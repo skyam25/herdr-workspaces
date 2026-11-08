@@ -1,9 +1,12 @@
 // Opens an output, beside its agent when it is a page and in macOS otherwise.
 
-import { exec, home } from "herdr";
+import { exec, home, panes, run, spaces } from "herdr";
 import { opensAsPage, outputTarget, surfaceArgs } from "./data.js";
 
 let found = null;
+
+// Page surfaces this panel opened, keyed by agent and file.
+const pagePanes = new Map();
 
 async function runHws(args) {
   for (const bin of found ? [found] : [`${home()}/.local/bin/hws`, "hws"]) {
@@ -41,14 +44,41 @@ export async function hws(args) {
   }
 }
 
+// A surface opens in its agent's tab, so that tab must be showing to see it.
+function showPane(tab, pane) {
+  const active = spaces().find((s) => s.active)?.tabs.find((x) => x.active)?.id;
+  if (tab && tab !== active) run("tab.select", { id: tab });
+  if (pane) run("pane.focus", { pane });
+}
+
+function openedPane(r) {
+  try {
+    return JSON.parse(r.stdout).pane ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function openPage(agent, target, ref) {
+  const key = `${agent.address} ${target}`;
+  const existing = panes().find((p) => p.pane === pagePanes.get(key));
+  if (existing) {
+    showPane(existing.tab, existing.pane);
+    return null;
+  }
+  const r = await runHws(surfaceArgs(agent, target));
+  if (r.code !== 0) return hwsError(r) || `Could not open ${ref}`;
+  const pane = openedPane(r);
+  if (pane) pagePanes.set(key, pane);
+  showPane(agent.tab, pane);
+  return null;
+}
+
 // Resolves to null on success and to a message on failure.
 export async function openOutput(agent, session, ref) {
   const target = outputTarget(ref, session.cwd);
   try {
-    if (opensAsPage(ref)) {
-      const r = await runHws(surfaceArgs(agent, target));
-      return r.code === 0 ? null : hwsError(r) || `Could not open ${ref}`;
-    }
+    if (opensAsPage(ref)) return await openPage(agent, target, ref);
     const r = await exec("open", [target]);
     return r.code === 0 ? null : (r.stderr || r.stdout).trim() || `Could not open ${ref}`;
   } catch (e) {
