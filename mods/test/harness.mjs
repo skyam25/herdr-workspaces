@@ -22,7 +22,7 @@ export function element(kind, extra = {}) {
       if (key === "hover") return (fn) => { fn(element("style")); return proxy; };
       if (key === "on_click" || key === "on_key_down" || key === "on_size_change" || key === "on_hover") return (fn) => { target.handlers[key] = fn; return proxy; };
       if (key === "on_mouse_down" || key === "on_mouse_up") return (button, fn) => { target.handlers[`${key}_${button}`] = fn; return proxy; };
-      if (key === "bg" || key === "opacity" || key === "w") return (value) => { target[key] = value; return proxy; };
+      if (key === "bg" || key === "opacity" || key === "w" || key === "text_color") return (value) => { target[key] = value; return proxy; };
       return () => proxy;
     },
   });

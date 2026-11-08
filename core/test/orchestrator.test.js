@@ -166,5 +166,137 @@ test('status defaults to the selected space', (t) => {
 test('hws --help lists the orchestrator commands', (t) => {
   const { box } = board(t);
   const { stdout } = box.hws(['--help']);
-  for (const command of ['start', 'status']) assert.match(stdout, new RegExp(`orchestrator ${command}`));
+  for (const command of ['start', 'stop', 'status']) assert.match(stdout, new RegExp(`orchestrator ${command}`));
+});
+
+function card(id, column, address) {
+  return { id, title: id, notes: '', column, terminal: address, hold: false, worktree: false, note: 'working', addedBy: null, archived: false, createdAt: 1, updatedAt: 1 };
+}
+
+function boardWith(box, items, address = 't9') {
+  mkdirSync(join(box.root, 'todos'), { recursive: true });
+  writeFileSync(todoFile(box), JSON.stringify({ version: 1, space: 'sp1', items, orchestrator: { terminal: address, startedAt: 1 } }));
+}
+
+function stop(box) {
+  return box.json(['orchestrator', 'stop', '--space', 'sp1']);
+}
+
+function kills(box) {
+  return box.actions().filter((action) => action[1] === 'kill').map((action) => action[2]);
+}
+
+function cardNamed(box, id) {
+  return readTodos(box).items.find((item) => item.id === id);
+}
+
+test('stop ends the orchestrator first, then its live workers, and returns their cards', (t) => {
+  const { box } = board(t);
+  boardWith(box, [card('a', 'doing', 't20'), card('b', 'doing', 't21')]);
+  box.setState({ hc: { t20: { parent: 't9' }, t21: { parent: 't9' } } });
+  const before = Date.now();
+
+  const result = stop(box);
+
+  assert.deepEqual(kills(box), ['t9', 't20', 't21']);
+  assert.deepEqual(result, { stopped: true, terminal: 't9', workers: ['t20', 't21'], returned: ['a', 'b'] });
+  const returned = cardNamed(box, 'a');
+  assert.deepEqual(
+    [returned.column, returned.terminal, returned.hold, returned.note],
+    ['todo', null, true, 'Stopped before finishing'],
+  );
+  assert.ok(returned.updatedAt >= before);
+  assert.equal(readTodos(box).orchestrator, undefined);
+});
+
+test('stop lists workers before they end with the orchestrator', (t) => {
+  const { box } = board(t);
+  boardWith(box, [card('a', 'doing', 't20')]);
+  box.setState({ killEndsChildren: true, hc: { t9: {}, t20: { parent: 't9' } } });
+
+  const result = stop(box);
+
+  assert.deepEqual(kills(box), ['t9']);
+  assert.deepEqual(result.workers, ['t20']);
+  assert.deepEqual(result.returned, ['a']);
+  assert.equal(cardNamed(box, 'a').column, 'todo');
+});
+
+test('stop leaves a card alone when its live terminal is not a child', (t) => {
+  const { box } = board(t);
+  boardWith(box, [card('mine', 'doing', 't30')]);
+  box.setState({ hc: { t30: { parent: 't1' } } });
+
+  const result = stop(box);
+
+  assert.deepEqual(kills(box), ['t9']);
+  assert.deepEqual(result.returned, []);
+  const left = cardNamed(box, 'mine');
+  assert.deepEqual([left.column, left.terminal, left.hold, left.note], ['doing', 't30', false, 'working']);
+});
+
+test('stop returns a doing card whose worker already ended', (t) => {
+  const { box } = board(t);
+  boardWith(box, [card('gone', 'doing', 't40')]);
+  box.setState({ hc: { t40: 'missing' } });
+
+  const result = stop(box);
+
+  assert.deepEqual(kills(box), ['t9']);
+  assert.deepEqual(result.returned, ['gone']);
+});
+
+test('stop leaves other columns and a doing card with no terminal', (t) => {
+  const { box } = board(t);
+  const items = [card('w', 'waiting', 't41'), card('d', 'done', 't42'), card('t', 'todo', null), card('n', 'doing', null)];
+  boardWith(box, items);
+  box.setState({ hc: { t41: 'missing', t42: 'missing' } });
+
+  assert.deepEqual(stop(box).returned, []);
+
+  assert.deepEqual(readTodos(box).items, items);
+});
+
+test('stop with nothing recorded succeeds and changes nothing', (t) => {
+  const { box } = board(t);
+
+  assert.deepEqual(stop(box), { stopped: false });
+
+  assert.deepEqual(box.actions(), []);
+  assert.equal(existsSync(todoFile(box)), false);
+});
+
+test('stop with a dead orchestrator reports not stopped and changes nothing', (t) => {
+  const { box } = board(t);
+  boardWith(box, [card('a', 'doing', 't20')]);
+  box.setState({ hc: { t9: 'missing', t20: 'missing' } });
+  const before = readFileSync(todoFile(box), 'utf8');
+
+  assert.deepEqual(stop(box), { stopped: false });
+
+  assert.deepEqual(box.actions(), []);
+  assert.equal(readFileSync(todoFile(box), 'utf8'), before);
+});
+
+test('stop that cannot end a live orchestrator fails and keeps the board', (t) => {
+  const { box } = board(t);
+  boardWith(box, [card('a', 'doing', 't20')]);
+  box.setState({ killFails: true, hc: { t20: { parent: 't9' } } });
+  const before = readFileSync(todoFile(box), 'utf8');
+
+  const result = box.hws(['orchestrator', 'stop', '--space', 'sp1']);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /could not end the orchestrator t9/);
+  assert.equal(readFileSync(todoFile(box), 'utf8'), before);
+});
+
+test('stop run from an agent uses the space of its terminal', (t) => {
+  const { box } = board(t);
+  boardWith(box, []);
+
+  const result = box.hws(['orchestrator', 'stop', '--json'], { HC_TERMINAL_ID: 't1' });
+
+  assert.equal(JSON.parse(result.stdout).stopped, true);
+  assert.deepEqual(kills(box), ['t9']);
 });

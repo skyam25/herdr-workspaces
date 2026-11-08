@@ -40,6 +40,49 @@ test("a flipped agent with a reply gets every row in table order", async () => {
   assert.deepEqual(rows(m), ["Sketch", "Write", "Write from last reply", "Review a page…", "Attach file…", "Tasks", "Outputs"]);
 });
 
+test("Orchestrate this space comes last, after its own divider", async () => {
+  world();
+  const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
+  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Tasks", "Outputs", "Orchestrate this space"]);
+  const last = m.render().node.children.at(-1).node;
+  assert.equal(last.children.length, 2);
+  assert.equal(last.children[1].node.id, "orchestrate");
+});
+
+test("Orchestrate this space starts one in the agent's space and folder", async () => {
+  const H = world();
+  const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
+  await m.click("orchestrate");
+
+  assert.deepEqual(openArgs(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/w/proj", "--json"]]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("a flipped agent orchestrates its space too", async () => {
+  const H = world();
+  const m = await mount("hws-actions", { ...FLIPPED, cwd: "/w/flip" });
+  await m.click("orchestrate");
+
+  assert.deepEqual(openArgs(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/w/flip", "--json"]]);
+});
+
+test("Orchestrate this space is hidden when the space or folder is unknown", async () => {
+  world();
+  for (const extra of [{}, { space: "spc1" }, { cwd: "/w/proj" }, { space: "spc1", cwd: "" }]) {
+    const m = await mount("hws-actions", { ...TERMINAL, ...extra });
+    assert.equal(m.has("orchestrate"), false, JSON.stringify(extra));
+  }
+});
+
+test("a failing orchestrator start shows its message and keeps the menu open", async () => {
+  const H = world({ hws: { "orchestrator start": { fail: "claude is not installed" } } });
+  const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
+  await m.click("orchestrate");
+
+  assert.match(m.text(), /claude is not installed/);
+  assert.deepEqual(H.closed, []);
+});
+
 test("Sketch opens a board beside the terminal and closes the menu", async () => {
   const H = world();
   const m = await mount("hws-actions", TERMINAL);
@@ -235,7 +278,15 @@ test("an agent pane shows the + without hover and opens the menu for its termina
   assert.equal(m.view.hovered, false);
   await m.click("ph-new-p1");
 
-  assert.deepEqual(H.overlays, [{ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: "t1" } }]);
+  assert.deepEqual(H.overlays, [{ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: "t1", space: "spc1" } }]);
+});
+
+test("an agent pane passes its folder to the menu", async () => {
+  const H = world({ panes: [{ ...AGENT, cwd: "/w/proj" }] });
+  const m = await mount("hws-pane", { pane: "p1" });
+  await m.click("ph-new-p1");
+
+  assert.deepEqual(H.overlays[0].props, { terminal: "t1", space: "spc1", cwd: "/w/proj" });
 });
 
 test("a chat pane's + opens the menu for its parked agent", async () => {
@@ -244,6 +295,14 @@ test("a chat pane's + opens the menu for its parked agent", async () => {
   await m.click("ph-new-p2");
 
   assert.deepEqual(H.overlays[0].props, { terminal: "t1", chat: true, pane: "p2", space: "spc1" });
+});
+
+test("a chat pane passes its parked agent's folder to the menu", async () => {
+  const H = world({ panes: [CHAT_PANE], terminals: [{ ...parked, cwd: "/w/old", foreground: { cwd: "/w/live" } }] });
+  const m = await mount("hws-pane", { pane: "p2" });
+  await m.click("ph-new-p2");
+
+  assert.deepEqual(H.overlays[0].props, { terminal: "t1", chat: true, pane: "p2", space: "spc1", cwd: "/w/live" });
 });
 
 test("shell panes and chats with no live agent have no +", async () => {
@@ -302,6 +361,21 @@ test("the composer's + opens the menu with the newest assistant text", () => {
   c.openActions(cx);
 
   assert.deepEqual(H.overlays, [{ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: "t1", chat: true, pane: "p2", space: "spc1", lastReply: "New" } }]);
+});
+
+test("the composer's + passes the agent's folder", () => {
+  const H = world({ panes: [CHAT_PANE] });
+  chat({ t: { cwd: "/w/old", foreground: { cwd: "/w/live" } } }).openActions(cx);
+
+  assert.equal(H.overlays[0].props.cwd, "/w/live");
+  assert.equal(H.overlays[0].props.space, "spc1");
+});
+
+test("a chat with no known folder leaves cwd out", () => {
+  const H = world({ panes: [CHAT_PANE] });
+  chat().openActions(cx);
+
+  assert.equal("cwd" in H.overlays[0].props, false);
 });
 
 test("a chat with no reply yet leaves lastReply out", () => {

@@ -56,9 +56,10 @@ function homeStub(options) {
   stub(join(home, ".local", "bin"), options);
 }
 
-function run(script, { input = STDIN, terminal = "t13", path = `${nodeBin}:/usr/bin:/bin` } = {}) {
+function run(script, { input = STDIN, terminal = "t13", path = `${nodeBin}:/usr/bin:/bin`, bundle } = {}) {
   const env = { HOME: home, PATH: path };
   if (terminal) env.HC_TERMINAL_ID = terminal;
+  if (bundle) env.__CFBundleIdentifier = bundle;
 
   const started = Date.now();
   const result = spawnSync("/bin/bash", [script], { env, input, encoding: "utf8" });
@@ -76,6 +77,19 @@ function assertSilent(result) {
   assert.equal(result.stderr, "");
 }
 
+const HERDR_APP = "dev.herdr.app";
+
+function contextOf(result) {
+  assert.equal(result.status, 0);
+  return JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+}
+
+function assertTaskList(context) {
+  for (const text of ["on the Board", "`hws todo list --json`", '`hws todo add --title="..."`', "lands held", "unless asked"]) {
+    assert.ok(context.includes(text), text);
+  }
+}
+
 describe("session-start hook", () => {
   it("registers the session and returns the line as context", () => {
     homeStub();
@@ -86,6 +100,32 @@ describe("session-start hook", () => {
       hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: LINE },
     });
     assert.deepEqual(calls(), ["bin register --terminal t13 --session sess-1 --json", "bin current --line"]);
+  });
+
+  it("adds the task list paragraph after the line in a Herdr app terminal", () => {
+    homeStub();
+    const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
+
+    assert.ok(context.startsWith(`${LINE}\n\n`));
+    assertTaskList(context);
+  });
+
+  it("gives the task list paragraph outside a workspace in a Herdr app terminal", () => {
+    homeStub({ current: ":" });
+    const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
+
+    assert.ok(context.startsWith("This Herdr space"));
+    assertTaskList(context);
+  });
+
+  it("leaves out the paragraph in another app's terminal", () => {
+    homeStub();
+    assert.equal(contextOf(run(HOOK, { bundle: "com.apple.Terminal" })), LINE);
+  });
+
+  it("stays silent in a Herdr app with no terminal id", () => {
+    homeStub();
+    assertSilent(run(HOOK, { bundle: HERDR_APP, terminal: "" }));
   });
 
   it("stays silent and skips hws with no terminal id", () => {

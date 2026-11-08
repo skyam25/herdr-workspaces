@@ -38,6 +38,7 @@ test('todo add writes the contract shape to the space file', (t) => {
     hold: false,
     worktree: false,
     note: '',
+    addedBy: null,
     archived: false,
     createdAt: item.createdAt,
     updatedAt: item.createdAt,
@@ -562,11 +563,11 @@ test('text flags take values that begin with a dash through the equals form', (t
   assert.deepEqual(box.actions(), [['hc', 'send', 't5', '-y']]);
 });
 
-test('older items read the new fields as false and empty', (t) => {
+test('older items read the new fields as false, empty and null', (t) => {
   const box = sandbox(t);
   const legacy = writeLegacyItem(box);
 
-  assert.deepEqual(list(box), [{ ...legacy, hold: false, worktree: false, note: '' }]);
+  assert.deepEqual(list(box), [{ ...legacy, hold: false, worktree: false, note: '', addedBy: null }]);
 
   const moved = todoJson(box, 'move', '--id', legacy.id, '--column', 'doing');
   assert.equal(moved.hold, false);
@@ -601,4 +602,160 @@ test('changing a card keeps the recorded orchestrator', (t) => {
   todoJson(box, 'move', '--id', item.id, '--column', 'done');
 
   assert.deepEqual(readTodos(box).orchestrator, orchestrator);
+});
+
+function placedBoard(t, spaces, selected = 'other') {
+  const box = sandbox(t);
+  box.setState({ spaces: [...spaces, space('other', [tab('tb9', [terminal('t99', 'p99')])])], selected });
+  return box;
+}
+
+function named(id, name, tabs = []) {
+  return { ...space(id, tabs), name };
+}
+
+function addAs(box, address, ...flags) {
+  return box.hws(['todo', 'add', '--title', 'task', '--json', ...flags], { HC_TERMINAL_ID: address });
+}
+
+function assertUnplaced(box, result) {
+  assert.equal(result.code, 1);
+  assert.match(JSON.parse(result.stdout).error, /cannot place terminal t50.*--space/);
+  assert.equal(existsSync(join(box.root, 'todos')), false);
+}
+
+test('an agent resolves its own space from the live listing, not the selected one', (t) => {
+  const box = placedBoard(t, [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])]);
+
+  addAs(box, 't1');
+
+  assert.equal(readTodos(box).items.length, 1);
+  assert.equal(existsSync(todoFile(box, 'other')), false);
+});
+
+test('a sub-agent resolves the space of its parent pane', (t) => {
+  const parent = { ...terminal('t1', 'p1'), sub_agents: [{ terminal: 't1b' }] };
+  const box = placedBoard(t, [space('sp1', [tab('tb1', [parent])])]);
+
+  addAs(box, 't1b');
+
+  assert.equal(readTodos(box).items.length, 1);
+});
+
+test('a flipped agent resolves its space from the herdr.space label', (t) => {
+  const box = placedBoard(t, [space('sp1', [])]);
+  box.setState({ hc: { t50: { labels: { 'herdr.space': 'sp1' } } } });
+
+  addAs(box, 't50');
+
+  assert.equal(readTodos(box).items.length, 1);
+});
+
+test('the live listing wins over a label', (t) => {
+  const box = placedBoard(t, [space('sp1', [tab('tb1', [terminal('t1', 'p1')])]), space('sp2', [])]);
+  box.setState({ hc: { t1: { labels: { 'herdr.space': 'sp2' } } } });
+
+  addAs(box, 't1');
+
+  assert.equal(readTodos(box).items.length, 1);
+  assert.equal(existsSync(todoFile(box, 'sp2')), false);
+});
+
+test('a where label places a terminal when its space name matches one space', (t) => {
+  const box = placedBoard(t, [named('sp1', 'herdr-workspaces'), named('sp2', 'herdr')]);
+  box.setState({ hc: { t50: { labels: { where: 'herdr-workspaces / img-test' } } } });
+
+  addAs(box, 't50');
+
+  assert.equal(readTodos(box).items.length, 1);
+  assert.equal(existsSync(todoFile(box, 'sp2')), false);
+});
+
+test('a where label that matches two spaces is an error', (t) => {
+  const box = placedBoard(t, [named('sp1', 'same'), named('sp2', 'same')]);
+  box.setState({ hc: { t50: { labels: { where: 'same / tab' } } } });
+
+  assertUnplaced(box, addAs(box, 't50'));
+});
+
+test('a where label that matches no space is an error', (t) => {
+  const box = placedBoard(t, [named('sp1', 'one')]);
+  box.setState({ hc: { t50: { labels: { where: 'gone / tab' } } } });
+
+  assertUnplaced(box, addAs(box, 't50'));
+});
+
+test('a terminal nothing places is an error and never uses the selected space', (t) => {
+  const box = placedBoard(t, [space('sp1', [])]);
+
+  assertUnplaced(box, addAs(box, 't50'));
+
+  const listed = box.hws(['todo', 'list', '--json'], { HC_TERMINAL_ID: 't50' });
+  assert.equal(listed.code, 1);
+  assert.match(JSON.parse(listed.stdout).error, /--space/);
+  assert.equal(box.calls().some((call) => call.args[0] === 'status'), false);
+});
+
+test('a terminal still resolves its label when the window does not answer', (t) => {
+  const box = placedBoard(t, []);
+  box.setState({ lsFails: true, hc: { t50: { labels: { 'herdr.space': 'sp1' } } } });
+
+  addAs(box, 't50');
+
+  assert.equal(readTodos(box).items.length, 1);
+});
+
+test('--space wins over the terminal', (t) => {
+  const box = placedBoard(t, [space('sp1', [])]);
+
+  const result = addAs(box, 't50', '--space', 'sp1');
+
+  assert.equal(result.code, 0);
+  assert.equal(readTodos(box).items.length, 1);
+  assert.equal(box.calls().length, 0);
+});
+
+test('with no terminal the selected space is used', (t) => {
+  const box = placedBoard(t, [space('sp1', [])], 'sp1');
+
+  box.json(['todo', 'add', '--title', 'task']);
+
+  assert.equal(readTodos(box).items.length, 1);
+});
+
+test('an agent card records addedBy and starts held', (t) => {
+  const box = sandbox(t);
+
+  const item = JSON.parse(addAs(box, 't7', '--space', 'sp1').stdout);
+
+  assert.equal(item.addedBy, 't7');
+  assert.equal(item.hold, true);
+});
+
+test('every card from --titles records addedBy and starts held', (t) => {
+  const box = sandbox(t);
+
+  const reply = box.hws(['todo', 'add', '--titles', 'one\ntwo', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7' });
+
+  const { items } = JSON.parse(reply.stdout);
+  assert.deepEqual(items.map((item) => [item.addedBy, item.hold]), [['t7', true], ['t7', true]]);
+});
+
+test('a card with no terminal has a null addedBy and keeps its hold choice', (t) => {
+  const box = sandbox(t);
+  const plain = add(box, 'plain');
+
+  assert.deepEqual([plain.addedBy, plain.hold], [null, false]);
+  assert.equal(add(box, 'held', '--hold').hold, true);
+  assert.equal(box.json(['todo', 'add', '--titles', 'one', '--space', 'sp1']).items[0].addedBy, null);
+});
+
+test('no agent takes an agent card until the person allows it', (t) => {
+  const box = sandbox(t);
+  const item = JSON.parse(addAs(box, 't7', '--space', 'sp1').stdout);
+
+  assert.equal(box.json(['todo', 'next', '--terminal', 't8', '--space', 'sp1']), null);
+
+  box.json(['todo', 'edit', '--id', item.id, '--hold', 'false', '--space', 'sp1']);
+  assert.equal(box.json(['todo', 'next', '--terminal', 't8', '--space', 'sp1']).id, item.id);
 });

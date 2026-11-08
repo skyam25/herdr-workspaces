@@ -52,7 +52,15 @@ const __terminals = () => [
 ];
 `;
 
+const BOARD_CARD = { id: "a1", title: "Held", notes: "", column: "todo", terminal: null, hold: true, worktree: true, addedBy: "t13", kind: "todo" };
+const boardState = (extra) => (s) => s.replace("tasksBody(t, blocker) {", `tasksBody(t, blocker) { this.todos = [${JSON.stringify(BOARD_CARD)}]; this.orchestrator = { terminal: "t13", live: true }; ${extra}`);
+
 const VARIANTS = [
+  { mod: "hws-work", name: "board-orchestrating", props: { view: "tasks" }, patch: boardState("") },
+  { mod: "hws-work", name: "board-stop-confirm", props: { view: "tasks" }, patch: boardState("this.confirmingStop = true;") },
+  { mod: "hws-work", name: "board-stopping", props: { view: "tasks" }, patch: boardState('this.orchestratorBusy = "stop";') },
+  { mod: "hws-actions", name: "actions-orchestrate", props: { terminal: "t13", space: "spc1", cwd: "/w", overlay: "o" } },
+  { mod: "hws-new", name: "menu-orchestrate", props: { overlay: "o" }, header: LIVE_HEADER, patch: (s) => s.replaceAll("focused()", "__focused()").replaceAll("spaces()", '__spaces().map((x) => ({ ...x, active: true, folder: "/w" }))') },
   { mod: "hws-new", name: "form", props: { step: "workspace" } },
   { mod: "hws-new", name: "form-problem", props: { step: "workspace" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "That folder does not exist.";') },
   { mod: "hws-new", name: "menu-problem", props: { overlay: "o" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "hws failed";') },
@@ -71,6 +79,7 @@ const VARIANTS = [
   { mod: "hws-tabs", name: "tabs-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace('shared("hws.tasks.waiting")', "3") },
   { mod: "hws-agents", name: "agents-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("this.folded = new Set();", 'this.folded = new Set(); this.hovered = "t22";') },
   { mod: "hws-agents", name: "agents-rail", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("const narrow = () =>", "const narrow = () => true || ") },
+  { mod: "hws-work", name: "CONTROL-board-typo", props: { view: "tasks" }, expectFailure: true, patch: (s) => boardState("")(s).replace("allowButton(t, id) {\n    return div()", "allowButton(t, id) {\n    return div().no_such_builder()") },
   { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('dialogRoot(t, "hws-new-form")', 'dialogRoot(t, "hws-new-form").no_such_builder()') },
 ];
 
@@ -80,7 +89,7 @@ for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  for (const file of ["hws.js", "sidebar.js", "flipped.js", "board.js"]) {
+  for (const file of ["hws.js", "sidebar.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
     if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
   }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");

@@ -48,6 +48,21 @@ export default class Launcher extends View {
     openWorkspaceForm();
   }
 
+  // The active local space and its folder, or null when either is unknown.
+  orchestrateTarget() {
+    const space = spaces().find((s) => s.active);
+    if (!space || space.machine) return null;
+    const f = focused();
+    const folder = (f?.space === space.id && f.cwd) || space.folder;
+    return folder ? { space: space.id, folder } : null;
+  }
+
+  orchestrateRow() {
+    const target = this.orchestrateTarget();
+    const args = target && ["orchestrator", "start", "--space", target.space, "--folder", target.folder];
+    return { id: "orchestrate", name: "Orchestrate this space", line: "Run the Board with an agent that assigns the work.", go: target ? (cx) => this.launch("orchestrate", args, cx) : null };
+  }
+
   create(cx) {
     submitDialog(this, "create", async () => {
       const path = await checkFolder(this.values.folder);
@@ -70,13 +85,14 @@ export default class Launcher extends View {
       { id: "new-throwaway", name: "Throwaway", line: "Claude in a scratch workspace.", go: (cx) => this.launch("new-throwaway", ["new", "throwaway"], cx) },
       { id: "new-board", name: "New board", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled board", "--standalone"], cx) },
       { id: "new-note", name: "New note", line: "A prompt, template or note on its own.", go: (cx) => this.launch("new-note", ["surface", "open", "--type", "note", "--title", "Untitled note", "--standalone"], cx) },
+      this.orchestrateRow(),
     ];
   }
 
   menuKey(e, cx, items) {
     if (e.key === "down") this.at = (this.at + 1) % items.length;
     else if (e.key === "up") this.at = (this.at + items.length - 1) % items.length;
-    else if (e.key === "enter") items[this.at].go(cx);
+    else if (e.key === "enter") items[this.at].go?.(cx);
     else if (e.key === "escape") this.dismiss();
     else return;
     cx.stop_propagation();
@@ -104,10 +120,9 @@ export default class Launcher extends View {
             .px(10)
             .py(7)
             .rounded(7)
-            .cursor_pointer()
+            .opacity(item.go ? 1 : 0.5)
             .when(i === this.at, (el) => el.bg(t.selected))
-            .hover((s) => s.bg(t.selected))
-            .on_click((_e, cx) => item.go(cx))
+            .when(Boolean(item.go), (el) => el.cursor_pointer().hover((s) => s.bg(t.selected)).on_click((_e, cx) => item.go(cx)))
             .child(div().font_medium().child(this.busy === item.id ? `${item.name.replace("…", "")}…` : item.name))
             .child(div().text_size(11.5).text_color(t.dim).child(item.line)),
         ),

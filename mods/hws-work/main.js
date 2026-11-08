@@ -16,7 +16,8 @@ const LANES_FIT_PX = 840;
 const LOADING = "Loading…";
 const TRACKING_OFF = "Item tracking is off for these sessions. Turn it on in the Agent Brief app.";
 const NO_AGENT_ITEMS = { waiting: [], progress: [], done: [] };
-const BOARD_HINT = "Add what needs doing. Send a card to an agent, or start the orchestrator to work through them.";
+const BOARD_HINT = "Add what needs doing, then send a card to an agent.";
+const STOP_QUESTION = "Stop orchestrator and its workers?";
 
 const message = (e) => String(e?.message ?? e);
 
@@ -55,7 +56,8 @@ export default class Work extends View {
     this.drag = null;
     this.over = null;
     this.orchestrator = undefined;
-    this.starting = false;
+    this.orchestratorBusy = null;
+    this.confirmingStop = false;
     if (this.kind === "tasks") this.makeQuickAdd();
     this.syncTodos(cx);
     this.poll(cx);
@@ -97,6 +99,7 @@ export default class Work extends View {
       this.todos = null;
       this.todoProblem = null;
       this.orchestrator = undefined;
+      this.confirmingStop = false;
       this.note = null;
       this.drag = null;
       this.over = null;
@@ -120,6 +123,7 @@ export default class Work extends View {
         if (space === this.todoSpace) {
           this.todos = todoItems(listed);
           this.orchestrator = listed?.orchestrator ?? null;
+          if (!this.orchestrator?.live) this.confirmingStop = false;
           this.todoProblem = null;
         }
       } catch (e) {
@@ -181,11 +185,12 @@ export default class Work extends View {
     });
   }
 
-  moveTodo(id, column, cx) {
+  // Runs one card change and reloads. A failure goes on the quiet line.
+  changeTodo(args, cx) {
     this.note = null;
     cx.spawn(async (cx) => {
       try {
-        await hws(["todo", "move", "--id", id, "--column", column, "--space", this.todoSpace]);
+        await hws(["todo", ...args, "--space", this.todoSpace]);
         this.loadTodos(cx);
       } catch (e) {
         this.note = message(e);
@@ -194,25 +199,53 @@ export default class Work extends View {
     });
   }
 
-  // Starts an orchestrator, or asks the live one to read the board again.
-  runOrchestrator(cx) {
-    if (this.starting || !this.todoSpace) return;
-    const lists = { agents: agents(), panes: panes(), terminals: terminals(), spaces: spaces() };
-    const folder = orchestratorFolder(lists, this.todoSpace) ?? home();
-    const space = this.todoSpace;
-    this.starting = true;
+  moveTodo(id, column, cx) {
+    this.changeTodo(["move", "--id", id, "--column", column], cx);
+  }
+
+  allowTodo(id, cx) {
+    this.changeTodo(["edit", "--id", id, textFlag("hold", false)], cx);
+  }
+
+  // Runs one orchestrator command at a time. A failure goes on the quiet line.
+  orchestratorCommand(busy, args, cx, done = () => {}) {
+    this.orchestratorBusy = busy;
     this.note = null;
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        await hws(["orchestrator", "start", "--space", space, "--folder", folder]);
+        await hws(["orchestrator", ...args]);
+        done();
         this.loadTodos(cx);
       } catch (e) {
         this.note = message(e);
       }
-      this.starting = false;
+      this.orchestratorBusy = null;
       cx.notify();
     });
+  }
+
+  // Asks the live orchestrator to read the board again.
+  sendNewCards(cx) {
+    if (this.orchestratorBusy || !this.todoSpace) return;
+    const lists = { agents: agents(), panes: panes(), terminals: terminals(), spaces: spaces() };
+    const folder = orchestratorFolder(lists, this.todoSpace) ?? home();
+    this.orchestratorCommand("send", ["start", "--space", this.todoSpace, "--folder", folder], cx);
+  }
+
+  // The header drops its controls at once, and the reload confirms it.
+  stopOrchestrator(cx) {
+    this.confirmingStop = false;
+    if (this.orchestratorBusy || !this.todoSpace) return;
+    const space = this.todoSpace;
+    this.orchestratorCommand("stop", ["stop", "--space", space], cx, () => {
+      if (space === this.todoSpace) this.orchestrator = null;
+    });
+  }
+
+  askStop(asking, cx) {
+    this.confirmingStop = asking;
+    cx.notify();
   }
 
   goToOrchestrator() {
@@ -418,12 +451,33 @@ export default class Work extends View {
     return { header, quiet: this.quietLine(blocker, agentColumns), content };
   }
 
-  // Waits for the first to-do list, because only that says whether one is running.
+  // A live orchestrator is the only thing that puts these in the header.
   orchestratorControls(t) {
-    if (this.orchestrator === undefined) return [];
-    const running = Boolean(this.orchestrator?.live);
-    const action = this.headerButton(t, "orchestrator", running ? "Send new cards" : "Start orchestrator", (_e, cx) => this.runOrchestrator(cx), !this.starting);
-    return running ? [action, this.headerButton(t, "orchestrator-go", "Go to", () => this.goToOrchestrator())] : [action];
+    if (!this.orchestrator?.live) return [];
+    const label = div().id("orchestrating").flex_none().px(6).text_size(11).font_medium().text_color(t.accent).child("Orchestrating");
+    if (this.confirmingStop) return [label, this.stopConfirm(t)];
+    const free = this.orchestratorBusy === null;
+    return [
+      label,
+      this.headerButton(t, "orchestrator", "Send new cards", (_e, cx) => this.sendNewCards(cx), free),
+      this.headerButton(t, "orchestrator-go", "Go to", () => this.goToOrchestrator()),
+      this.headerButton(t, "orchestrator-stop", this.orchestratorBusy === "stop" ? "Stopping…" : "Stop", (_e, cx) => this.askStop(true, cx), free),
+    ];
+  }
+
+  // Asks in place. Moving the pointer away cancels, as the pane header's End agent does.
+  stopConfirm(t) {
+    return h_flex()
+      .id("orchestrator-confirm")
+      .flex_none()
+      .gap(4)
+      .items_center()
+      .on_hover((hovered, cx) => {
+        if (!hovered) this.askStop(false, cx);
+      })
+      .child(div().flex_none().whitespace_nowrap().text_size(11).text_color(t.foreground).child(STOP_QUESTION))
+      .child(this.headerButton(t, "orchestrator-stop-no", "Cancel", (_e, cx) => this.askStop(false, cx)))
+      .child(this.headerButton(t, "orchestrator-stop-yes", "Stop", (_e, cx) => this.stopOrchestrator(cx), true, true));
   }
 
   // The one line under the header. A failed action outranks the state of agent items.
@@ -437,7 +491,7 @@ export default class Work extends View {
     return agentItems === 0 && !tracked ? TRACKING_OFF : null;
   }
 
-  headerButton(t, id, text, action, enabled = true) {
+  headerButton(t, id, text, action, enabled = true, primary = false) {
     return div()
       .id(id)
       .flex_none()
@@ -447,9 +501,10 @@ export default class Work extends View {
       .items_center()
       .rounded(5)
       .text_size(11)
-      .text_color(t.muted)
+      .text_color(primary ? t.solid_foreground : t.muted)
+      .when(primary, (el) => el.bg(t.solid))
       .opacity(enabled ? 1 : 0.5)
-      .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(action))
+      .when(enabled, (el) => el.cursor_pointer().hover((s) => (primary ? s.opacity(0.88) : s.bg(t.hover).text_color(t.foreground))).on_click(action))
       .child(text);
   }
 
@@ -503,10 +558,36 @@ export default class Work extends View {
     return div().flex_none().px(5).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.dim).child(text);
   }
 
+  // Stops the press, so Allow neither opens its card nor starts a drag.
+  allowButton(t, id) {
+    return div()
+      .id(`allow-${id}`)
+      .flex_none()
+      .px(5)
+      .rounded(4)
+      .border_1()
+      .border_color(t.accent)
+      .text_size(10)
+      .text_color(t.accent)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.allowTodo(id, cx);
+      })
+      .child("Allow");
+  }
+
+  terminalName(address) {
+    return this.targets.find((x) => x.address === address)?.name ?? address;
+  }
+
   todoCard(t, item, columnKey) {
     const subtitle = notesLine(item.note) || notesLine(item.notes);
-    const tags = [...(item.hold ? ["Hold"] : []), ...(item.worktree ? ["Worktree"] : [])];
-    const sentTo = item.terminal ? (this.targets.find((x) => x.address === item.terminal)?.name ?? item.terminal) : null;
+    const tags = [...(item.hold ? ["Hold"] : []), ...(item.worktree ? ["Worktree"] : []), ...(item.addedBy ? [`From ${this.terminalName(item.addedBy)}`] : [])];
+    const sentTo = item.terminal ? this.terminalName(item.terminal) : null;
+    const canAllow = Boolean(item.hold && item.addedBy);
     return v_flex()
       .id(`todo-${item.id}`)
       .flex_none()
@@ -525,7 +606,16 @@ export default class Work extends View {
       .child(div().line_height("18px").max_h(36).overflow_hidden().whitespace_normal().child(item.title))
       .when(Boolean(subtitle), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(subtitle)))
       .when(sentTo !== null, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(`Sent to ${sentTo}`)))
-      .when(tags.length > 0, (el) => el.child(h_flex().id(`tags-${item.id}`).gap(4).children(tags.map((x) => this.tag(t, x)))));
+      .when(tags.length > 0, (el) =>
+        el.child(
+          h_flex()
+            .id(`tags-${item.id}`)
+            .flex_wrap()
+            .gap(4)
+            .children(tags.map((x) => this.tag(t, x)))
+            .when(canAllow, (row) => row.child(this.allowButton(t, item.id))),
+        ),
+      );
   }
 
   card(t, card) {

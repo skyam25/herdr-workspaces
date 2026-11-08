@@ -140,6 +140,11 @@ export function isTerminalAlive(terminal) {
   return isLive(terminalInfo(terminal));
 }
 
+export function isLiveChild(terminal, parent) {
+  const info = terminalInfo(terminal);
+  return isLive(info) && info.parent === parent;
+}
+
 export function isIdleShell(info) {
   if (!isLive(info)) return false;
   const program = info.foreground?.name ?? info.foreground?.argv?.[0] ?? info.argv?.[0] ?? '';

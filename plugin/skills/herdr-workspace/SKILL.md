@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", asks what is in the workspace or what artifacts it has, or asks to sketch, draw, write or review something in a pane. Explains how to read the workspace and how to ask the user for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos or the Board, asks what is in the workspace or what artifacts it has, or asks to sketch, draw, write or review something in a pane. Explains how to read the workspace, use the space's task list and ask the user for input through a surface.
 ---
 
 # Herdr workspace
@@ -28,6 +28,19 @@ Read the manifest before inferring anything from the folder or git state. If `$H
 | `app` | Kept workspace for building software in its folder |
 | `deliverable` | Kept workspace for producing a document or other finished output |
 | `throwaway` | Short-lived workspace with no project folder. `hws promote` turns it into a kept one |
+
+## Task list
+
+Each Herdr space has a shared task list, and the person sees it on the Board. These commands act on this terminal's own space. They fail and ask for `--space` when Herdr cannot place the terminal.
+
+| Command | Does |
+|---|---|
+| `hws todo list --json` | Prints the cards and any orchestrator |
+| `hws todo add --title="..."` | Adds a card for follow-up work the person should see |
+
+A card you add lands held. It stays held until the person presses Allow, so no orchestrator takes it first.
+
+Do not take or move cards unless the person asks.
 
 ## Ask the user through a surface
 

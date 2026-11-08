@@ -4,7 +4,7 @@ import { artifactList, artifactTerminal, link } from './commands/artifact.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
-import { orchestratorStart, orchestratorStatus } from './commands/orchestrator.js';
+import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
 import { surfaceDone, surfaceFocus, surfaceOpen, surfaceSocket } from './commands/surface.js';
 import {
   todoAdd,
@@ -74,6 +74,7 @@ const ROUTES = [
   { path: ['todo', 'reply'], run: todoReply, options: { id: text, text, space: text } },
   { path: ['todo', 'archive'], run: todoArchive, options: { id: text, space: text } },
   { path: ['orchestrator', 'start'], run: orchestratorStart, options: { space: text, folder: text } },
+  { path: ['orchestrator', 'stop'], run: orchestratorStop, options: { space: text } },
   { path: ['orchestrator', 'status'], run: orchestratorStatus, options: { space: text } },
   {
     path: ['promote'],

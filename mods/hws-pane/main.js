@@ -118,7 +118,9 @@ export default class Pane extends View {
   // Opens the + menu at the pointer. A chat pane speaks for the agent parked behind it.
   openActions(self, agent) {
     const space = spaces().find((s) => s.tabs.some((c) => c.id === self.tab))?.id;
-    const menu = self.mod === CHAT ? { terminal: agent, chat: true, pane: self.pane, space } : { terminal: self.terminal };
+    const cwd = self.mod === CHAT ? parked(agent)?.cwd : self.cwd;
+    const where = { space, ...(cwd ? { cwd } : {}) };
+    const menu = self.mod === CHAT ? { terminal: agent, chat: true, pane: self.pane, ...where } : { terminal: self.terminal, ...where };
     openOverlay({ mod: "hws-actions", kind: "popup", width: MENU_WIDTH, props: menu });
   }
 

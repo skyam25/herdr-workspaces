@@ -513,7 +513,7 @@ test("an empty board says what it is for", async () => {
   const H = world({ files: { "/w/s1/i.md": "" } });
   H.hws["todo list"] = todoList();
   const m = await mount("hws-work", { view: "tasks" });
-  assert.match(textOf(findNode(m, "board-hint")), /Send a card to an agent, or start the orchestrator/);
+  assert.equal(textOf(findNode(m, "board-hint")), "Add what needs doing, then send a card to an agent.");
   H.hws["todo list"] = todoList(todo("a1", "Fix login"));
   await m.fireTimer(10000);
   assert.equal(m.has("board-hint"), false);
@@ -583,68 +583,256 @@ test("locateTerminal finds a pane, then a flipped agent's chat pane, then nothin
   assert.equal(locateTerminal({ panes, terminals }, "t7"), null);
 });
 
-test("with none running the header starts one and hides Go to", async () => {
-  const H = orchWorld(null);
+const CONTROLS = ["orchestrating", "orchestrator", "orchestrator-go", "orchestrator-stop"];
+const headerHasNoOrchestrator = (m) => CONTROLS.forEach((id) => assert.equal(m.has(id), false, id));
+
+test("with none running the header says nothing about orchestration", async () => {
+  orchWorld(null);
   const m = await mount("hws-work", { view: "tasks" });
-  assert.match(textOf(findNode(m, "orchestrator")), /Start orchestrator/);
-  assert.equal(m.has("orchestrator-go"), false);
-  const lists = todoLists(H);
-  await m.click("orchestrator");
-  assert.deepEqual(orchCalls(H).at(-1).args, ORCH_ARGS);
-  assert.equal(todoLists(H), lists + 1);
+  headerHasNoOrchestrator(m);
+  assert.equal(m.text().includes("orchestrator"), false);
+  assert.equal(m.has("add"), true);
 });
 
 test("a recorded orchestrator that is no longer live counts as none running", async () => {
   orchWorld({ terminal: "t9", live: false });
   const m = await mount("hws-work", { view: "tasks" });
-  assert.match(textOf(findNode(m, "orchestrator")), /Start orchestrator/);
-  assert.equal(m.has("orchestrator-go"), false);
+  headerHasNoOrchestrator(m);
 });
 
-test("while one runs the header sends new cards and offers Go to", async () => {
+test("the header waits for the first list before showing the mode", async () => {
+  const H = world();
+  H.hws["todo list"] = { fail: "the to-do file is damaged" };
+  const m = await mount("hws-work", { view: "tasks" });
+  headerHasNoOrchestrator(m);
+});
+
+test("while one runs the header labels the mode, sends new cards and offers Go to and Stop", async () => {
   const H = orchWorld({ terminal: "t1", live: true });
   const m = await mount("hws-work", { view: "tasks" });
+  const label = findNode(m, "orchestrating");
+  assert.equal(textOf(label), "Orchestrating");
+  assert.equal(label.text_color, "color:accent");
+  assert.equal(label.handlers.on_click, undefined);
   assert.match(textOf(findNode(m, "orchestrator")), /Send new cards/);
+  assert.equal(textOf(findNode(m, "orchestrator-stop")), "Stop");
+  const lists = todoLists(H);
   await m.click("orchestrator");
   assert.deepEqual(orchCalls(H).at(-1).args, ORCH_ARGS);
+  assert.equal(todoLists(H), lists + 1);
   await m.click("orchestrator-go");
   assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { terminal: "t1" } });
 });
 
-test("the header waits for the first list before offering the orchestrator", async () => {
-  const H = world();
-  H.hws["todo list"] = { fail: "the to-do file is damaged" };
-  const m = await mount("hws-work", { view: "tasks" });
-  assert.equal(m.has("orchestrator"), false);
-});
-
-test("the orchestrator's folder falls back to the space's folder", async () => {
-  const H = orchWorld(null, { agents: [], spaces: [{ ...SPACES[0], folder: "/space/dir" }] });
+test("Send new cards uses the space's folder when no agent reports one", async () => {
+  const H = orchWorld({ terminal: "t9", live: true }, { agents: [], spaces: [{ ...SPACES[0], folder: "/space/dir" }] });
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("orchestrator");
   assert.deepEqual(orchCalls(H).at(-1).args, ["orchestrator", "start", "--space", "spc1", "--folder", "/space/dir", "--json"]);
 });
 
-test("the control cannot run twice at once", async () => {
+test("Send new cards cannot run twice at once", async () => {
   let finish;
-  const H = orchWorld(null);
+  const H = orchWorld({ terminal: "t1", live: true });
   const realExec = H.exec;
   H.exec = (command, args) => (args?.[0] === "orchestrator" ? new Promise((resolve) => { finish = () => resolve({ code: 0, stdout: "{}", stderr: "" }); }) : realExec(command, args));
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("orchestrator");
   assert.equal(m.clickable("orchestrator"), false);
+  assert.equal(m.clickable("orchestrator-stop"), false);
   finish();
   await settle();
   assert.equal(m.clickable("orchestrator"), true);
+  assert.equal(m.clickable("orchestrator-stop"), true);
 });
 
-test("an orchestrator failure goes on the quiet line", async () => {
-  const H = orchWorld(null);
+test("a Send new cards failure goes on the quiet line", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
   H.hws["orchestrator start"] = { fail: "claude is not installed" };
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("orchestrator");
   assert.match(quietText(m), /claude is not installed/);
   assert.equal(m.clickable("orchestrator"), true);
+});
+
+test("Stop asks first and runs nothing until confirmed", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-stop");
+  assert.match(textOf(findNode(m, "orchestrator-confirm")), /^Stop orchestrator and its workers\? \| Cancel \| Stop$/);
+  assert.equal(m.has("orchestrator-stop"), false);
+  assert.equal(m.has("orchestrator"), false);
+  assert.equal(m.has("orchestrating"), true);
+  assert.deepEqual(orchCalls(H), []);
+});
+
+test("Cancel puts the controls back and stops nothing", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-stop");
+  await m.click("orchestrator-stop-no");
+  assert.equal(m.has("orchestrator-confirm"), false);
+  assert.equal(m.has("orchestrator-stop"), true);
+  assert.deepEqual(orchCalls(H), []);
+});
+
+test("moving the pointer off the question cancels it", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-stop");
+  hover(m, "orchestrator-confirm", true);
+  assert.equal(m.has("orchestrator-confirm"), true);
+  hover(m, "orchestrator-confirm", false);
+  assert.equal(m.has("orchestrator-confirm"), false);
+  assert.deepEqual(orchCalls(H), []);
+});
+
+test("confirming Stop runs hws orchestrator stop, clears the header and reloads", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
+  H.hws["orchestrator stop"] = () => {
+    H.hws["todo list"] = { items: [], orchestrator: null };
+    return {};
+  };
+  const m = await mount("hws-work", { view: "tasks" });
+  const lists = todoLists(H);
+  await m.click("orchestrator-stop");
+  await m.click("orchestrator-stop-yes");
+  assert.deepEqual(orchCalls(H), [{ args: ["orchestrator", "stop", "--space", "spc1", "--json"] }]);
+  assert.equal(todoLists(H), lists + 1);
+  headerHasNoOrchestrator(m);
+  assert.equal(m.has("orchestrator-confirm"), false);
+});
+
+test("Stop reads Stopping and is off while the command runs", async () => {
+  let finish;
+  const H = orchWorld({ terminal: "t1", live: true });
+  const realExec = H.exec;
+  H.exec = (command, args) => (args?.[0] === "orchestrator" ? new Promise((resolve) => { finish = () => resolve({ code: 0, stdout: "{}", stderr: "" }); }) : realExec(command, args));
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-stop");
+  await m.click("orchestrator-stop-yes");
+  assert.equal(textOf(findNode(m, "orchestrator-stop")), "Stopping…");
+  assert.equal(m.clickable("orchestrator-stop"), false);
+  assert.equal(m.clickable("orchestrator"), false);
+  H.hws["todo list"] = { items: [], orchestrator: null };
+  finish();
+  await settle();
+  assert.equal(m.has("orchestrator-stop"), false);
+});
+
+test("a Stop failure goes on the quiet line and keeps the controls", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
+  H.hws["orchestrator stop"] = { fail: "No orchestrator is running." };
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-stop");
+  await m.click("orchestrator-stop-yes");
+  assert.match(quietText(m), /No orchestrator is running\./);
+  assert.equal(m.clickable("orchestrator-stop"), true);
+  assert.equal(m.has("orchestrator-confirm"), false);
+});
+
+test("a question left open ends when the orchestrator does", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-stop");
+  H.hws["todo list"] = { items: [], orchestrator: null };
+  await m.fireTimer(10000);
+  headerHasNoOrchestrator(m);
+  assert.equal(m.has("orchestrator-confirm"), false);
+  H.hws["todo list"] = { items: [], orchestrator: { terminal: "t1", live: true } };
+  await m.fireTimer(10000);
+  assert.equal(m.has("orchestrator-confirm"), false);
+  assert.equal(m.has("orchestrator-stop"), true);
+});
+
+// From and Allow
+
+const named = { ...agent("t1"), program: { key: "claude", name: "Claude Code" } };
+const edits = (H) => hwsCalls(H).filter((c) => c.args[0] === "todo" && c.args[1] === "edit");
+
+// Fires press handlers from the innermost element outward, as GPUI does, until one stops the event.
+function pressThrough(m, ...ids) {
+  let stopped = false;
+  m.cx.stop_propagation = () => { stopped = true; };
+  for (const id of ids) {
+    if (stopped) break;
+    findNode(m, id).handlers.on_mouse_down_left?.({}, m.cx);
+  }
+  return stopped;
+}
+
+test("a card an agent added shows who added it, by name when the agent is known", async () => {
+  const H = world({ agents: [named] });
+  H.hws["todo list"] = todoList(todo("a1", "Known", { addedBy: "t1" }), todo("a2", "Unknown", { addedBy: "t77" }), todo("a3", "Mine", { addedBy: null }));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(m, "tags-a1")), "From Claude Code");
+  assert.equal(textOf(findNode(m, "tags-a2")), "From t77");
+  assert.equal(m.has("tags-a3"), false);
+});
+
+test("Allow appears only on a held card an agent added", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(
+    todo("a1", "Held by agent", { hold: true, addedBy: "t1" }),
+    todo("a2", "Held by me", { hold: true, addedBy: null }),
+    todo("a3", "Released", { hold: false, addedBy: "t1" }),
+  );
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "tags-a1")), /^Hold \| From .* \| Allow$/);
+  assert.equal(m.has("allow-a2"), false);
+  assert.equal(m.has("allow-a3"), false);
+});
+
+test("Allow clears the hold and reloads without opening the card", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  const lists = todoLists(H);
+  await m.click("allow-a1");
+  assert.deepEqual(edits(H), [{ args: ["todo", "edit", "--id", "a1", "--hold=false", "--space", "spc1", "--json"] }]);
+  assert.equal(todoLists(H), lists + 1);
+  assert.deepEqual(H.overlays, []);
+});
+
+test("pressing Allow starts no drag and never reaches the card", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(pressThrough(m, "allow-a1", "todo-a1"), true);
+  assert.equal(m.view.drag, null);
+  await release(m, "todo-a1", "lane-todo", "root");
+  assert.deepEqual(H.overlays, []);
+  assert.deepEqual(moves(H), []);
+});
+
+test("Allow's click stops at the button", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  let stopped = 0;
+  m.cx.stop_propagation = () => { stopped += 1; };
+  findNode(m, "allow-a1").handlers.on_click({}, m.cx);
+  await settle();
+  assert.equal(stopped, 1);
+});
+
+test("a card still drags and opens from its own body", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(pressThrough(m, "todo-a1"), false);
+  assert.equal(m.view.drag.id, "a1");
+  await release(m, "todo-a1", "lane-todo", "root");
+  assert.equal(H.overlays.at(-1).props.id, "a1");
+});
+
+test("an Allow failure goes on the quiet line", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  H.hws["todo edit"] = { fail: "That to-do no longer exists." };
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("allow-a1");
+  assert.match(quietText(m), /That to-do no longer exists\./);
 });
 
 test("Go to reaches a terminal in another tab", async () => {

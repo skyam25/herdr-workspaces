@@ -3904,8 +3904,9 @@ export default class Chat extends View {
     if (!pane) { this.pickFiles(cx); return; }
     const tab = panes().find((p) => p.pane === pane)?.tab;
     const space = spaces().find((s) => s.tabs.some((c) => c.id === tab))?.id;
+    const cwd = this.t?.foreground?.cwd ?? this.t?.cwd;
     const lastReply = [...(this.conv?.items ?? [])].reverse().find((x) => x.kind === "agent" && x.text)?.text;
-    openOverlay({ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: this.addr, chat: true, pane, space, ...(lastReply ? { lastReply } : {}) } });
+    openOverlay({ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: this.addr, chat: true, pane, space, ...(cwd ? { cwd } : {}), ...(lastReply ? { lastReply } : {}) } });
   }
 
   // The + menu's Attach file sets shared "hws-chat.attach" = { pane, at }.

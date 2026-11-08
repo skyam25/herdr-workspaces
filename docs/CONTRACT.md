@@ -257,7 +257,8 @@ A popup that the pane header and the chat composer open at the pointer.
 | `terminal` | The agent the surface attaches to. Required |
 | `chat` | True when the agent is flipped to Chat |
 | `pane` | The chat pane, when `chat` is true |
-| `space` | The space id, when `chat` is true |
+| `space` | The agent's space id |
+| `cwd` | The agent's folder, when Herdr knows it |
 | `lastReply` | The agent's last reply, when the chat has one |
 
 | Item | Shown | Action |
@@ -269,6 +270,7 @@ A popup that the pane header and the chat composer open at the pointer.
 | Attach file… | `chat` is true | `setShared("hws-chat.attach", { pane, at })` |
 | Tasks | Always | Opens the Board tab |
 | Outputs | Always | Selects `outputs` in `panel-body` and shows `panel` |
+| Orchestrate this space | `space` and `cwd` are known | `hws orchestrator start --space S --folder F`, where F is this agent's folder |
 
 Every `hws surface open` passes `--terminal T`. A flipped agent also passes `--beside-pane P --space S`.
 
@@ -307,10 +309,12 @@ The pane header names it Board. The board shows your to-dos beside the agents' i
 
 | Card | Shows | Click | Drag |
 |---|---|---|---|
-| To-do | Title, `note` or the first line of notes, the agent working on it, Hold and Worktree tags | Opens the to-do dialog | Release over To do, In progress or Done |
+| To-do | Title, `note` or the first line of notes, the agent working on it, Hold, Worktree and From tags, and Allow on a held card an agent added | Opens the to-do dialog | Release over To do, In progress or Done |
 | Agent item | `#n`, title, agent name, Claude's last line | Focuses the agent | None, because the agent owns the items file |
 
 Drag uses press and release across elements, as Herdr's tab bar does. The column under the pointer highlights during a drag, and Waiting on you never accepts a drop.
+
+Allow runs `hws todo edit --id I --hold=false`, which lets an orchestrator take that card.
 
 Adding has three routes:
 
@@ -320,14 +324,14 @@ Adding has three routes:
 
 The to-do dialog has title, notes, a column choice, Keep for me (`hold`), Use a worktree (`worktree`), Send to, Archive and Save. A card in Waiting on you also shows its `note` and a Reply box that runs `hws todo reply`.
 
-The header's orchestrator control reads `orchestrator` from `hws todo list`.
+The Board is a plain list until you turn orchestration on. Orchestration starts from the `+` menu or the launcher, and the header has no control for it while it is off.
 
-| State | Control | Action |
-|---|---|---|
-| None running | Start orchestrator | `hws orchestrator start --space S --folder F` |
-| Running | Send new cards | The same command, and a Go to link focuses its terminal |
-
-F is the working folder of the active space's first agent, else the space's folder.
+| While an orchestrator is live, the header shows | Action |
+|---|---|
+| Orchestrating | None. It is the mode's label |
+| Send new cards | `hws orchestrator start --space S --folder F` |
+| Go to | Focuses its terminal |
+| Stop | Asks in place, as ending an agent does, then runs `hws orchestrator stop --space S` |
 
 ### Right panel: `hws-work`
 
@@ -343,7 +347,7 @@ Only `hws` writes `<state root>/todos/<space id>.json`. To-dos belong to a space
 
 ```json
 { "version": 1, "space": "sp1", "items": [
-  { "id": "t1a2b3", "title": "Fix login", "notes": "", "column": "todo", "terminal": null, "hold": false, "worktree": false, "note": "", "archived": false, "createdAt": 1, "updatedAt": 1 }
+  { "id": "t1a2b3", "title": "Fix login", "notes": "", "column": "todo", "terminal": null, "hold": false, "worktree": false, "note": "", "addedBy": null, "archived": false, "createdAt": 1, "updatedAt": 1 }
 ], "orchestrator": { "terminal": "t9", "startedAt": 1 } }
 ```
 
@@ -361,17 +365,22 @@ Only `hws` writes `<state root>/todos/<space id>.json`. To-dos belong to a space
 | `hws todo reply --id I --text X [--space S]` | Pastes X into the card's `terminal`, clears `note`, moves to `doing` |
 | `hws todo archive --id I [--space S]` | Sets `archived`. Nothing is deleted |
 
-`--space` defaults to the window's selected space. Mods always pass it. The to-do dialog sets `shared("hws.todos.changed")` after a change, and the board reloads on it.
+`--space` defaults to the calling agent's own space, from `$HC_TERMINAL_ID`. A terminal Herdr cannot place is an error, so a card never lands on another space's board. With no `$HC_TERMINAL_ID`, it defaults to the window's selected space. Mods always pass it.
 
-Items written before these fields existed read `hold` and `worktree` as false and `note` as empty.
+A card added with `$HC_TERMINAL_ID` set is an agent's. It records `addedBy` as that terminal and starts held, so an orchestrator takes only your cards until you press Allow. The to-do dialog sets `shared("hws.todos.changed")` after a change, and the board reloads on it.
+
+Items written before these fields existed read `hold` and `worktree` as false, `note` as empty and `addedBy` as null.
+
+Every agent can use the list. The session-start hook tells each Claude session in a Herdr terminal that it exists, and the `herdr-workspace` skill explains it.
 
 ### Orchestrator
 
-An orchestrator is an ordinary Claude session in a visible tab. It reads the board, decides what can run in parallel and starts workers. Nothing runs in the background.
+Orchestration is a way of operating on the list, and is off until you start it. An orchestrator is an ordinary Claude session in a visible tab. It reads the board, decides what can run in parallel and starts workers. Nothing runs in the background.
 
 | Command | Does |
 |---|---|
 | `hws orchestrator start --space S --folder F` | With none live, opens an Orchestrator tab running `claude` with a first prompt that loads the `orchestrate` skill, and records its terminal. With one live, pastes a note into it to read the board again |
+| `hws orchestrator stop [--space S]` | Ends the orchestrator and its workers. A card still in `doing` whose worker has ended returns to To do, held, with the note `Stopped before finishing` |
 | `hws orchestrator status [--space S]` | Prints `{ terminal, live }` or null |
 
 - The skill is `plugin/skills/orchestrate/SKILL.md`.

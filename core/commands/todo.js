@@ -2,19 +2,43 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { HwsError, UsageError } from '../errors.js';
-import { isTerminalAlive, sendText, windowStatus } from '../herdr.js';
+import { findTerminal, isTerminalAlive, listLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { withLock } from '../lock.js';
 import { writeJsonAtomic } from '../manifest.js';
 import { todosPath } from '../paths.js';
 import { requireFlag } from '../resolve.js';
 
 const COLUMNS = ['todo', 'doing', 'waiting', 'done'];
-const ITEM_DEFAULTS = { hold: false, worktree: false, note: '' };
+const ITEM_DEFAULTS = { hold: false, worktree: false, note: '', addedBy: null };
 
+// A `where` label reads "<space name> / <tab name>". Space names can repeat, so only a single match counts.
+function spaceFromWhere(where, spaces) {
+  const matches = spaces.filter(({ name }) => where === name || where.startsWith(`${name} / `));
+  return matches.length === 1 ? matches[0].id : null;
+}
+
+// A flipped agent is missing from the listing, so its labels place it.
+function spaceOfTerminal(terminal) {
+  const live = listLive();
+  const found = live && findTerminal(live, terminal);
+  if (found) return found.space.id;
+  const labels = terminalInfo(terminal)?.labels ?? {};
+  if (labels['herdr.space']) return labels['herdr.space'];
+  return live && labels.where ? spaceFromWhere(labels.where, live.spaces) : null;
+}
+
+// An agent's card must reach its own board, so a set terminal never falls back to the selected space.
 export function resolveSpace(flags) {
-  const space = flags.space ?? windowStatus()?.space;
-  if (!space) throw new UsageError('pass --space, because the window has no selected space');
-  return space;
+  if (flags.space) return flags.space;
+  const terminal = process.env.HC_TERMINAL_ID;
+  if (terminal) {
+    const own = spaceOfTerminal(terminal);
+    if (!own) throw new HwsError(`Herdr cannot place terminal ${terminal} in a space, so pass --space`);
+    return own;
+  }
+  const selected = windowStatus()?.space;
+  if (!selected) throw new UsageError('pass --space, because the window has no selected space');
+  return selected;
 }
 
 // Only a missing file counts as empty, so a damaged file is never overwritten.
@@ -101,6 +125,12 @@ function newItem(title, fields = {}) {
   };
 }
 
+// An agent's card starts held, so it waits for the person to press Allow.
+function agentFields() {
+  const terminal = process.env.HC_TERMINAL_ID;
+  return terminal ? { addedBy: terminal, hold: true } : {};
+}
+
 function claim(item, terminal) {
   return Object.assign(item, { column: 'doing', terminal, updatedAt: Date.now() });
 }
@@ -129,7 +159,7 @@ function addTitles(flags) {
   }
   const titles = flags.titles.split('\n').map((line) => line.trim()).filter(Boolean);
   if (titles.length === 0) throw new UsageError('--titles must have a line that is not blank');
-  const items = titles.map((title) => newItem(title));
+  const items = titles.map((title) => newItem(title, agentFields()));
   updateTodos(resolveSpace(flags), (todos) => todos.items.push(...items));
   return { data: { items } };
 }
@@ -140,6 +170,7 @@ export function todoAdd(flags) {
     notes: flags.notes ?? '',
     hold: Boolean(flags.hold),
     worktree: Boolean(flags.worktree),
+    ...agentFields(),
   });
   updateTodos(resolveSpace(flags), (todos) => todos.items.push(item));
   return { data: item };

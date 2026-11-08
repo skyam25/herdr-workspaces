@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stands in for hc. Reads terminal facts from FAKE_STATE and logs every call.
-const { appendFileSync, readFileSync } = require('node:fs');
+const { appendFileSync, readFileSync, writeFileSync } = require('node:fs');
 
 const argv = process.argv.slice(2);
 appendFileSync(process.env.FAKE_LOG, `${JSON.stringify({ bin: 'hc', args: argv })}\n`);
@@ -29,7 +29,13 @@ if (command === 'run') {
   process.exit(0);
 }
 
-if (command === 'kill') process.exit(0);
+if (command === 'kill') {
+  if (state.killFails) process.exit(1);
+  const children = Object.keys(state.hc ?? {}).filter((address) => state.killEndsChildren && state.hc[address].parent === terminal);
+  for (const address of [terminal, ...children]) state.hc = { ...state.hc, [address]: 'missing' };
+  writeFileSync(process.env.FAKE_STATE, JSON.stringify(state));
+  process.exit(0);
+}
 
 if (command === 'send') {
   if (state.sendFails) {

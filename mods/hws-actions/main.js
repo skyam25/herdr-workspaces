@@ -1,6 +1,6 @@
 // The + menu on agent panes and in the chat composer. It starts boards, notes and page
 // reviews glued to an agent, and reaches the chat's file picker, the Board tab and the right panel.
-// Props: { terminal, chat?, pane?, space?, lastReply? }. docs/CONTRACT.md lists the rows.
+// Props: { terminal, chat?, pane?, space?, cwd?, lastReply? }. docs/CONTRACT.md lists the rows.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -69,6 +69,7 @@ export default class Actions extends View {
       ...(p.chat ? [{ id: "attach", name: "Attach file…", icon: "attach", work: () => setShared("hws-chat.attach", { pane: p.pane, at: Date.now() }) }] : []),
       { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: openBoard },
       { id: "outputs", name: "Outputs", icon: "outputs", work: () => showPanel("outputs") },
+      ...(p.space && p.cwd ? [{ id: "orchestrate", name: "Orchestrate this space", icon: "orchestrate", divided: true, work: () => hws(["orchestrator", "start", "--space", p.space, "--folder", p.cwd]) }] : []),
     ];
   }
 

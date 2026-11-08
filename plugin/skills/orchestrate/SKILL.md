@@ -17,7 +17,7 @@ Three values fill the commands below.
 | `<folder>` | This session's working folder, because the Orchestrator tab opens there. Use the absolute path |
 | `<orchestrator>` | The output of `echo $HC_TERMINAL_ID` in this session |
 
-Always pass `--space`, because the default is whichever space the window has selected.
+Always pass `--space`, so every command reaches this board even when Herdr cannot place a terminal.
 
 ## Read the board
 
@@ -30,10 +30,12 @@ The output has `items` and `orchestrator`. Read each item's `column`, `hold`, `w
 | Card | Meaning | Action |
 |---|---|---|
 | `todo`, `hold` false | Ready | Start it when its files are free |
-| `todo`, `hold` true | Held by the person | Leave it alone |
+| `todo`, `hold` true | Held | Leave it alone |
 | `doing` | A worker is on it | Count it toward the limit. Its files are taken |
 | `waiting` | The person owes an answer | Leave it alone. Its files are still taken |
 | `done` | Finished | Leave it alone. Cards that needed its result are now free |
+
+A held card includes every card an agent added, until the person presses Allow. You must not clear `hold` on any card.
 
 ## Decide what runs in parallel
 
@@ -175,6 +177,7 @@ You never answer a card's question for the person, even when you know the answer
 ## Never
 
 - Take a held card.
+- Clear `hold`. Only the person does that, with Allow.
 - Edit the to-do file by hand. Only `hws` writes it.
 - Start a worktree outside the rule above.
 - Start two workers on one file, in a worktree or not.

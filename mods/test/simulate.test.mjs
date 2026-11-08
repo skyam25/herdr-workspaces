@@ -45,6 +45,67 @@ test("launcher menu runs the right commands and closes after success", async () 
   assert.deepEqual(args(H3), [["surface", "open", "--type", "board", "--title", "Untitled board", "--standalone", "--json"]]);
 });
 
+const ACTIVE = { id: "spc1", active: true, machine: null, folder: "/space/dir", tabs: [] };
+
+test("Orchestrate this space starts in the focused terminal's folder", async () => {
+  const H = setup({ spaces: [ACTIVE] });
+  const m = await mount("hws-new", { overlay: "ov0" });
+  assert.match(m.text(), /Orchestrate this space \| Run the Board with an agent that assigns the work\./);
+  await m.click("orchestrate");
+  assert.deepEqual(args(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/Users/me/work", "--json"]]);
+  assert.deepEqual(H.closed, ["ov0"]);
+});
+
+test("Orchestrate this space falls back to the space's folder", async () => {
+  const H = setup({ spaces: [ACTIVE], focused: { space: "spc1", tab: "tb1", pane: "p9", terminal: null, cwd: null } });
+  const m = await mount("hws-new", { overlay: "ov0" });
+  await m.click("orchestrate");
+  assert.deepEqual(args(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/space/dir", "--json"]]);
+});
+
+test("Orchestrate this space ignores focus in another space", async () => {
+  const H = setup({ spaces: [ACTIVE], focused: { space: "spc2", tab: "tb9", pane: "p9", terminal: "t9", cwd: "/elsewhere" } });
+  const m = await mount("hws-new", { overlay: "ov0" });
+  await m.click("orchestrate");
+  assert.deepEqual(args(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/space/dir", "--json"]]);
+});
+
+test("Orchestrate this space is disabled with no space, no folder or a remote space", async () => {
+  const unavailable = [
+    { spaces: [] },
+    { spaces: [{ ...ACTIVE, active: false }] },
+    { spaces: [{ ...ACTIVE, folder: "" }], focused: null },
+    { spaces: [{ ...ACTIVE, machine: "vps" }] },
+  ];
+  for (const world of unavailable) {
+    const H = setup(world);
+    const m = await mount("hws-new", { overlay: "ov0" });
+    assert.equal(m.has("orchestrate"), true);
+    assert.equal(m.clickable("orchestrate"), false);
+    m.view.at = 5;
+    await m.key("enter");
+    assert.deepEqual(args(H), []);
+    assert.deepEqual(H.closed, []);
+  }
+});
+
+test("Enter runs Orchestrate this space when it is selected", async () => {
+  const H = setup({ spaces: [ACTIVE] });
+  const m = await mount("hws-new", { overlay: "ov0" });
+  m.view.at = 5;
+  await m.key("enter");
+  assert.deepEqual(args(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/Users/me/work", "--json"]]);
+});
+
+test("the launcher shows why an orchestrator did not start and stays open", async () => {
+  const H = setup({ spaces: [ACTIVE] });
+  H.hws["orchestrator start"] = { fail: "claude is not installed" };
+  const m = await mount("hws-new", { overlay: "ov0" });
+  await m.click("orchestrate");
+  assert.match(m.text(), /claude is not installed/);
+  assert.deepEqual(H.closed, []);
+});
+
 test("new terminal leaves out a folder from another machine", async () => {
   const H = setup({ spaces: [{ id: "spc1", machine: "vps", tabs: [] }] });
   const m = await mount("hws-new", { overlay: "ov0" });
