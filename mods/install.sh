@@ -4,9 +4,11 @@
 
 set -eu
 
-MODS="hws-new hws-panel hws-brief"
+MODS="hws-new hws-panel hws-brief hws-pane hws-chat hws-chat-models hws-chat-image"
 SOURCE="$(cd "$(dirname "$0")" && pwd)"
-TARGET="${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods"
+APP_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
+TARGET="$APP_HOME/mods"
+LAYOUTS="$APP_HOME/layouts"
 FORCE=0
 
 for arg in "$@"; do
@@ -30,7 +32,8 @@ for mod in $MODS; do
     for file in "$SOURCE/$mod"/*; do
       case "$(basename "$file")" in
         gpui-kit.d.ts|jsconfig.json) ;;
-        *.js|*.json|*.svg) cp "$file" "$dest/" ;;
+        *.js|*.json|*.svg|*.py) cp "$file" "$dest/" ;;
+        core) cp -R "$file" "$dest/" ;;
       esac
     done
     echo "$mod: installed to $dest"
@@ -43,5 +46,13 @@ for mod in $MODS; do
     failed=1
   fi
 done
+
+mkdir -p "$LAYOUTS"
+if [ -f "$LAYOUTS/hws.json" ] && [ "$FORCE" -eq 0 ]; then
+  echo "hws layout: already installed, skipped (use --force to replace)"
+else
+  cp "$SOURCE/layouts/hws.json" "$LAYOUTS/hws.json"
+  echo "hws layout: installed to $LAYOUTS/hws.json"
+fi
 
 exit "$failed"

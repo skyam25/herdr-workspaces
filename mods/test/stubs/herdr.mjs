@@ -15,3 +15,11 @@ export const exec = (command, args, options) => H().exec(command, args, options)
 export const readTextFile = (path) => Promise.resolve(H().files[path] ?? null);
 export const watchFolder = (dir) => { H().watches.push(dir); return H().watchResult ? H().watchResult(dir) : new Promise(() => {}); };
 export const nextCommand = () => new Promise(() => {});
+export const terminals = () => H().terminals ?? [];
+export const machines = () => H().machines ?? [];
+export const hc = (args) => { H().hcCalls?.push(args); return Promise.resolve({ code: 0, stdout: "{}", stderr: "" }); };
+export const shared = () => undefined;
+export const setShared = () => null;
+export const notify = () => null;
+export const settings = () => ({});
+export const layout = () => null;

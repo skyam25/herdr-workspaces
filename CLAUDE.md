@@ -10,7 +10,7 @@ Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.m
 |---|---|
 | `bin/hws`, `core/` | CLI that creates, tracks and closes workspaces. Node, ESM, no runtime dependencies |
 | `surface/` | Pixel host. `surface/app/` is an owned copy of Agent Brief's Electron app |
-| `mods/` | Herdr mods `hws-new`, `hws-panel` and `hws-brief`, written in GPUI JavaScript |
+| `mods/` | Herdr mods `hws-new`, `hws-panel`, `hws-brief`, `hws-pane` and `hws-chat*`, written in GPUI JavaScript. `mods/NOTICE.md` records the Shepherdr import |
 | `plugin/` | Claude Code plugin with the session hook, skill and `/workspace` command |
 
 ## Commands
@@ -18,7 +18,7 @@ Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.m
 | Task | Command |
 |---|---|
 | CLI tests | `npm test` |
-| Mod tests | `cd mods && node --import ./test/register.mjs --test test/simulate.test.mjs` |
+| Mod tests | `cd mods && node --import ./test/register.mjs --test test/simulate.test.mjs test/pane.test.mjs` |
 | Mod states | `node mods/test/forced-check.mjs` |
 | Plugin tests | `cd plugin && node --test tests/*.test.mjs` |
 | Surface tests | `cd surface/app && pnpm test && pnpm compile` |

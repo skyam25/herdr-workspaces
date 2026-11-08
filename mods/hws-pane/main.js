@@ -1,0 +1,226 @@
+// A pane header with a Chat | Terminal switch for Claude Code and Codex panes.
+// Chat splits hws-chat beside the agent's pane, then parks the terminal, so the chat takes its spot.
+// Terminal reverses the swap. Each swap's last step removes this header's pane, so it runs last.
+// The core label herdr.chat=<chat pane> records which chat shows which agent.
+
+import { View, div, svg, image } from "gpui-kit";
+import { h_flex } from "gpui-base";
+import { props, run, theme, home, exec, hc, nextCommand } from "herdr";
+import { panes, terminals, inRender } from "./live.js";
+import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
+import { LABEL, sweep } from "./parked.js";
+
+const CHAT = "hws-chat";
+const SWEEP_MS = 4000;
+const NEW_COPY_MS = 2000;
+const SWAP_GAP_MS = 3000;
+
+// Every header copy shares these.
+let lastSwap = 0;
+let lastSweep = 0;
+
+const chatty = (p) => Boolean(p?.terminal) && (["claude-code", "codex"].includes(p.app) || ["claude", "codex"].includes(p.program?.key));
+
+function icon(p, size, color) {
+  if (!p?.icon) return null;
+  return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
+}
+
+function folder(cwd) {
+  if (!cwd) return "";
+  const h = home();
+  return cwd === h ? "~" : cwd.startsWith(`${h}/`) ? `~${cwd.slice(h.length)}` : cwd;
+}
+
+function chatOf(terminal) {
+  const chat = terminals().find((x) => x.address === terminal)?.labels?.[LABEL];
+  return chat && panes().some((p) => p.pane === chat && p.mod === CHAT) ? chat : null;
+}
+
+const agentOf = (chat) => terminals().find((x) => x.labels?.[LABEL] === chat && x.state === "live")?.address ?? null;
+
+// Runs one app command and waits, because a swap's steps must go in order.
+async function app(name, args) {
+  const r = await exec("herdr-app", ["do", name, ...Object.entries(args).flatMap(([k, v]) => [`--${k}`, typeof v === "string" ? v : JSON.stringify(v)])]);
+  let out = {};
+  try { out = JSON.parse(r.stdout || "{}"); } catch { out = {}; }
+  if (r.code !== 0 || out.error) throw new Error(out.error || r.stderr?.trim() || `${name} failed`);
+  return out;
+}
+
+function parked(terminal) {
+  const k = terminals().find((x) => x.address === terminal);
+  if (!k) return null;
+  const status = ["working", "blocked", "done", "idle"].includes(k.status) ? k.status : null;
+  return { program: k.program, status, cwd: k.foreground?.cwd ?? k.cwd ?? null, title: k.title ?? "" };
+}
+
+export default class Pane extends View {
+  init(_props, cx) {
+    this.hovered = false;
+    this.busy = false;
+    this.ending = false;
+    this.born = Date.now();
+
+    cx.timer.every(SWEEP_MS, () => {
+      if (Date.now() - lastSweep < SWEEP_MS / 2) return;
+      lastSweep = Date.now();
+      sweep();
+    });
+
+    // A short wait lets a reloaded build exit at its next cx use.
+    cx.spawn(async (cx) => {
+      let cmd = null;
+      for (;;) {
+        cmd ??= nextCommand();
+        const c = await Promise.race([cmd, cx.sleep(5000)]);
+        if (c === undefined) continue;
+        cmd = null;
+        const self = this.me();
+        if (c !== "toggle" || !self?.focused) continue;
+
+        // The new pane's header may receive the toggle that made it, which would swap straight back.
+        if (Date.now() - this.born < NEW_COPY_MS || Date.now() - lastSwap < SWAP_GAP_MS) continue;
+        lastSwap = Date.now();
+        if (self.mod === CHAT) { if (agentOf(self.pane)) this.toTerminal(self.pane, cx); }
+        else if (chatty(self)) this.toChat(self, cx);
+      }
+    });
+  }
+
+  me() {
+    return panes().find((p) => p.pane === props()?.pane);
+  }
+
+  button(t, id, name, onClick) {
+    return h_flex()
+      .id(id)
+      .size(24)
+      .flex_none()
+      .items_center()
+      .justify_center()
+      .rounded(RADIUS.control)
+      .text_color(t.dim)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        onClick();
+        cx.notify();
+      })
+      .child(svg(`mods/hws-pane/${name}.svg`).size(14));
+  }
+
+  toChat(p, cx) {
+    const open = chatOf(p.terminal);
+    if (open) { run("pane.focus", { pane: open }); return; }
+    if (this.busy) return;
+    this.busy = true;
+    const terminal = p.terminal;
+    cx.spawn(async (cx) => {
+      try {
+        const out = await app("pane.split", { direction: "right", pane: p.pane, mod: CHAT, props: { terminal } });
+        if (!out.pane) throw new Error("Herdr didn't open the chat");
+        await hc(["label", terminal, `${LABEL}=${out.pane}`]);
+        run("pane.focus", { pane: out.pane });
+        await app("terminal.park", { terminal });
+      } catch (e) {
+        toast({ title: "Chat didn't open", body: plainError(e), level: "error" });
+      }
+      this.busy = false;
+      cx.notify();
+    });
+  }
+
+  toTerminal(chat, cx) {
+    const terminal = agentOf(chat);
+
+    // The agent ended or still has its own pane, so only the chat needs closing.
+    const own = terminal && panes().find((x) => x.terminal === terminal);
+    if (!terminal || own) {
+      const zoomed = panes().find((x) => x.pane === chat)?.zoomed;
+      run("pane.close", { pane: chat });
+      if (terminal) hc(["label", terminal, `${LABEL}=`]);
+      if (own) {
+        if (zoomed && own.zoomed) run("pane.zoom", { pane: own.pane });
+        run("pane.focus", { pane: own.pane });
+      }
+      return;
+    }
+
+    if (this.busy) return;
+    this.busy = true;
+    cx.spawn(async (cx) => {
+      try {
+        await app("pane.focus", { pane: chat });
+        const out = await app("terminal.keep", { terminal, place: "right" });
+        await hc(["label", terminal, `${LABEL}=`]);
+        if (out.pane) run("pane.focus", { pane: out.pane });
+        await app("pane.close", { pane: chat });
+      } catch (e) {
+        toast({ title: "Terminal didn't come back", body: plainError(e), level: "error" });
+      }
+      this.busy = false;
+      cx.notify();
+    });
+  }
+
+  // Closing a chat ends its agent, as closing the agent's own pane would.
+  endChat(chat) {
+    this.ending = false;
+    const terminal = agentOf(chat);
+    if (terminal) run("terminal.kill", { terminal });
+    run("pane.close", { pane: chat });
+  }
+
+  render(cx) {
+    return inRender(() => this.draw(cx));
+  }
+
+  draw(cx) {
+    const t = theme();
+    const self = this.me();
+    if (!self) return div();
+
+    const chatMode = self.mod === CHAT;
+    const agent = chatMode ? agentOf(self.pane) : null;
+    const p = (agent && parked(agent)) ?? self;
+    const prog = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "Shell";
+    const name = chatMode && !agent ? "Chat" : prog;
+    const pic = icon(p.program, 14, t.dim);
+    const pane = self.pane;
+    const canSwitch = chatMode ? Boolean(agent) : chatty(self);
+    const confirming = Boolean(agent) && this.ending;
+
+    return h_flex()
+      .id(`pane-head-${pane}`)
+      .size_full()
+      .px(10)
+      .gap(8)
+      .items_center()
+      .bg(t.background)
+      .border_b(1)
+      .border_color(t.border)
+      .text_size(TEXT.label)
+      .on_hover((hovered, cx) => { this.hovered = hovered; if (!hovered) this.ending = false; cx.notify(); })
+      .on_click(() => run("pane.focus", { pane }))
+      .when(Boolean(pic), (el) => el.child(pic))
+      .child(div().flex_none().max_w(260).min_w(0).truncate().font_medium().text_color(t.foreground).child(name))
+      .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(p.cwd)))
+      .child(div().flex_1())
+      .when(p.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
+      .when(p.status === "blocked", (el) => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(RADIUS.control).bg(`${t.blocked}26`).text_size(TEXT.id).font_semibold().text_color(t.blocked).child("Needs you")))
+      .when(p.status === "done", (el) => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
+      .when(confirming, (el) => el
+        .child(div().flex_none().whitespace_nowrap().text_color(t.foreground).child(`End ${prog}?`))
+        .child(uiButton(`ph-end-no-${pane}`, "Cancel", { kind: "plain", onClick: () => { this.ending = false; } }))
+        .child(uiButton(`ph-end-${pane}`, "End agent", { kind: "primary", onClick: () => this.endChat(pane) })))
+      .when(this.hovered && !confirming, (el) => el
+        .child(this.button(t, `ph-r-${pane}`, "split-right", () => run("pane.split", { direction: "right", pane })))
+        .child(this.button(t, `ph-d-${pane}`, "split-down", () => run("pane.split", { direction: "down", pane })))
+        .child(this.button(t, `ph-z-${pane}`, self.zoomed ? "unzoom" : "zoom", () => run("pane.zoom", { pane })))
+        .child(this.button(t, `ph-x-${pane}`, "close", () => { if (agent) this.ending = true; else run("pane.close", { pane }); })))
+      .when(canSwitch, (el) => el.child(segmented(`ph-mode-${pane}`, [["chat", "Chat"], ["terminal", "Terminal"]], chatMode ? "chat" : "terminal",
+        (v, _e, cx) => (v === "chat" ? this.toChat(self, cx) : this.toTerminal(pane, cx)))));
+  }
+}

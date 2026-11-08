@@ -150,3 +150,17 @@ Binaries resolve from `HWS_HERDR_APP`, default `herdr-app`, and `HWS_HC`, defaul
 | Terminal alive | `hc get T` prints JSON. A finished terminal has `exit_code` or an error |
 
 `herdr-app do` prints `{"error":"..."}` and exits 1 on failure.
+
+## Chat and Terminal flip
+
+The `hws` layout uses the `hws-pane` header. Claude Code and Codex panes get a Chat | Terminal switch.
+
+| Step | Command |
+|---|---|
+| Flip the focused pane | `herdr-app do hws-pane.toggle` |
+| To chat | `pane.split --mod hws-chat --props {"terminal":T}`, `hc label T herdr.chat=<chat pane>`, `terminal.park --terminal T` |
+| To terminal | `terminal.keep --terminal T --place right`, `hc label T herdr.chat=`, `pane.close --pane <chat pane>` |
+
+- The core label `herdr.chat` names the chat pane that shows a parked agent.
+- A parked agent has no pane, so `herdr-app ls` lists no terminal for it and `pane.focus --terminal T` fails.
+- `hws-pane` ends a parked agent once its chat pane has gone.

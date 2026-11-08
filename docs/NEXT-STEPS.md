@@ -96,6 +96,15 @@ The audit found these from reading code.
 - [ ] Add an orchestrator mode across a workspace, using Orchestrate mode and `hc run` children.
 - [ ] Decide whether this replaces the Agent Brief panel or runs beside it, including on the work Mac.
 
+### 8. Finish the chat flip
+
+- [ ] Test the composer, Send and the model picker with a real keyboard and pointer.
+- [ ] Add the `PermissionRequest` hook so permissions and questions arrive as cards. Today the chat shows Needs you.
+- [ ] Make attach and image paste work on macOS. The imported code uses `wl-paste` and a Linux file picker.
+- [ ] Show flipped agents in the sidebar's Agents list and tab status. A parked agent drops out of both.
+- [ ] Make `hws surface open` work for a flipped agent. It fails today because the agent has no pane.
+- [ ] Revisit the iOS shell around a web client.
+
 ## State outside this repo
 
 | Thing | Where | Note |

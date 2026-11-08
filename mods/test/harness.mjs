@@ -132,6 +132,7 @@ export async function mount(mod, props, H = globalThis.__herdr) {
     stop_propagation() {},
     focus_handle: () => ({ focus() {}, is_focused: () => false }),
     spawn: (fn) => { fn(cx); },
+    sleep: () => new Promise(() => {}),
     timer: {
       every: (ms, fn) => { timers.push({ ms, fn, repeating: true }); },
       after: (ms, fn) => { timers.push({ ms, fn, repeating: false }); },
