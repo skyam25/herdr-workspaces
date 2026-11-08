@@ -4,6 +4,7 @@ import { artifactList, artifactTerminal, link } from './commands/artifact.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
+import { find, reopen } from './commands/retired.js';
 import { orchestratorStart, orchestratorStatus } from './commands/orchestrator.js';
 import { surfaceDone, surfaceFocus, surfaceOpen, surfaceSocket } from './commands/surface.js';
 import {
@@ -84,6 +85,8 @@ const ROUTES = [
   { path: ['parent'], run: parent, options: {} },
   { path: ['close'], run: close, prunes: true, options: { workspace: text, keep: flag, trash: flag } },
   { path: ['resume'], run: resume, options: { workspace: text } },
+  { path: ['find'], run: find, options: {}, positionals: 'any' },
+  { path: ['reopen'], run: reopen, options: {}, positionals: 1 },
   { path: ['prune'], run: prune, options: {} },
 ];
 
@@ -108,7 +111,7 @@ function parseRouteArgs(route, args) {
       allowPositionals: true,
       strict: true,
     });
-    if (positionals.length !== (route.positionals ?? 0)) throw new UsageError(`wrong arguments for hws ${route.path.join(' ')}`);
+    if (route.positionals !== 'any' && positionals.length !== (route.positionals ?? 0)) throw new UsageError(`wrong arguments for hws ${route.path.join(' ')}`);
     return { flags: values, positionals };
   } catch (error) {
     if (error.code?.startsWith('ERR_PARSE_ARGS')) throw new UsageError(error.message);

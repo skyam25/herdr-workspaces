@@ -55,6 +55,8 @@ const __terminals = () => [
 const VARIANTS = [
   { mod: "hws-new", name: "form", props: { step: "workspace" } },
   { mod: "hws-new", name: "form-problem", props: { step: "workspace" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "That folder does not exist.";') },
+  { mod: "hws-new", name: "find-empty", props: { step: "find" } },
+  { mod: "hws-new", name: "find-results", props: { step: "find" }, patch: (s) => s.replace("this.results = null;", `this.results = [{ id: "sp1", name: "throwaway-1c26", closedAt: 1, sessions: [{ title: "Fix login" }], artifacts: [{}] }, { id: "sp2", name: "plain", closedAt: 2, sessions: [], artifacts: [] }];`).replace("this.search(cx);\n      focusField", "focusField") },
   { mod: "hws-new", name: "menu-problem", props: { overlay: "o" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "hws failed";') },
   { mod: "hws-panel", name: "toggle", props: { overlay: "o" }, patch: (s) => s.replace("cx.spawn(async () => this.toggle());", "") },
   { mod: "hws-panel", name: "decide", props: { view: "decide", name: "scratch", artifacts: MANIFEST.artifacts } },

@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { HwsError } from './errors.js';
 import { updateManifest, listManifests } from './manifest.js';
 import { STANDALONE, keptArtifactDir, standaloneArtifactDir, throwawayArtifactDir } from './paths.js';
+import { listRetired } from './retired.js';
 
 export function artifactStoreDir(manifest, artifactId) {
   if (manifest.id === STANDALONE) return standaloneArtifactDir(artifactId);
@@ -83,7 +84,7 @@ export function relocateArtifact(workspaceId, artifact, targetDir) {
 }
 
 export function findArtifact(artifactId) {
-  for (const manifest of listManifests({ includeStandalone: true })) {
+  for (const manifest of [...listManifests({ includeStandalone: true }), ...listRetired()]) {
     const artifact = manifest.artifacts.find((item) => item.id === artifactId);
     if (artifact) return { manifest, artifact };
   }

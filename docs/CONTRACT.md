@@ -21,6 +21,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 - If the owning terminal has ended, Done acts like standalone.
 - Done writes the artifact, delivers it, and collapses the surface pane.
 - The manifest lives until its workspace closes. Artifacts outlive the manifest.
+- A closed throwaway leaves a retired record, unless the user chose Trash.
 - Only `hws` writes the manifest. Every other part calls `hws`.
 - No background jobs and no notifications. Pruning runs inside `hws` commands.
 - User work moves to the macOS Trash. It is never deleted outright.
@@ -36,6 +37,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Kept artifacts | `<folder>/.herdr-workspace/<name>-<id tail>/artifacts/<artifactId>/` |
 | Throwaway artifacts | `<root>/workspaces/<spaceId>/artifacts/<artifactId>/` |
 | Standalone artifacts | `<root>/standalone/artifacts/<artifactId>/` |
+| Retired throwaways | `<root>/retired/<spaceId>.json` |
 
 Standalone surfaces with no workspace use the workspace id `standalone`.
 
@@ -99,14 +101,16 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface done --id S --bundle DIR` | Moves DIR to the artifact store, delivers, closes the pane |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
-| `hws artifact list [--workspace W]` | Artifacts |
+| `hws artifact list [--workspace W]` | Artifacts, including those of retired throwaways when W is absent |
 | `hws link ARTIFACT` | Prints `@<absolute prompt.md path>`, ready to paste into Claude |
 | `hws todo list\|add\|edit\|move\|send\|archive` | To-dos for a space. See [To-dos](#to-dos-hws-todo) |
 | `hws artifact terminal ARTIFACT` | Opens a new tab running `claude` with that artifact's prompt |
 | `hws promote [--workspace W] --name N --folder F [--kind K]` | Makes a throwaway a kept workspace and moves its artifacts. W defaults to the current workspace |
-| `hws close [--workspace W] [--keep\|--trash]` | Closes the space. A throwaway with artifacts and no flag returns `{"decision":"needed","artifacts":[...]}` and closes nothing |
+| `hws close [--workspace W] [--keep\|--trash]` | Closes the space. A throwaway with artifacts and no flag returns `{"decision":"needed","artifacts":[...]}` and closes nothing. `--trash` leaves no retired record |
 | `hws resume [--workspace W]` | Runs `claude --resume` in shell panes whose recorded session lost its process |
-| `hws prune` | Removes manifests whose space no longer exists. Does nothing when the Herdr window does not answer |
+| `hws prune` | Removes manifests whose space no longer exists, expires idle throwaways and purges old retired records. Prints `{pruned,expired,skipped}`. Does nothing when the Herdr window does not answer |
+| `hws find [TEXT...]` | Retired throwaways, newest close first. TEXT must match every word in the name, a session title, a last prompt or an artifact title |
+| `hws reopen ID` | Opens a retired throwaway in a new space, with one tab per session running `claude --resume`, and removes its record |
 
 ## Delivery on Done
 
@@ -115,6 +119,44 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 3. `hws` moves the bundle to the artifact store and rewrites paths inside `prompt.md` to the new location.
 4. For a glued surface whose terminal is live, `hws` runs `hc send T "<prompt.md text>"`, then `herdr-app do pane.close --pane P`, then `herdr-app do pane.focus --terminal T`.
 5. For standalone, or a terminal that ended, `hws` records the artifact and prints `{"standalone":true,"artifact":"...","link":"@..."}`. The host then shows Open terminal and Copy link.
+
+## Temporary throwaways
+
+Throwaways close themselves when idle and stay findable afterwards. `prune` does the work, and the sidebar's `hws list` runs it every 60 seconds.
+
+| Stage | When | Effect |
+|---|---|---|
+| Expire | 24 hours after the last activity | The space closes and a retired record is written |
+| Purge | 30 days after the close | Artifacts under the state root go to the Trash and the record goes. Kept artifacts and transcripts stay |
+
+Last activity is the newest of `createdAt` and the modified time of each session's transcript, `<claude home>/projects/<folder with symbols as dashes>/<sessionId>.jsonl`. The Claude home is `CLAUDE_CONFIG_DIR` or `~/.claude`.
+
+Expiry skips a throwaway in any of these cases.
+
+- It is the selected space, or the window does not report a selected space.
+- A listed agent's status is anything but idle. `done` means an answer nobody has seen.
+- A listed terminal without an agent is running something other than a shell.
+- A flipped agent's status is anything but idle.
+- A surface has its own window open.
+
+Every close of a throwaway writes the record, whether by expiry, `hws close` or Herdr's own UI. A throwaway with no transcript and no artifacts has no record. `hws close --trash` sets `discarded` on the manifest, which suppresses the record even if the closing process ends with the space.
+
+```json
+{
+  "version": 1,
+  "id": "spc...",
+  "name": "throwaway-1c26",
+  "folder": "/Users/me/Projects",
+  "createdAt": 1794126748609,
+  "closedAt": 1794226748609,
+  "sessions": [{ "sessionId": "uuid", "activeAt": 1794200000000, "title": "Fix login", "lastPrompt": "why does login fail" }],
+  "artifacts": []
+}
+```
+
+`sessions` is newest first. `title` and `lastPrompt` come from undocumented transcript lines, `ai-title` and `last-prompt`. When `last-prompt` has no text, `lastPrompt` is the newest typed user message, up to 2,000 characters.
+
+The launcher's Find throwaway dialog calls `hws find -- TEXT` as you type and `hws reopen ID` on a row.
 
 ## Host environment
 

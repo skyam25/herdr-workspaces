@@ -170,7 +170,7 @@ test('prune removes manifests whose space is gone', (t) => {
   const gone = box.app('gone');
   const kept = box.app('kept');
   box.setState({ spaces: box.state().spaces.filter((item) => item.id !== gone.id) });
-  assert.deepEqual(box.json(['prune']), { pruned: [gone.id], skipped: false });
+  assert.deepEqual(box.json(['prune']), { pruned: [gone.id], expired: [], skipped: false });
   assert.equal(existsSync(join(box.root, 'workspaces', gone.id)), false);
   assert.ok(box.manifest(kept.id));
 });
@@ -179,7 +179,7 @@ test('prune does nothing when the window does not answer', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   box.setState({ lsFails: true });
-  assert.deepEqual(box.json(['prune']), { pruned: [], skipped: true });
+  assert.deepEqual(box.json(['prune']), { pruned: [], expired: [], skipped: true });
   assert.ok(box.manifest(manifest.id));
 });
 
