@@ -1,0 +1,14 @@
+{
+  "name": "herdr-workspaces",
+  "description": "Local marketplace for the Herdr Workspaces plugin.",
+  "owner": {
+    "name": "skyam25"
+  },
+  "plugins": [
+    {
+      "name": "herdr-workspaces",
+      "source": "./plugin",
+      "description": "Makes each Claude session aware of its Herdr workspace and how to ask the user for input through a surface."
+    }
+  ]
+}

@@ -63,6 +63,8 @@ import { dayLabel, dayOf } from "./days.js";
 import { CallScreen } from "./call-screen.js";
 import { on as addonOn } from "./addons.js";
 import { note } from "./usage.js";
+import { statusLines } from "./statusline.js";
+import { insertedText, isImageNames, namesMatch } from "./clipboard.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
 const PAGE = 200;
@@ -71,6 +73,7 @@ const PAGE = 200;
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
 const COLUMN = 760;
+const CLI_STATUS_MS = 3000;
 const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
@@ -297,6 +300,17 @@ export default class Chat extends View {
         cx.spawn(async (cx) => { const f = await attach.textFile(pasted); if (f) { this.addFiles([f]); this.saveSoon(cx); cx.notify(); } });
         return;
       }
+      // Finder pastes a copied file's name as text, so a matching name becomes an attachment.
+      const inserted = now.length - was.length > 1 ? insertedText(was, now) : "";
+      if (isImageNames(inserted)) cx.spawn(async (cx) => {
+        const got = await attach.fromClipboard().catch(() => []);
+        if (!namesMatch(inserted, got) || this.box.value() !== now) return;
+        this.box.set_value(was);
+        this.lastValue = was;
+        this.addFiles(got);
+        this.saveSoon(cx);
+        cx.notify();
+      });
       // Copied files pasted as text (file:// lines) become attachments.
       const v = this.box.value();
       if (/^file:\/\/\S/m.test(v)) {
@@ -435,6 +449,7 @@ export default class Chat extends View {
       const rows = [...this.helpers(), ...this.jobs()];
       if (this.status() === "working" || rows.some((r) => Date.now() - (r.at ?? 0) < 61000) || (rows.length && ticks % 30 === 0)) cx.notify();
     });
+    cx.timer.every(CLI_STATUS_MS, (cx) => this.readCliStatus(cx));
     // An Assistant's chat keeps its tasks current for their news lines (newsLines()): herdr-task's own
     // statuses, the same as the Tasks panel's and the news it sends.
     cx.timer.every(8000, (cx) => {
@@ -3986,6 +4001,37 @@ export default class Chat extends View {
           : this.round("chat-send", "mods/hws-chat/send.svg", t, can ? "solid" : "off", can ? (cx) => this.send(cx) : null)))));
   }
 
+  // Reads the CLI's status lines while this chat's tab is showing.
+  readCliStatus(cx) {
+    const addr = this.addr;
+    if (!addr || !this.kind || this.cliStatusReading || this.call || this.status() === "blocked") return;
+
+    const tab = panes().find((p) => p.pane === this.myPane())?.tab;
+    if (!tab || tab !== focused()?.tab) return;
+
+    this.cliStatusReading = true;
+    cx.spawn(async (cx) => {
+      try {
+        const screen = (await hc(["read", addr]).catch(() => null))?.stdout;
+        const lines = screen === undefined ? null : statusLines(screen, this.kind);
+        if (!lines || addr !== this.addr) return;
+        if (addr === this.cliStatusAddr && JSON.stringify(lines) === JSON.stringify(this.cliStatusLines)) return;
+        this.cliStatusAddr = addr;
+        this.cliStatusLines = lines;
+        cx.notify();
+      } finally {
+        this.cliStatusReading = false;
+      }
+    });
+  }
+
+  cliStatus(t) {
+    if (this.cliStatusAddr !== this.addr || !this.cliStatusLines?.length) return null;
+    return v_flex().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(20).pt(6).gap(1)
+      .font_family(settings().font_family ?? "JetBrains Mono").text_size(11.5).text_color(t.muted)
+      .children(this.cliStatusLines.map((line, i) => div().id(`chat-cli-status-${i}`).w_full().truncate().child(line)));
+  }
+
   // ---- alerts ---------------------------------------------------------------------------------
 
   // While its terminal is parked behind this chat, Herdr doesn't see the agent: no sound, no
@@ -4324,6 +4370,7 @@ export default class Chat extends View {
       .child(this.queued(t) ?? div())
       .child(this.background(t, st, cx) ?? div())
       .child(this.composer(t, st))
+      .child(this.cliStatus(t) ?? div())
       .child(div().flex_none().h(12));
   }
 

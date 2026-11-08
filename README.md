@@ -19,7 +19,8 @@ Interfaces are in `docs/CONTRACT.md`.
 ln -s "$PWD/bin/hws" ~/.local/bin/hws
 sh mods/install.sh
 (cd surface/app && pnpm build)
-claude --plugin-dir "$PWD/plugin"
+claude plugin marketplace add "$PWD"
+claude plugin install herdr-workspaces@herdr-workspaces
 ```
 
 `mods/keys.example.json` lists suggested key bindings for `~/.config/herdr-app/keys.json`.
@@ -36,6 +37,7 @@ claude --plugin-dir "$PWD/plugin"
 
 ## Using it
 
+- The Workspaces section in the sidebar lists workspaces and opens the launcher with its +.
 - Open the launcher to pick a normal terminal, a workspace, a throwaway, or a standalone board or note.
 - A surface opens with `hws surface open --type board --title X --terminal "$HC_TERMINAL_ID"`.
 - Done delivers to the terminal that opened the surface and closes the pane. The work stays in `.herdr-workspace/` inside the workspace folder.

@@ -1,11 +1,13 @@
 // The current workspace: what it is, who is working, what is open and what it made.
 // One copy runs per use. A pane shows the panel, a dialog copy shows the close
-// decision or Promote, and a `mod.open` copy toggles the pane and closes itself.
+// decision or Promote, a `mod.open` copy toggles the pane and closes itself, and
+// a layout block with `view: "sidebar"` shows the Workspaces section.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, panes, spaces, focused, props, exec, theme, run, openOverlay, closeOverlay, watchFolder } from "herdr";
 import { hws, message, submitDialog, openWorkspaceForm, KINDS, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
+import { startSidebar, drawSidebar } from "./sidebar.js";
 
 const MOD = "hws-panel";
 const REFRESH_MS = 20000;
@@ -36,6 +38,8 @@ export default class Panel extends View {
 
     if (this.view === "toggle") {
       cx.spawn(async () => this.toggle());
+    } else if (this.view === "sidebar") {
+      this.sidebar = startSidebar(cx);
     } else if (this.view === "promote") {
       const submit = (cx) => this.promote(cx);
       makeInput(this, "name", { value: p.name ?? "", placeholder: "Untitled workspace", submit });
@@ -581,6 +585,7 @@ export default class Panel extends View {
   render(cx) {
     const t = theme();
     if (this.view === "toggle") return div();
+    if (this.view === "sidebar") return drawSidebar(this.sidebar);
     if (this.view === "decide") return this.renderDecide(t);
     if (this.view === "promote") return this.renderPromote(t);
     if (this.view === "instructions") return this.renderInstructions(t);

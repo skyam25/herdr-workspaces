@@ -5,13 +5,30 @@
 
 import { exec, hc, appHome } from "herdr";
 import * as fs from "fs/promises";
+import { MAC_CLIPBOARD, parseMacClipboard } from "./clipboard.js";
 
 const IMAGE = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i;
 const base = (p) => String(p).split("/").filter(Boolean).pop() ?? p;
 export const isImage = (p) => IMAGE.test(p);
 
-// The clipboard's files or image, here (Wayland). [{ path, name, image, temp }] or [].
+let macOS = null;
+const isMac = async () => (macOS ??= (await exec("uname", []).catch(() => null))?.stdout?.trim() === "Darwin");
+
+const pastedName = (ext) => `pasted-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "")}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+
+async function fromMacClipboard() {
+  const dir = `${appHome()}/data/chat-attach`;
+  await exec("mkdir", ["-p", dir]);
+  const name = pastedName("png");
+  const r = await exec("osascript", ["-l", "JavaScript", "-e", MAC_CLIPBOARD, `${dir}/${name}`]);
+  const got = parseMacClipboard(r.stdout);
+  if (got?.files) return paths(got.files);
+  return got?.image ? [{ path: got.image, name, image: true, temp: true }] : [];
+}
+
+// The clipboard's files or image, here. [{ path, name, image, temp }] or [].
 export async function fromClipboard() {
+  if (await isMac()) return fromMacClipboard();
   const types = (await exec("sh", ["-c", "wl-paste --list-types 2>/dev/null"]).catch(() => null))?.stdout?.split("\n") ?? [];
   if (types.includes("text/uri-list")) {
     const r = await exec("sh", ["-c", "wl-paste -n -t text/uri-list 2>/dev/null"]);
@@ -28,12 +45,21 @@ export async function fromClipboard() {
 // Dropped or pasted file paths as attachments.
 export const paths = (list) => list.filter(Boolean).map((p) => ({ path: p, name: base(p), image: isImage(p), temp: false }));
 
+// An agent reads an image only from a path without spaces, and screenshot names have them.
+async function spacelessPath(f) {
+  if (!f.image || !/\s/.test(f.path)) return f.path;
+  const dir = `${appHome()}/data/chat-attach`;
+  const name = `pasted-${Date.now().toString(36)}-${base(f.path).replace(/[^\w.-]+/g, "-")}`;
+  const r = await exec("sh", ["-c", 'mkdir -p "$1" && cp "$2" "$1/$3" && echo ok', "x", dir, f.path, name]);
+  return r.stdout.trim() === "ok" ? `${dir}/${name}` : f.path;
+}
+
 // The message's file lines: each file's path where the agent is. For another machine, a copy
 // lands beside the agent's terminal.
 export async function deliver(files, addr, machine) {
   const out = [];
   for (const f of files) {
-    if (!machine) { out.push(f.path); continue; }
+    if (!machine) { out.push(await spacelessPath(f)); continue; }
     const r = await hc(["put", addr, f.path, "--json"]);
     let landed = null;
     try { landed = JSON.parse(r.stdout || "{}").path ?? null; } catch { landed = r.stdout.trim() || null; }
@@ -59,7 +85,7 @@ const VIEW = `
 d="$1"; shift; mkdir -p "$d"
 for p in "$@"; do
   [ -f "$p" ] || continue
-  s=$(magick identify -format '%w %h' "$p[0]" 2>/dev/null) || s=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=' ' "$p" 2>/dev/null)
+  s=$(magick identify -format '%w %h' "$p[0]" 2>/dev/null) || s=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=' ' "$p" 2>/dev/null) || s=$(sips -g pixelWidth -g pixelHeight "$p" 2>/dev/null | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{if(w&&h)print w, h}')
   [ -n "$s" ] || continue
   n=$(printf '%s' "$p" | cksum | cut -d' ' -f1)-$(printf '%s' "\${p##*/}" | tr -c 'A-Za-z0-9._-' '_')
   [ -f "$d/$n" ] || ln -f "$p" "$d/$n" 2>/dev/null || cp "$p" "$d/$n" 2>/dev/null || continue

@@ -1,6 +1,6 @@
 # Next steps
 
-Handoff for the next session. Written 2026-11-08 at commit `0ebd2b0`.
+Handoff for the next session. Updated 2026-11-08.
 
 Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
@@ -9,8 +9,8 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Part | State | Tests |
 |---|---|---|
 | `hws` CLI | Built | 81 pass |
-| Herdr mods | Built and installed | 47 simulated pass |
-| Claude plugin | Built, not enabled | 22 pass |
+| Herdr mods | Built and installed | 69 simulated pass |
+| Claude plugin | Built, enabled for every session | 22 pass |
 | Surface | Built | 1,209 unit tests pass, pty checks pass |
 
 ## Proven in the real Herdr window
@@ -56,8 +56,11 @@ Drawing lag decides whether Pixel stays. Herdr app reports itself as Ghostty, an
 
 ### 2. Turn it on
 
-- [ ] Add the bindings from `mods/keys.example.json` to `~/.config/herdr-app/keys.json`.
-- [ ] Enable the plugin for every session. Today it needs `claude --plugin-dir`.
+- [x] Add the bindings from `mods/keys.example.json` to `~/.config/herdr-app/keys.json`.
+- [x] Enable the plugin for every session, through the local marketplace in `.claude-plugin/`.
+- [x] Add a Workspaces section to the sidebar of the `hws` layout.
+- [ ] Click the section's +, New workspace, a row and the panel button with a real pointer.
+- [x] Make the `keys.json` test in `mods/test/simulate.test.mjs` independent of the real file.
 
 ### 3. Close the input gaps
 
@@ -99,8 +102,10 @@ The audit found these from reading code.
 ### 8. Finish the chat flip
 
 - [ ] Test the composer, Send and the model picker with a real keyboard and pointer.
-- [ ] Add the `PermissionRequest` hook so permissions and questions arrive as cards. Today the chat shows Needs you.
-- [ ] Make attach and image paste work on macOS. The imported code uses `wl-paste` and a Linux file picker.
+- [ ] Add the `PermissionRequest` hook so permissions and questions arrive as cards. `hws-chat` handles the asks, but `ask-hook.sh` and its registration are missing, so the chat shows Needs you.
+- [ ] Press Cmd+V on a real screenshot and confirm the tile appears. The clipboard reader is tested, the keypress is not.
+- [ ] Make the attach button work on macOS. It still uses a Linux file picker.
+- [ ] Find Codex 0.167's session log. The app-server owns the file, so the chat shows "Can't find this conversation".
 - [ ] Show flipped agents in the sidebar's Agents list and tab status. A parked agent drops out of both.
 - [ ] Make `hws surface open` work for a flipped agent. It fails today because the agent has no pane.
 - [ ] Revisit the iOS shell around a web client.

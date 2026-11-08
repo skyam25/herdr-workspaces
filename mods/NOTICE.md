@@ -10,3 +10,5 @@
 - Mod names and asset paths carry the `hws-` prefix.
 - `hws-chat/addons.js` turns off voice, reactions, artifacts, task browser, Autopilot, machine sync and usage insights.
 - `hws-pane` drops Autopilot and Assistant slots and runs the parked-agent sweep.
+- `hws-chat` shows the CLI's status lines under the box, in `statusline.js`.
+- `hws-chat` reads the macOS clipboard and accepts Finder's copied files, in `clipboard.js` and `attach.js`.

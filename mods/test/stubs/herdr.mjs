@@ -22,4 +22,4 @@ export const shared = () => undefined;
 export const setShared = () => null;
 export const notify = () => null;
 export const settings = () => ({});
-export const layout = () => null;
+export const layout = () => H().layout ?? null;

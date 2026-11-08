@@ -151,6 +151,19 @@ Binaries resolve from `HWS_HERDR_APP`, default `herdr-app`, and `HWS_HC`, defaul
 
 `herdr-app do` prints `{"error":"..."}` and exits 1 on failure.
 
+## Workspaces sidebar section
+
+The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"sidebar"}`.
+
+| Action | Result |
+|---|---|
+| Heading + | `mod.open` for `hws-new` |
+| New workspace row, shown when there are none | Opens the workspace form |
+| Workspace row | `space.select` for that space |
+| Panel button on the current workspace | `mod.open` for `hws-panel` |
+
+The section reloads with `hws list` when the spaces change and every 60 seconds. It sizes its block with `layout.resize`, up to five rows, and shows only the + when the sidebar is narrower than 160px.
+
 ## Chat and Terminal flip
 
 The `hws` layout uses the `hws-pane` header. Claude Code and Codex panes get a Chat | Terminal switch.

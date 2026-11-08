@@ -18,7 +18,7 @@ Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.m
 | Task | Command |
 |---|---|
 | CLI tests | `npm test` |
-| Mod tests | `cd mods && node --import ./test/register.mjs --test test/simulate.test.mjs test/pane.test.mjs` |
+| Mod tests | `cd mods && node --import ./test/register.mjs --test test/simulate.test.mjs test/pane.test.mjs test/statusline.test.mjs test/clipboard.test.mjs` |
 | Mod states | `node mods/test/forced-check.mjs` |
 | Plugin tests | `cd plugin && node --test tests/*.test.mjs` |
 | Surface tests | `cd surface/app && pnpm test && pnpm compile` |

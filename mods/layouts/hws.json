@@ -47,6 +47,20 @@
           "type": "column",
           "children": [
             {
+              "id": "workspaces",
+              "type": "block",
+              "size": {
+                "px": 69
+              },
+              "min": 31,
+              "content": {
+                "mod": "hws-panel",
+                "props": {
+                  "view": "sidebar"
+                }
+              }
+            },
+            {
               "id": "spaces",
               "type": "block",
               "size": {

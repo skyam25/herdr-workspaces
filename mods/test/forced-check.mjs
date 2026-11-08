@@ -2,7 +2,7 @@
 // state forced on and runs the real check on it, so a bad builder call in a dialog fails.
 // Copies live in test/.forced and are removed afterwards.
 
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -47,6 +47,9 @@ const VARIANTS = [
   { mod: "hws-panel", name: "panel-confirm", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.isConfirmingClose = false;", "this.isConfirmingClose = true;").replace("this.note = null;", 'this.note = { text: "Link copied.", isError: false };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-problem", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.problem = null;", 'this.problem = "hws failed";') },
+  { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null };") },
+  { mod: "hws-panel", name: "sidebar-empty", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [], problem: null };") },
+  { mod: "hws-panel", name: "sidebar-problem", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", 'this.sidebar = { workspaces: null, problem: "hws failed" };') },
   { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('dialogRoot(t, "hws-new-form")', 'dialogRoot(t, "hws-new-form").no_such_builder()') },
 ];
 
@@ -57,6 +60,7 @@ for (const v of VARIANTS) {
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/hws.js`, `${dir}/hws.js`);
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
+  if (existsSync(`${root}${v.mod}/sidebar.js`)) cpSync(`${root}${v.mod}/sidebar.js`, `${dir}/sidebar.js`);
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");
   if (v.patch) source = v.patch(source);
   writeFileSync(`${dir}/main.js`, `const __props = () => (${JSON.stringify(v.props)});\n${v.header ?? ""}${source}`);

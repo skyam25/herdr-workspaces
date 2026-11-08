@@ -529,9 +529,61 @@ test("mods keep the View lifecycle names to themselves", () => {
   for (const file of ["../hws-new/main.js", "../hws-panel/main.js"]) assert.equal(/^  (async )?close\(/m.test(read(file)), false, file);
 });
 
-test("keys.example.json uses chords free in the user's keys.json", () => {
+test("keys.example.json avoids the chords Herdr binds", () => {
   const example = JSON.parse(read("../keys.example.json"));
-  const mine = JSON.parse(readFileSync(`${process.env.HOME}/.config/herdr-app/keys.json`, "utf8"));
-  const taken = new Set(Object.values(mine).flatMap((section) => Object.keys(section)));
+  const herdr = JSON.parse(read("./fixtures/herdr-keys.json"));
+  const taken = new Set(Object.values(herdr).flatMap((section) => Object.keys(section)));
   for (const chord of Object.keys(example.global)) assert.equal(taken.has(chord), false, chord);
+});
+
+// Sidebar section
+
+const SIDEBAR_LAYOUT = { id: "root", children: [{ id: "sidebar", size: { px: 268 }, children: [{ id: "workspaces", size: { px: 69 } }] }] };
+
+test("the empty sidebar section offers New workspace and the launcher", async () => {
+  const H = setup({ hws: { list: [] } });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.match(m.text(), /Workspaces.*New workspace/);
+  await m.click("sidebar-new-workspace");
+  assert.equal(H.overlays[0].props.step, "workspace");
+  await m.click("sidebar-launcher");
+  assert.deepEqual(H.runs.at(-1), { name: "mod.open", args: { name: "hws-new" } });
+});
+
+test("sidebar rows switch spaces, and only the current workspace toggles the panel", async () => {
+  const other = { ...THROWAWAY, id: "spc2" };
+  const H = setup({ hws: { list: [APP, other] }, spaces: [{ id: "spc1", active: true, tabs: [] }, { id: "spc2", active: false, tabs: [] }] });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.match(m.text(), /checkout demo.*scratch.*Throwaway/);
+  await m.click("sidebar-workspace-spc2");
+  assert.deepEqual(H.runs.at(-1), { name: "space.select", args: { id: "spc2" } });
+  await m.click("sidebar-panel");
+  assert.deepEqual(H.runs.at(-1), { name: "mod.open", args: { name: "hws-panel" } });
+  assert.equal(H.runs.filter((r) => r.name === "mod.open").length, 1);
+});
+
+test("the sidebar section sizes its block to its rows and hides them when narrow", async () => {
+  const H = setup({ hws: { list: [APP, THROWAWAY] }, layout: structuredClone(SIDEBAR_LAYOUT) });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 99 } });
+  H.layout.children[0].children[0].size.px = 99;
+  H.runs.length = 0;
+  await m.fireTimer(1000);
+  assert.deepEqual(H.runs, []);
+  H.layout.children[0].size.px = 76;
+  await m.fireTimer(1000);
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 31 } });
+  assert.equal(m.has("sidebar-workspace-spc1"), false);
+});
+
+test("the sidebar section reloads when the spaces change and shows a failure", async () => {
+  const H = setup({ hws: { list: [] } });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  const before = hwsCalls(H).length;
+  await m.fireTimer(1000);
+  assert.equal(hwsCalls(H).length, before);
+  H.hws.list = { fail: "hws broke" };
+  H.spaces = [...H.spaces, { id: "spc2", tabs: [] }];
+  await m.fireTimer(1000);
+  assert.match(m.text(), /hws broke/);
 });
