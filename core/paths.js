@@ -21,6 +21,11 @@ export function manifestPath(id) {
   return join(workspaceDir(id), 'workspace.json');
 }
 
+// A remote space id has a machine prefix with a slash, so the name encodes it.
+export function todosPath(spaceId) {
+  return join(stateRoot(), 'todos', `${encodeURIComponent(spaceId)}.json`);
+}
+
 export function surfaceDataDir(workspaceId, surfaceId) {
   return join(workspaceDir(workspaceId), 'surfaces', surfaceId);
 }

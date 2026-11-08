@@ -74,10 +74,14 @@ if (action === 'tab.new') {
 }
 
 if (action === 'pane.split') {
-  const tab = state.spaces
-    .flatMap((space) => space.tabs)
-    .find((item) => item.terminals.some((terminal) => terminal.pane === flags.pane));
+
+  // `ls` hides chat panes, so chatPanes maps each one to its tab.
+  const tabs = state.spaces.flatMap((space) => space.tabs);
+  const tab =
+    tabs.find((item) => item.terminals.some((terminal) => terminal.pane === flags.pane)) ??
+    tabs.find((item) => item.id === state.chatPanes?.[flags.pane]);
   if (!tab) fail(`no pane ${flags.pane}`);
+
   const n = nextId();
   tab.terminals.push({ terminal: `t${n}`, pane: `p${n}`, status: null, app: null, sub_agents: [] });
   save();

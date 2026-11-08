@@ -1,5 +1,5 @@
 {
-  "description": "Register the session with its Herdr workspace and tell Claude which workspace it is in.",
+  "description": "Register the session with its Herdr workspace, tell Claude which workspace it is in, and show a flipped agent's permission requests in its chat.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,17 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
             "timeout": 6
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/ask-hook.sh\"",
+            "timeout": 1830
           }
         ]
       }

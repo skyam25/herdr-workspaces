@@ -128,6 +128,103 @@ test('surface open rejects bad usage and unknown terminals', (t) => {
   assert.equal(box.hws(['surface', 'open', '--type', 'board', '--terminal', 't404']).code, 1);
 });
 
+// Parks the owner behind a chat pane, so `ls` no longer lists it.
+function flipToChat(box, manifest, chatPane = 'pchat') {
+  const [{ terminal: owner, tabId }] = manifest.terminals;
+  const { spaces, hc } = box.state();
+  const ownerTab = spaces.flatMap((item) => item.tabs).find((item) => item.id === tabId);
+  ownerTab.terminals = ownerTab.terminals.filter((item) => item.terminal !== owner);
+  box.setState({
+    spaces,
+    chatPanes: { [chatPane]: tabId },
+    hc: { ...hc, [owner]: { labels: { 'herdr.chat': chatPane } } },
+  });
+  return { owner, chatPane };
+}
+
+test('surface open splits beside the chat pane of a flipped agent', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const { owner, chatPane } = flipToChat(box, manifest);
+
+  const surface = box.json([
+    'surface', 'open', '--type', 'board', '--terminal', owner, '--beside-pane', chatPane, '--space', manifest.id,
+  ]);
+
+  const [call] = box.actions();
+  assert.deepEqual(call.slice(0, 8), ['herdr-app', 'do', 'pane.split', '--direction', 'right', '--pane', chatPane, '--argv']);
+  assert.equal(hostEnvOf(call).HWS_WORKSPACE_ID, manifest.id);
+  assert.equal(surface.workspace, manifest.id);
+  const [record] = box.manifest(manifest.id).surfaces;
+  assert.equal(record.terminal, owner);
+  assert.equal(record.pane, surface.pane);
+});
+
+test('surface open refuses a pane that does not match the herdr.chat label', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const { owner } = flipToChat(box, manifest);
+  const notFlipped = box.app('other').terminals[0].terminal;
+
+  for (const terminal of [owner, notFlipped]) {
+    const result = box.hws([
+      'surface', 'open', '--type', 'board', '--terminal', terminal, '--beside-pane', 'pwrong', '--space', manifest.id,
+    ]);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout + result.stderr, new RegExp(`terminal ${terminal} is not flipped to chat pane pwrong`));
+  }
+  assert.deepEqual(box.actions(), []);
+  assert.deepEqual(box.manifest(manifest.id).surfaces, []);
+});
+
+test('surface open requires --beside-pane and --space together', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const { owner, chatPane } = flipToChat(box, manifest);
+  const open = (extra) => box.hws(['surface', 'open', '--type', 'board', ...extra]);
+
+  assert.equal(open(['--terminal', owner, '--beside-pane', chatPane]).code, 2);
+  assert.equal(open(['--terminal', owner, '--space', manifest.id]).code, 2);
+  assert.equal(open(['--standalone', '--beside-pane', chatPane, '--space', manifest.id]).code, 2);
+  assert.deepEqual(box.actions(), []);
+});
+
+test('done focuses the chat pane when the agent flipped after the surface opened', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', owner]);
+  const { chatPane } = flipToChat(box, manifest);
+  const bundle = box.bundle('bundle-flipped');
+  box.clearCalls();
+
+  box.json(['surface', 'done', '--id', surface.id, '--bundle', bundle]);
+
+  assert.deepEqual(box.actions().slice(1), [
+    ['herdr-app', 'do', 'pane.close', '--pane', surface.pane],
+    ['herdr-app', 'do', 'pane.focus', '--pane', chatPane],
+  ]);
+});
+
+test('done focuses the terminal when the agent flipped back after the surface opened', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const { owner, chatPane } = flipToChat(box, manifest);
+  const surface = box.json([
+    'surface', 'open', '--type', 'board', '--terminal', owner, '--beside-pane', chatPane, '--space', manifest.id,
+  ]);
+  box.setState({ hc: { [owner]: { labels: { 'herdr.chat': '' } } } });
+  const bundle = box.bundle('bundle-unflipped');
+  box.clearCalls();
+
+  box.json(['surface', 'done', '--id', surface.id, '--bundle', bundle]);
+
+  assert.deepEqual(box.actions().slice(1), [
+    ['herdr-app', 'do', 'pane.close', '--pane', surface.pane],
+    ['herdr-app', 'do', 'pane.focus', '--terminal', owner],
+  ]);
+});
+
 test('done on a glued surface moves the bundle, sends, closes and focuses', (t) => {
   const box = sandbox(t);
   const manifest = box.app();

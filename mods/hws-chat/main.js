@@ -53,6 +53,17 @@ import { cleanCommand } from "./core/clean-env.js";
 import * as choices from "./settings.js";
 import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
+// Prints each chosen file's POSIX path on its own line. Error -128 means the person cancelled.
+const PICK_FILES_MAC = [
+  "activate",
+  'set picked to choose file with prompt "Attach files" with multiple selections allowed',
+  'set out to ""',
+  "repeat with f in picked",
+  "set out to out & POSIX path of f & linefeed",
+  "end repeat",
+  "return out",
+].flatMap((line) => ["-e", line]);
+
 // Writing down after Done this long says it's taking longer than usual (SHEP-63).
 const DICT_SLOW = 5000;
 import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD, STACK as TASKS_STACK, BODY as THREAD_BODY, CHAT as THREAD_CHAT, TERM as THREAD_TERM, FILES as THREAD_FILES, CHANGES as THREAD_CHANGES, PR as THREAD_PR, BROWSER as THREAD_BROWSER } from "./panel.js";
@@ -474,6 +485,7 @@ export default class Chat extends View {
     this.reactReqAt = shared("chat.reactreq")?.at ?? null;
     this.sendReqAt = shared("chat.sendreq")?.at ?? null;
     this.startReqAt = shared("chat.startreq")?.at ?? null;
+    this.attachReqAt = shared("hws-chat.attach")?.at ?? 0;
     // The working line's clock, once a second while the agent works; the rows over the box (its
     // subagents, its background shells) count seconds for their first minute, then minutes.
     let ticks = 0;
@@ -3885,13 +3897,36 @@ export default class Chat extends View {
     if (this.pinned) this.stick = true;
   }
 
-  // The desktop's own file picker (pick-files.py, xdg-desktop-portal): the chosen files join
-  // the message as tiles, as a drop or a paste makes them.
+  // Opens the + menu. A surface runs on this computer, so a remote agent gets Attach alone,
+  // as does a chat with no agent or pane to act on.
+  openActions(cx) {
+    const pane = this.addr && !this.addr.includes("/") ? this.myPane() : null;
+    if (!pane) { this.pickFiles(cx); return; }
+    const tab = panes().find((p) => p.pane === pane)?.tab;
+    const space = spaces().find((s) => s.tabs.some((c) => c.id === tab))?.id;
+    const lastReply = [...(this.conv?.items ?? [])].reverse().find((x) => x.kind === "agent" && x.text)?.text;
+    openOverlay({ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: this.addr, chat: true, pane, space, ...(lastReply ? { lastReply } : {}) } });
+  }
+
+  // The + menu's Attach file sets shared "hws-chat.attach" = { pane, at }.
+  takeAttachRequest(mine, cx) {
+    const req = shared("hws-chat.attach");
+    if (!req || !mine || req.pane !== mine || req.at <= this.attachReqAt) return;
+    this.attachReqAt = req.at;
+    cx.timer.after(0, (cx) => this.pickFiles(cx));
+  }
+
+  // The desktop's own file picker (osascript on macOS, pick-files.py and xdg-desktop-portal
+  // elsewhere). The chosen files join the message as tiles, as a drop or a paste makes them.
   pickFiles(cx) {
     cx.spawn(async (cx) => {
-      const r = await exec("sh", ["-c", 'P=/usr/bin/python3; [ -x "$P" ] || P=python3; exec "$P" -I "$1"', "x", `${appHome()}/mods/hws-chat/pick-files.py`]).catch(() => null);
+      const isMac = (await exec("uname", []).catch(() => null))?.stdout?.trim() === "Darwin";
+      const r = await (isMac
+        ? exec("osascript", PICK_FILES_MAC)
+        : exec("sh", ["-c", 'P=/usr/bin/python3; [ -x "$P" ] || P=python3; exec "$P" -I "$1"', "x", `${appHome()}/mods/hws-chat/pick-files.py`])).catch(() => null);
+      const cancelled = isMac && Boolean(r?.stderr?.includes("-128"));
       const list = (r?.stdout ?? "").split("\n").filter(Boolean);
-      if (r && r.code !== 0) this.error = "Couldn't open the file picker.";
+      if (r && r.code !== 0 && !cancelled) this.error = "Couldn't open the file picker.";
       if (!list.length) { cx.notify(); return; }
       this.addInline(attach.paths(list));
       this.saveSoon(cx);
@@ -4084,7 +4119,7 @@ export default class Chat extends View {
       .when(rec !== "idle", (el) => el.child(this.recordingRow(t)))
       .when(rec === "idle", (el) => el.child(h_flex().h(36).pl(6).pr(6).gap(4).items_center()
         // Attach on the left, as ChatGPT and Claude have it: the desktop's file picker.
-        .child(this.round("chat-attach", "mods/hws-chat/plus.svg", t, "ghost", (cx) => this.pickFiles(cx)))
+        .child(this.round("chat-attach", "mods/hws-chat/plus.svg", t, "ghost", (cx) => this.openActions(cx)))
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? "" : ""))
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
@@ -4237,6 +4272,7 @@ export default class Chat extends View {
     this.wasFocused = paneFocused;
     this.hadBox = showsBox;
     this.paneFocused = paneFocused;
+    this.takeAttachRequest(mine, cx);
     // The sidebar's Shepherdr row (mods/spaces-chat voiceRow, SHEP-105) starts, mutes and ends the call it runs here
     // through shared "chat.callreq" = { pane, at, action: "start" | "mute" | "end" } (none: start or end).
     const req = shared("chat.callreq");

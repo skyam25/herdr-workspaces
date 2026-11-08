@@ -8,9 +8,9 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
 | Part | State | Tests |
 |---|---|---|
-| `hws` CLI | Built | 81 pass |
-| Herdr mods | Built and installed | 69 simulated pass |
-| Claude plugin | Built, enabled for every session | 22 pass |
+| `hws` CLI | Built | 109 pass |
+| Herdr mods | Built and installed | 204 simulated pass |
+| Claude plugin | Built, enabled for every session | 50 pass |
 | Surface | Built | 1,209 unit tests pass, pty checks pass |
 
 ## Proven in the real Herdr window
@@ -102,13 +102,25 @@ The audit found these from reading code.
 ### 8. Finish the chat flip
 
 - [ ] Test the composer, Send and the model picker with a real keyboard and pointer.
-- [ ] Add the `PermissionRequest` hook so permissions and questions arrive as cards. `hws-chat` handles the asks, but `ask-hook.sh` and its registration are missing, so the chat shows Needs you.
+- [x] Add the `PermissionRequest` hook so permissions and questions arrive as cards.
+- [ ] Confirm a real Claude session fires that hook and honours a card's answer. Only fakes have run it.
 - [ ] Press Cmd+V on a real screenshot and confirm the tile appears. The clipboard reader is tested, the keypress is not.
-- [ ] Make the attach button work on macOS. It still uses a Linux file picker.
+- [x] Make the attach button work on macOS.
 - [ ] Find Codex 0.167's session log. The app-server owns the file, so the chat shows "Can't find this conversation".
-- [ ] Show flipped agents in the sidebar's Agents list and tab status. A parked agent drops out of both.
-- [ ] Make `hws surface open` work for a flipped agent. It fails today because the agent has no pane.
+- [x] Show flipped agents in the sidebar's Agents list and tab status.
+- [x] Make `hws surface open` work for a flipped agent.
 - [ ] Revisit the iOS shell around a web client.
+
+### 9. Test the new UI homes by hand
+
+`docs/CONTRACT.md` describes these under UI homes.
+
+- [ ] Open the `+` menu from a Terminal pane and a Chat pane, and check its height.
+- [ ] Confirm Review a page opens after the macOS chooser takes focus.
+- [ ] Drag a to-do between columns. Nothing has confirmed hover and release order during a real press.
+- [ ] Add, edit, send and archive a to-do in the dialog.
+- [ ] Press Done on a surface opened from a flipped agent.
+- [ ] Count flipped agents in the status bar, and make `agent.next` and `agent.prev` reach them.
 
 ## State outside this repo
 
@@ -122,7 +134,7 @@ The audit found these from reading code.
 
 ## Agent Brief repo
 
-- The Herdr app detection fix is uncommitted on `main`, across 17 files. Tests pass, and it needs a commit and a rebuild.
+- The Herdr app detection fix is committed as `a71d5a5` and installed. Open sessions need `/reload-plugins` or a restart to report `hcTerminal`.
 - Branch `worktree-agent-af9944c917614d5bf` holds the Pixel spike.
 - Branch `worktree-agent-a16a8fa756df58c45` holds the first Brief mod.
 - Neither branch needs merging, because this repo now carries that work.

@@ -6,6 +6,7 @@ import { artifactStoreDir, linkFor, moveBundle } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import {
   act,
+  chatPaneOf,
   closePaneThenFocus,
   findTerminal,
   isTerminalAlive,
@@ -40,10 +41,31 @@ function gluedPlacement(live, terminal) {
   return { workspace: readManifest(found.space.id), pane: found.pane, space: found.space.id };
 }
 
+// A flipped agent has no pane, so its surface splits beside its chat pane.
+function flippedPlacement(terminal, chatPane, space) {
+  if (chatPaneOf(terminal) !== chatPane) {
+    throw new HwsError(`terminal ${terminal} is not flipped to chat pane ${chatPane}`);
+  }
+  return { workspace: readManifest(space), pane: chatPane, space };
+}
+
 // A standalone surface opens a tab in the selected space.
 function standalonePlacement() {
   const space = windowStatus()?.space ?? undefined;
   return { workspace: space ? readManifest(space) : null, pane: null, space };
+}
+
+function placementFor(live, terminal, flags) {
+  if (!terminal) return standalonePlacement();
+  if (flags['beside-pane']) return flippedPlacement(terminal, flags['beside-pane'], flags.space);
+  return gluedPlacement(live, terminal);
+}
+
+function assertBesideFlags(flags) {
+  if (Boolean(flags['beside-pane']) !== Boolean(flags.space)) {
+    throw new UsageError('use --beside-pane and --space together');
+  }
+  if (flags['beside-pane'] && flags.standalone) throw new UsageError('use --beside-pane or --standalone, not both');
 }
 
 function ownerTerminal(flags) {
@@ -56,10 +78,12 @@ function ownerTerminal(flags) {
 
 export function surfaceOpen(flags) {
   if (!SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
+  assertBesideFlags(flags);
   const terminal = ownerTerminal(flags);
+  if (terminal?.includes('/')) throw new HwsError(`surfaces run on this computer, and ${terminal} is on another machine`);
   const live = requireLive();
 
-  const placement = terminal ? gluedPlacement(live, terminal) : standalonePlacement();
+  const placement = placementFor(live, terminal, flags);
   const workspace = placement.workspace ?? ensureStandaloneManifest();
   const surfaceId = newId('s');
   const file = flags.type === 'board' ? '' : resolveFile(flags.file);
@@ -158,7 +182,12 @@ export async function surfaceDone(flags) {
     logDelivery(surface, error.message);
     return { data: { ...standalone, deliveryError: error.message } };
   }
-  await closePaneThenFocus(surface.pane, surface.terminal);
+
+  // The user may have flipped since the surface opened, so the label is read now.
+  const chatPane = chatPaneOf(surface.terminal);
+  if (chatPane) await closePaneThenFocus(surface.pane, chatPane, 'pane');
+  else await closePaneThenFocus(surface.pane, surface.terminal);
+
   return { data: { standalone: false, artifact: artifact.id, link, delivered: true } };
 }
 

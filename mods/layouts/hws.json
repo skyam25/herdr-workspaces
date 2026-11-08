@@ -79,7 +79,7 @@
               },
               "min": 90,
               "content": {
-                "mod": "agents"
+                "mod": "hws-agents"
               }
             }
           ]
@@ -112,7 +112,7 @@
           },
           "window_drag": true,
           "content": {
-            "mod": "tabs"
+            "mod": "hws-tabs"
           }
         },
         {
@@ -177,6 +177,26 @@
                       "type": "block",
                       "content": {
                         "mod": "changes"
+                      }
+                    },
+                    {
+                      "id": "tasks",
+                      "type": "block",
+                      "content": {
+                        "mod": "hws-work",
+                        "props": {
+                          "view": "tasks"
+                        }
+                      }
+                    },
+                    {
+                      "id": "outputs",
+                      "type": "block",
+                      "content": {
+                        "mod": "hws-work",
+                        "props": {
+                          "view": "outputs"
+                        }
                       }
                     }
                   ]

@@ -34,6 +34,24 @@ const __panes = () => [{ pane: "p1", terminal: "t13", tab: "tb1" }, { pane: "p9"
 const __spaces = () => [{ id: "spc1", machine: null, tabs: [{ id: "tb1", name: "Plan", status: "blocked" }, { id: "tb2", name: "Build", status: null }] }];
 `;
 
+function flipWorld(source) {
+  return source
+    .replaceAll("focused()", "__focused()").replaceAll("agents()", "__agents()").replaceAll("panes()", "__panes()")
+    .replaceAll("spaces()", "__spaces()").replaceAll("terminals()", "__terminals()");
+}
+
+const FLIP_HEADER = `
+const __focused = () => ({ space: "spc1", tab: "tb1", pane: "p9", terminal: null, cwd: "/w" });
+const __agents = () => [${JSON.stringify({ ...AGENT, pane: "p1", space_name: "demo", tab_name: "Plan", title: "", seq: 1, pinned: false })}];
+const __panes = () => [{ pane: "p1", terminal: "t13", tab: "tb1" }, { pane: "p9", terminal: null, tab: "tb2", mod: "hws-chat", title: "Chat", focused: true }];
+const __spaces = () => [{ id: "spc1", name: "demo", active: true, machine: null, tabs: [{ id: "tb1", name: "Plan", index: 1, active: true, status: "blocked" }, { id: "tb2", name: "Build", index: 2, active: false, status: null }] }];
+const __terminals = () => [
+  { address: "t13", state: "live", labels: {}, status: "blocked" },
+  { address: "t22", state: "live", labels: { "herdr.chat": "p9", "herdr.pinned": "1" }, status: "working", program: { name: "Claude Code" }, turn: 2 },
+  { address: "t30", state: "live", parent: "t22", labels: {}, status: "done", program: { name: "Claude Code" } },
+];
+`;
+
 const VARIANTS = [
   { mod: "hws-new", name: "form", props: { step: "workspace" } },
   { mod: "hws-new", name: "form-problem", props: { step: "workspace" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "That folder does not exist.";') },
@@ -50,6 +68,9 @@ const VARIANTS = [
   { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null };") },
   { mod: "hws-panel", name: "sidebar-empty", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [], problem: null };") },
   { mod: "hws-panel", name: "sidebar-problem", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", 'this.sidebar = { workspaces: null, problem: "hws failed" };') },
+  { mod: "hws-tabs", name: "tabs-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace('shared("hws.tasks.waiting")', "3") },
+  { mod: "hws-agents", name: "agents-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("this.folded = new Set();", 'this.folded = new Set(); this.hovered = "t22";') },
+  { mod: "hws-agents", name: "agents-rail", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("const narrow = () =>", "const narrow = () => true || ") },
   { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('dialogRoot(t, "hws-new-form")', 'dialogRoot(t, "hws-new-form").no_such_builder()') },
 ];
 
@@ -58,9 +79,10 @@ let failed = 0;
 for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
-  cpSync(`${root}${v.mod}/hws.js`, `${dir}/hws.js`);
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  if (existsSync(`${root}${v.mod}/sidebar.js`)) cpSync(`${root}${v.mod}/sidebar.js`, `${dir}/sidebar.js`);
+  for (const file of ["hws.js", "sidebar.js", "flipped.js"]) {
+    if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
+  }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");
   if (v.patch) source = v.patch(source);
   writeFileSync(`${dir}/main.js`, `const __props = () => (${JSON.stringify(v.props)});\n${v.header ?? ""}${source}`);

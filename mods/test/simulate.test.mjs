@@ -448,67 +448,42 @@ test("a hws failure on list shows the message", async () => {
 
 // Brief
 
-const SESSION = { sessionId: "sess1", cwd: "/w", name: "Work", host: { hcTerminal: "t13" }, outputsPath: "/w/o.json", itemsPath: "/w/i.md" };
-const OUTPUTS = JSON.stringify({ version: 1, outputs: [{ ref: "plan.md", tier: "declared", kind: "doc", title: "Plan", status: "ready", declaredAt: 1 }] });
-const ITEMS = "- [ ] #1 Pick a name\n  Claude: Which one?\n- [x] #2 Done thing\n";
-const briefAgent = { ...AGENT, address: "t13" };
+const panelLayout = (panel, active) => ({ id: "root", children: [{ id: "panel", hidden: panel === "hidden", children: [{ id: "panel-body", active, children: [{ id: "outputs" }] }] }] });
 
-function briefWorld(sessions) {
-  return setup({
-    agents: [briefAgent],
-    focused: { space: "spc1", tab: "tb1", pane: "p1", terminal: "t13", cwd: "/w" },
-    panes: [{ pane: "p1", terminal: "t13", tab: "tb1", cwd: "/w" }],
-    files: { "/w/o.json": OUTPUTS, "/w/i.md": ITEMS },
-    other: (command, a) => (command === "agent-brief" && a[0] === "sessions" ? { code: 0, stdout: JSON.stringify({ sessions }), stderr: "" } : { code: 0, stdout: "", stderr: "" }),
-  });
-}
-
-test("brief shows the exact session's outputs and items, and Open uses that session", async () => {
-  const H = briefWorld([SESSION]);
-  const m = await mount("hws-brief", {});
-  m.render();
-  await settle();
-  assert.match(m.text(), /Plan.*Ready/);
-  assert.match(m.text(), /#1.*Pick a name.*Waiting on you/);
-  await m.click("open-plan.md");
-  assert.deepEqual(H.calls.at(-1), { command: "agent-brief", args: ["open", "--session", "sess1", "--output", "/w/plan.md"] });
-});
-
-test("brief's folder match keeps Open off until the user picks a session", async () => {
-  const candidate = { ...SESSION, host: { bundleId: "dev.herdr.app" } };
-  const H = briefWorld([candidate]);
-  const m = await mount("hws-brief", {});
-  m.render();
-  await settle();
-  assert.match(m.text(), /Confirm the session/);
-  assert.equal(m.has("open-plan.md"), false);
-  await m.click("pick-sess1");
-  m.render();
-  await settle();
-  await m.click("open-plan.md");
-  assert.deepEqual(H.calls.at(-1).args, ["open", "--session", "sess1", "--output", "/w/plan.md"]);
-});
-
-test("brief never sends", async () => {
-  const source = read("../hws-brief/main.js");
-  assert.equal(/"send"/.test(source), false);
-  const H = briefWorld([SESSION]);
-  const m = await mount("hws-brief", {});
-  m.render();
-  await settle();
-  assert.equal(H.calls.some((c) => c.args.includes("send")), false);
-});
-
-test("brief's key toggles its own pane by the new name", async () => {
-  const H = setup({ panes: [{ pane: "p1", terminal: "t1", tab: "tb1" }] });
+test("brief's key shows Outputs in a hidden panel and closes its overlay", async () => {
+  const H = setup({ layout: panelLayout("hidden", "files") });
   await mount("hws-brief", { overlay: "ov0" });
-  assert.equal(H.runs[0].args.mod, "hws-brief");
+  assert.deepEqual(H.runs, [{ name: "layout.select", args: { stack: "panel-body", child: "outputs" } }, { name: "layout.show", args: { id: "panel" } }]);
+  assert.deepEqual(H.closed, ["ov0"]);
+});
+
+test("brief's key hides the panel when Outputs is already showing", async () => {
+  const H = setup({ layout: panelLayout("shown", "outputs") });
+  await mount("hws-brief", { overlay: "ov0" });
+  assert.deepEqual(H.runs, [{ name: "layout.hide", args: { id: "panel" } }]);
+  assert.deepEqual(H.closed, ["ov0"]);
+});
+
+test("brief's key shows a toast when the layout has no panel-body", async () => {
+  const H = setup({ layout: { id: "root", children: [] }, notices: [] });
+  await mount("hws-brief", { overlay: "ov0" });
+  assert.deepEqual(H.runs, []);
+  assert.equal(H.notices.length, 1);
+  assert.deepEqual(H.closed, ["ov0"]);
+});
+
+test("brief does nothing without an overlay", async () => {
+  const H = setup({ layout: panelLayout("hidden", "files") });
+  await mount("hws-brief", {});
+  assert.deepEqual(H.runs, []);
+  assert.deepEqual(H.closed, []);
 });
 
 // Source checks
 
-test("both mods carry the same hws.js", () => {
+test("hws-new, hws-panel and hws-actions carry the same hws.js", () => {
   assert.equal(read("../hws-new/hws.js"), read("../hws-panel/hws.js"));
+  assert.equal(read("../hws-new/hws.js"), read("../hws-actions/hws.js"));
 });
 
 test("every element method used exists in gpui-kit.d.ts", () => {

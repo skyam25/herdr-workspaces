@@ -1,0 +1,371 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setup, mount, hwsCalls, settle, usedMethods } from "./harness.mjs";
+
+const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+
+const OK = { code: 0, stdout: "", stderr: "" };
+const CANCELLED = { code: 1, stdout: "", stderr: "execution error: User canceled. (-128)" };
+const BROKEN = { code: 1, stdout: "", stderr: "execution error: no display (-1)" };
+
+const TERMINAL = { terminal: "t1", overlay: "ov1" };
+const FLIPPED = { terminal: "t1", chat: true, pane: "p2", space: "spc1", overlay: "ov1" };
+
+function world(overrides) {
+  const H = setup({ writes: [], sharedSets: [], sharedValues: {}, terminals: [], ...overrides });
+  H.hcCalls = [];
+  return H;
+}
+
+const rows = (m) => m.text().split(" | ");
+const openArgs = (H) => hwsCalls(H).map((c) => c.args);
+const osascriptCalls = (H) => H.calls.filter((c) => c.command === "osascript");
+
+// hws-actions
+
+test("a terminal agent's menu has the rows every agent gets", async () => {
+  world();
+  const m = await mount("hws-actions", TERMINAL);
+  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Tasks", "Outputs"]);
+});
+
+test("a flipped agent with a reply gets every row in table order", async () => {
+  world();
+  const m = await mount("hws-actions", { ...FLIPPED, lastReply: "Done." });
+  assert.deepEqual(rows(m), ["Sketch", "Write", "Write from last reply", "Review a page…", "Attach file…", "Tasks", "Outputs"]);
+});
+
+test("Sketch opens a board beside the terminal and closes the menu", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("sketch");
+
+  assert.deepEqual(openArgs(H), [["surface", "open", "--type", "board", "--terminal", "t1", "--json"]]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("a flipped agent's surface splits beside its chat pane", async () => {
+  const H = world();
+  const m = await mount("hws-actions", FLIPPED);
+  await m.click("write");
+
+  assert.deepEqual(openArgs(H), [["surface", "open", "--type", "note", "--terminal", "t1", "--beside-pane", "p2", "--space", "spc1", "--json"]]);
+});
+
+test("a failing hws call shows its message and keeps the menu open", async () => {
+  const H = world({ hws: { "surface open": { fail: "t1 is not live." } } });
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("sketch");
+
+  assert.match(m.text(), /t1 is not live\./);
+  assert.deepEqual(H.closed, []);
+});
+
+test("Write from last reply saves the reply, then opens that file as a note", async () => {
+  const H = world();
+  const m = await mount("hws-actions", { ...TERMINAL, lastReply: "The plan is ready." });
+  await m.click("write-reply");
+
+  assert.equal(H.writes.length, 1);
+  const { path, text, expected } = H.writes[0];
+  assert.match(path, /^\/Users\/me\/\.config\/herdr-app\/data\/hws-actions\/reply-\d+\.md$/);
+  assert.equal(text, "The plan is ready.");
+  assert.equal(expected, null);
+  assert.deepEqual(H.calls.find((c) => c.command === "mkdir").args, ["-p", "/Users/me/.config/herdr-app/data/hws-actions"]);
+  assert.deepEqual(openArgs(H), [["surface", "open", "--type", "note", "--file", path, "--terminal", "t1", "--json"]]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+// Runs the recorded review shell for real, with fake osascript and hws on PATH.
+function runReview(H, osascript) {
+  const { args } = H.calls.find((c) => c.command === "sh");
+  const dir = mkdtempSync(join(tmpdir(), "hws-review-"));
+  writeFileSync(join(dir, "osascript"), `#!/bin/sh\n${osascript}\n`, { mode: 0o755 });
+  writeFileSync(join(dir, "hws"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+  return spawnSync("/bin/sh", args, { encoding: "utf8", env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir } });
+}
+
+test("Review a page offers html, htm and md, then opens the chosen file", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("review");
+
+  const run = runReview(H, 'echo "/Users/me/a b.html"');
+  assert.equal(run.status, 0);
+  assert.deepEqual(run.stdout.trim().split("\n"), ["surface", "open", "--type", "page", "--file", "/Users/me/a b.html", "--terminal", "t1", "--json"]);
+  assert.match(H.calls.find((c) => c.command === "sh").args[1], /of type \{"html", "htm", "md"\}/);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("a flipped agent's page opens beside its chat pane", async () => {
+  const H = world();
+  const m = await mount("hws-actions", FLIPPED);
+  await m.click("review");
+
+  const run = runReview(H, 'echo "/w/a.html"');
+  assert.deepEqual(run.stdout.trim().split("\n").slice(6), ["--terminal", "t1", "--beside-pane", "p2", "--space", "spc1", "--json"]);
+});
+
+test("cancelling the page chooser opens nothing and exits cleanly", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("review");
+
+  const run = runReview(H, 'echo "execution error: User canceled. (-128)" >&2; exit 1');
+  assert.equal(run.status, 0);
+  assert.equal(run.stdout, "");
+});
+
+test("a page chooser that fails reports it and opens nothing", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("review");
+
+  const run = runReview(H, 'echo "broken" >&2; exit 1');
+  assert.equal(run.status, 1);
+  assert.equal(run.stdout, "");
+  assert.match(run.stderr, /Couldn't open the file chooser\./);
+});
+
+test("a failing review shows its message and keeps the menu open", async () => {
+  const H = world({ other: (command) => (command === "sh" ? { code: 1, stdout: "", stderr: "Couldn't open the file chooser." } : OK) });
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("review");
+
+  assert.match(m.text(), /Couldn't open the file chooser\./);
+  assert.deepEqual(H.closed, []);
+});
+
+test("Attach file asks the chat pane to pick files and closes the menu", async () => {
+  const H = world();
+  const m = await mount("hws-actions", FLIPPED);
+  await m.click("attach");
+
+  assert.equal(H.sharedSets.length, 1);
+  assert.equal(H.sharedSets[0].key, "hws-chat.attach");
+  assert.equal(H.sharedSets[0].value.pane, "p2");
+  assert.equal(typeof H.sharedSets[0].value.at, "number");
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+for (const view of ["tasks", "outputs"]) {
+  test(`${view} selects its panel view and shows the panel`, async () => {
+    const H = world();
+    const m = await mount("hws-actions", TERMINAL);
+    await m.click(view);
+
+    assert.deepEqual(H.runs, [
+      { name: "layout.select", args: { stack: "panel-body", child: view } },
+      { name: "layout.show", args: { id: "panel" } },
+    ]);
+    assert.deepEqual(H.closed, ["ov1"]);
+  });
+}
+
+test("Up, Down and Enter move through the rows and run the selected one", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+
+  await m.key("down");
+  await m.key("enter");
+  assert.equal(openArgs(H)[0][3], "note");
+
+  const H2 = world();
+  const wrapped = await mount("hws-actions", TERMINAL, H2);
+  await wrapped.key("up");
+  await wrapped.key("enter");
+  assert.equal(H2.runs[0].args.child, "outputs");
+});
+
+test("Esc closes the menu and runs nothing", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+  await m.key("escape");
+
+  assert.deepEqual(H.closed, ["ov1"]);
+  assert.deepEqual(openArgs(H), []);
+  assert.deepEqual(H.runs, []);
+});
+
+test("hws-actions uses only documented builders and herdr functions", () => {
+  const types = (name) => readFileSync(`${process.env.HOME}/.config/herdr-app/${name}`, "utf8");
+  const gpui = types("gpui-kit.d.ts");
+  const unknown = usedMethods().filter((name) => !new RegExp(`\\b${name}\\s*[<(]`).test(gpui));
+  assert.deepEqual(unknown, []);
+
+  const herdr = types("herdr.d.ts");
+  const names = /import \{([^}]*)\} from "herdr"/.exec(read("../hws-actions/main.js"))[1].split(",").map((s) => s.trim());
+  for (const name of names) assert.match(herdr, new RegExp(`export function ${name}\\b`), name);
+});
+
+// The + button in the pane header
+
+const AGENT = { pane: "p1", terminal: "t1", tab: "tb1", focused: true, app: "claude-code", program: { agent: true, name: "Claude Code", key: "claude" } };
+const SHELL = { pane: "p1", terminal: "t1", tab: "tb1", focused: true, program: { shell: true, name: "zsh", key: "zsh" } };
+const CHAT_PANE = { pane: "p2", terminal: null, tab: "tb1", focused: true, mod: "hws-chat" };
+const parked = { address: "t1", state: "live", labels: { "herdr.chat": "p2" }, status: "idle", program: AGENT.program };
+
+test("an agent pane shows the + without hover and opens the menu for its terminal", async () => {
+  const H = world({ panes: [AGENT] });
+  const m = await mount("hws-pane", { pane: "p1" });
+  assert.equal(m.view.hovered, false);
+  await m.click("ph-new-p1");
+
+  assert.deepEqual(H.overlays, [{ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: "t1" } }]);
+});
+
+test("a chat pane's + opens the menu for its parked agent", async () => {
+  const H = world({ panes: [CHAT_PANE], terminals: [parked] });
+  const m = await mount("hws-pane", { pane: "p2" });
+  await m.click("ph-new-p2");
+
+  assert.deepEqual(H.overlays[0].props, { terminal: "t1", chat: true, pane: "p2", space: "spc1" });
+});
+
+test("shell panes and chats with no live agent have no +", async () => {
+  world({ panes: [SHELL] });
+  assert.equal((await mount("hws-pane", { pane: "p1" })).has("ph-new-p1"), false);
+
+  world({ panes: [CHAT_PANE], terminals: [{ ...parked, state: "ended" }] });
+  assert.equal((await mount("hws-pane", { pane: "p2" })).has("ph-new-p2"), false);
+});
+
+test("the + sits just left of the Chat | Terminal switch", async () => {
+  world({ panes: [AGENT] });
+  const m = await mount("hws-pane", { pane: "p1" });
+  const kids = m.render().node.children;
+  const plus = kids.findIndex((c) => c.node?.id === "ph-new-p1");
+  assert.equal(kids[plus + 1].node.children[0].node.id, "ph-mode-p1-chat");
+});
+
+// The composer's + and the attach request
+
+world();
+const { default: Chat } = await import("../hws-chat/main.js");
+
+function chat(overrides = {}) {
+  const c = Object.create(Chat.prototype);
+  const inline = [];
+  Object.assign(c, {
+    addr: "t1",
+    conv: null,
+    attachReqAt: 0,
+    error: null,
+    box: { focus() {} },
+    inline,
+    addInline: (list) => inline.push(...list),
+    saveSoon() {},
+    myPane: () => "p2",
+    ...overrides,
+  });
+  return c;
+}
+
+const cx = { notify() {}, spawn: (fn) => fn(cx), timer: { after: (_ms, fn) => fn(cx) } };
+
+const macPicker = (answer) => (command) => {
+  if (command === "uname") return { ...OK, stdout: "Darwin\n" };
+  return command === "osascript" ? answer : OK;
+};
+
+test("the composer's + is wired to the menu", () => {
+  assert.match(read("../hws-chat/main.js"), /this\.round\("chat-attach",[^\n]*this\.openActions\(cx\)/);
+});
+
+test("the composer's + opens the menu with the newest assistant text", () => {
+  const H = world({ panes: [CHAT_PANE], other: () => OK });
+  const c = chat({ conv: { items: [{ kind: "agent", text: "Old" }, { kind: "agent", text: "New" }, { kind: "tools", steps: [] }] } });
+  c.openActions(cx);
+
+  assert.deepEqual(H.overlays, [{ mod: "hws-actions", kind: "popup", width: 240, props: { terminal: "t1", chat: true, pane: "p2", space: "spc1", lastReply: "New" } }]);
+});
+
+test("a chat with no reply yet leaves lastReply out", () => {
+  const H = world({ panes: [CHAT_PANE] });
+  chat().openActions(cx);
+
+  assert.equal("lastReply" in H.overlays[0].props, false);
+});
+
+test("a chat with no agent opens the file picker directly", async () => {
+  const H = world({ other: macPicker(CANCELLED) });
+  chat({ addr: null, myPane: () => null }).openActions(cx);
+  await settle();
+
+  assert.deepEqual(H.overlays, []);
+  assert.equal(osascriptCalls(H).length, 1);
+});
+
+test("macOS picks several files and adds their POSIX paths", async () => {
+  const H = world({ other: macPicker({ ...OK, stdout: "/a/one.png\n/a/two words.pdf\n" }) });
+  const c = chat();
+  c.pickFiles(cx);
+  await settle();
+
+  assert.match(osascriptCalls(H)[0].args.join(" "), /choose file .*with multiple selections allowed/);
+  assert.match(osascriptCalls(H)[0].args.join(" "), /POSIX path of f/);
+  assert.match(JSON.stringify(c.inline), /\/a\/one\.png/);
+  assert.match(JSON.stringify(c.inline), /\/a\/two words\.pdf/);
+  assert.equal(H.calls.some((x) => x.command === "sh"), false);
+  assert.equal(c.error, null);
+});
+
+test("cancelling the macOS picker adds nothing and shows no error", async () => {
+  world({ other: macPicker(CANCELLED) });
+  const c = chat();
+  c.pickFiles(cx);
+  await settle();
+
+  assert.deepEqual(c.inline, []);
+  assert.equal(c.error, null);
+});
+
+test("a macOS picker that fails says so", async () => {
+  world({ other: macPicker(BROKEN) });
+  const c = chat();
+  c.pickFiles(cx);
+  await settle();
+
+  assert.equal(c.error, "Couldn't open the file picker.");
+});
+
+test("Linux keeps the portal picker", async () => {
+  const H = world({
+    other: (command) => {
+      if (command === "uname") return { ...OK, stdout: "Linux\n" };
+      return command === "sh" ? { ...OK, stdout: "/home/me/x.txt\n" } : OK;
+    },
+  });
+  const c = chat();
+  c.pickFiles(cx);
+  await settle();
+
+  assert.match(H.calls.find((x) => x.command === "sh").args.at(-1), /mods\/hws-chat\/pick-files\.py$/);
+  assert.equal(osascriptCalls(H).length, 0);
+  assert.match(JSON.stringify(c.inline), /\/home\/me\/x\.txt/);
+});
+
+test("an attach request for this pane runs the picker once", async () => {
+  const H = world({ other: macPicker(CANCELLED), sharedValues: { "hws-chat.attach": { pane: "p2", at: 50 } } });
+  const c = chat();
+
+  c.takeAttachRequest("p2", cx);
+  c.takeAttachRequest("p2", cx);
+  await settle();
+
+  assert.equal(c.attachReqAt, 50);
+  assert.equal(osascriptCalls(H).length, 1);
+});
+
+test("an attach request for another pane or an old time is ignored", async () => {
+  const H = world({ other: macPicker(CANCELLED), sharedValues: { "hws-chat.attach": { pane: "p9", at: 50 } } });
+  chat().takeAttachRequest("p2", cx);
+  chat({ attachReqAt: 50 }).takeAttachRequest("p9", cx);
+  await settle();
+
+  assert.equal(osascriptCalls(H).length, 0);
+});

@@ -1,5 +1,5 @@
-// Calls the hws CLI and holds the form parts hws-new and hws-panel share.
-// Keep this file identical in both mods. test/simulate.test.mjs compares them.
+// Calls the hws CLI and holds the form parts hws-new, hws-panel and hws-actions share.
+// Keep this file identical in all three. test/simulate.test.mjs compares them.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";

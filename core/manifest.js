@@ -13,12 +13,15 @@ export function readManifest(id) {
   }
 }
 
-function writeAtomic(manifest) {
-  const target = manifestPath(manifest.id);
+export function writeJsonAtomic(target, value) {
   mkdirSync(dirname(target), { recursive: true });
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(manifest, null, 2)}\n`);
+  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`);
   renameSync(temp, target);
+}
+
+function writeAtomic(manifest) {
+  writeJsonAtomic(manifestPath(manifest.id), manifest);
 }
 
 export function listManifests({ includeStandalone = false } = {}) {

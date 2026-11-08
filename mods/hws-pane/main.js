@@ -5,8 +5,8 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { props, run, theme, home, exec, hc, nextCommand, setShared } from "herdr";
-import { panes, terminals, inRender } from "./live.js";
+import { props, run, theme, home, exec, hc, nextCommand, setShared, openOverlay } from "herdr";
+import { panes, terminals, spaces, inRender } from "./live.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { LABEL, sweep } from "./parked.js";
 
@@ -16,6 +16,7 @@ const NEW_COPY_MS = 2000;
 const SWAP_GAP_MS = 3000;
 const CHAT_FADE_OUT_MS = 120;
 const LEAVING = "hws-chat.leaving";
+const MENU_WIDTH = 240;
 
 // Every header copy shares these.
 let lastSwap = 0;
@@ -113,6 +114,13 @@ export default class Pane extends View {
       .child(svg(`mods/hws-pane/${name}.svg`).size(14));
   }
 
+  // Opens the + menu at the pointer. A chat pane speaks for the agent parked behind it.
+  openActions(self, agent) {
+    const space = spaces().find((s) => s.tabs.some((c) => c.id === self.tab))?.id;
+    const menu = self.mod === CHAT ? { terminal: agent, chat: true, pane: self.pane, space } : { terminal: self.terminal };
+    openOverlay({ mod: "hws-actions", kind: "popup", width: MENU_WIDTH, props: menu });
+  }
+
   toChat(p, cx) {
     const open = chatOf(p.terminal);
     if (open) { run("pane.focus", { pane: open }); return; }
@@ -200,6 +208,9 @@ export default class Pane extends View {
     const pic = icon(p.program, 14, t.dim);
     const pane = self.pane;
     const canSwitch = chatMode ? Boolean(agent) : chatty(self);
+
+    // A surface runs on this computer, so a remote agent has no + menu.
+    const canAct = canSwitch && !(agent ?? self.terminal ?? "").includes("/");
     const confirming = Boolean(agent) && this.ending;
 
     return h_flex()
@@ -230,6 +241,7 @@ export default class Pane extends View {
         .child(this.button(t, `ph-d-${pane}`, "split-down", () => run("pane.split", { direction: "down", pane })))
         .child(this.button(t, `ph-z-${pane}`, self.zoomed ? "unzoom" : "zoom", () => run("pane.zoom", { pane })))
         .child(this.button(t, `ph-x-${pane}`, "close", () => { if (agent) this.ending = true; else run("pane.close", { pane }); })))
+      .when(canAct, (el) => el.child(this.button(t, `ph-new-${pane}`, "plus", () => this.openActions(self, agent))))
       .when(canSwitch, (el) => el.child(segmented(`ph-mode-${pane}`, [["chat", "Chat"], ["terminal", "Terminal"]], this.going ?? (chatMode ? "chat" : "terminal"),
         (v, _e, cx) => (v === "chat" ? this.toChat(self, cx) : this.toTerminal(pane, cx)))));
   }

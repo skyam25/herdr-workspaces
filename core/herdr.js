@@ -82,9 +82,10 @@ export function act(command, args = {}) {
 
 // Closing the pane ends the host that called hws, and hws with it.
 // A separate session keeps the focus step alive through that hangup.
-export async function closePaneThenFocus(pane, terminal) {
-  const script = '"$0" do pane.close --pane "$1"; "$0" do pane.focus --terminal "$2"';
-  const child = spawn('/bin/sh', ['-c', script, herdrBin(), pane, terminal], {
+// `kind` is the pane.focus flag that `target` fills, terminal or pane.
+export async function closePaneThenFocus(pane, target, kind = 'terminal') {
+  const script = '"$0" do pane.close --pane "$1"; "$0" do pane.focus "--$2" "$3"';
+  const child = spawn('/bin/sh', ['-c', script, herdrBin(), pane, kind, target], {
     detached: true,
     stdio: 'ignore',
   });
@@ -103,6 +104,11 @@ export function terminalInfo(terminal) {
   const result = run(hcBin(), ['get', terminal, '--json'], READ_MS);
   const info = result.ok ? parseJson(result.stdout) : null;
   return info && !info.error ? info : null;
+}
+
+// Returns the chat pane that shows a flipped agent, or null for any other terminal.
+export function chatPaneOf(terminal) {
+  return terminalInfo(terminal)?.labels?.['herdr.chat'] || null;
 }
 
 function isLive(info) {

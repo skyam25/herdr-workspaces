@@ -95,11 +95,12 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list` | Every manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest |
 | `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal |
-| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T \| --standalone]` | Splits a pane beside T, starts the host, records the surface |
+| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone]` | Splits a pane beside T, starts the host, records the surface. For an agent flipped to Chat, `--beside-pane` and `--space` split beside its chat pane P in space S and fail unless T's `herdr.chat` label equals P |
 | `hws surface done --id S --bundle DIR` | Moves DIR to the artifact store, delivers, closes the pane |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
 | `hws artifact list [--workspace W]` | Artifacts |
 | `hws link ARTIFACT` | Prints `@<absolute prompt.md path>`, ready to paste into Claude |
+| `hws todo list\|add\|edit\|move\|send\|archive` | To-dos for a space. See [To-dos](#to-dos-hws-todo) |
 | `hws artifact terminal ARTIFACT` | Opens a new tab running `claude` with that artifact's prompt |
 | `hws promote [--workspace W] --name N --folder F [--kind K]` | Makes a throwaway a kept workspace and moves its artifacts. W defaults to the current workspace |
 | `hws close [--workspace W] [--keep\|--trash]` | Closes the space. A throwaway with artifacts and no flag returns `{"decision":"needed","artifacts":[...]}` and closes nothing |
@@ -177,3 +178,137 @@ The `hws` layout uses the `hws-pane` header. Claude Code and Codex panes get a C
 - The core label `herdr.chat` names the chat pane that shows a parked agent.
 - A parked agent has no pane, so `herdr-app ls` lists no terminal for it and `pane.focus --terminal T` fails.
 - `hws-pane` ends a parked agent once its chat pane has gone.
+
+### Permission hook
+
+`plugin/hooks/ask-hook.sh` runs on Claude Code's `PermissionRequest` event and shows a flipped agent's requests as cards in `hws-chat`.
+
+The hook acts only when all three hold. Otherwise it exits at once with empty stdout, and Claude shows its own prompt.
+
+- `__CFBundleIdentifier` is `dev.herdr.app`.
+- `HC_TERMINAL_ID` is set.
+- `hc get T --json` shows a non-empty `herdr.chat` label.
+
+Files live in `<app home>/data/chat-asks`. `<id>` is `<terminal>.<unix seconds>.<hook pid>`, and the app home is `HERDR_APP_HOME` or `~/.config/herdr-app`.
+
+| File | Written by | Holds |
+|---|---|---|
+| `req/<id>.json` | Hook | The request from stdin, unchanged. The chat drops it once the pid is dead |
+| `ans/<id>.json` | Chat | Decision JSON from `core/asks.js`, which the hook prints as it is. An empty file means no decision |
+| `end/<id>` | Either | One line saying how the ask closed, kept for 24 hours |
+| `open/<terminal>` | Chat | Touched every few seconds, removed when the chat closes |
+
+The hook never decides by itself. It prints nothing, removes its request file and leaves an `end` line in these cases.
+
+| Event | `end` line |
+|---|---|
+| 30 minutes pass with no answer | `No answer in 30 minutes; it waits in the terminal` |
+| The label clears, the flag goes, or the flag is older than 30 seconds | `Chat closed; it waits in the terminal` |
+| The terminal ends | `Agent stopped` |
+| Claude's status goes from blocked to working, idle or done | `Answered in the terminal` |
+| Claude stops the hook with a signal | `Declined or interrupted in the terminal` |
+
+The `timeout` in `hooks.json` is 1830 seconds, 30 seconds above the give-up. `HWS_ASK_WAIT_MS` shortens the wait for tests.
+
+## UI homes
+
+Each region of the `hws` layout has one job.
+
+| Region | Job | Holds |
+|---|---|---|
+| Left sidebar | Navigate | Workspaces, Spaces, Agents (`hws-agents`, includes flipped agents) |
+| Tab bar | Switch tabs, toggle the right panel | `hws-tabs`, with Files, Changes, Tasks, Outputs |
+| Pane header | Act on this agent | `hws-pane` `+`, always visible on agent and chat panes |
+| Chat composer | Act on this agent while typing | The same menu, plus Attach file |
+| Pane beside the agent | Do the work | Board, note and page surfaces |
+| Right panel | See what the work produced | Files, Changes, Tasks, Outputs |
+
+### New menu: `hws-actions`
+
+A popup that the pane header and the chat composer open at the pointer.
+
+| Prop | Meaning |
+|---|---|
+| `terminal` | The agent the surface attaches to. Required |
+| `chat` | True when the agent is flipped to Chat |
+| `pane` | The chat pane, when `chat` is true |
+| `space` | The space id, when `chat` is true |
+| `lastReply` | The agent's last reply, when the chat has one |
+
+| Item | Shown | Action |
+|---|---|---|
+| Sketch | Always | `hws surface open --type board` |
+| Write | Always | `hws surface open --type note` |
+| Write from last reply | `lastReply` is set | Writes the reply to a file, then opens it with `--type note --file F` |
+| Review a page… | Always | macOS file chooser, then `--type page --file F` |
+| Attach file… | `chat` is true | `setShared("hws-chat.attach", { pane, at })` |
+| Tasks | Always | Selects `tasks` in `panel-body` and shows `panel` |
+| Outputs | Always | Selects `outputs` in `panel-body` and shows `panel` |
+
+Every `hws surface open` passes `--terminal T`. A flipped agent also passes `--beside-pane P --space S`.
+
+### Flipped agents
+
+A flipped agent has no pane, and `herdr-app ls` does not list chat panes. Mods find one this way:
+
+1. Take each entry in `panes()` whose `mod` is `hws-chat`.
+2. Find the live terminal in `terminals()` whose `herdr.chat` label equals that pane.
+3. Its tab is the pane's `tab`. Its space is the entry in `spaces()` that holds that tab.
+
+`hws surface open --terminal T --beside-pane P --space S` splits beside P. It fails unless T's `herdr.chat` label equals P. On Done, `hws` reads T's `herdr.chat` label again. It focuses that pane when the label is set and the terminal otherwise.
+
+### Right panel: `hws-work`
+
+`panel-body` has four children: `files`, `changes`, `tasks` and `outputs`. The last two run `hws-work` with `{"view":"tasks"}` and `{"view":"outputs"}`.
+
+Both views read the active space's Claude agents, flipped ones included, and bind each to its session by `host.hcTerminal` from `agent-brief sessions --json`.
+
+Tasks shows your to-dos beside the agents' items on one board.
+
+| Column | Your to-dos | Agent items |
+|---|---|---|
+| To do | `column` is `todo` | None |
+| In progress | `column` is `doing` | Open, and not waiting |
+| Waiting on you | None | Open, and the last line is Claude's |
+| Done | `column` is `done` | Checked |
+
+- The board shows four columns at 720px or wider, and stacked sections below that.
+- The header's expand button runs `layout.resize` on `panel`, between 368 and 860.
+- The board always renders. A problem reaching Agent Brief is one quiet line under the header, and to-dos still work.
+- `hws-work` keeps `shared("hws.tasks.waiting")` equal to the Waiting on you count, and `hws-tabs` shows it on the Tasks button.
+
+| Card | Shows | Click | Drag |
+|---|---|---|---|
+| To-do | Title, first line of notes, the agent it was sent to | Opens the to-do dialog | Release over To do, In progress or Done |
+| Agent item | `#n`, title, agent name, Claude's last line | Focuses the agent | None, because the agent owns the items file |
+
+Drag uses press and release across elements, as Herdr's tab bar does. The column under the pointer highlights during a drag, and Waiting on you never accepts a drop.
+
+`+ Add` in the To do column head and in the header opens the dialog. The dialog has title, notes, a column choice, Send to, Archive and Save. Send to lists every agent in the space, flipped ones included, and never picks one for you.
+
+### To-dos: `hws todo`
+
+Only `hws` writes `<state root>/todos/<space id>.json`. To-dos belong to a space, so they work in ordinary spaces as well as workspaces, and they survive closing a workspace.
+
+```json
+{ "version": 1, "space": "sp1", "items": [
+  { "id": "t1a2b3", "title": "Fix login", "notes": "", "column": "todo", "terminal": null, "archived": false, "createdAt": 1, "updatedAt": 1 }
+] }
+```
+
+| Command | Does |
+|---|---|
+| `hws todo list [--space S]` | Prints unarchived items, newest `updatedAt` first |
+| `hws todo add --title X [--notes N] [--space S]` | Adds to `todo` |
+| `hws todo edit --id I [--title X] [--notes N] [--space S]` | Changes the text |
+| `hws todo move --id I --column todo\|doing\|done [--space S]` | Changes the column |
+| `hws todo send --id I --terminal T [--space S]` | Pastes the title and notes into T with `hc send`, sets `terminal`, moves to `doing` |
+| `hws todo archive --id I [--space S]` | Sets `archived`. Nothing is deleted |
+
+`--space` defaults to the window's selected space. Mods always pass it. The to-do dialog sets `shared("hws.todos.changed")` after a change, and the board reloads on it.
+
+A surface runs on this computer. The `+` menu is hidden for a remote agent, and `hws surface open` refuses a terminal whose address has a machine prefix.
+
+Outputs lists each agent's outputs, newest first. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. Anything else goes to macOS `open`.
+
+`mod.open:hws-brief` shows or hides Outputs in the right panel.
