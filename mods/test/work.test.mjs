@@ -438,13 +438,13 @@ test("dragging a to-do to another column runs hws todo move", async () => {
   hover(m, "lane-todo", false);
   hover(m, "lane-doing", true);
   assert.equal(findNode(m, "lane-doing").bg, "color:selected");
-  assert.equal(findNode(m, "lane-todo").bg, "color:surface");
+  assert.equal(findNode(m, "lane-todo").bg, "color:chrome");
   assert.equal(findNode(m, "todo-a1").opacity, 0.45);
   const lists = todoLists(H);
   await release(m, "lane-doing", "root");
   assert.deepEqual(hwsCalls(H).find((c) => c.args[1] === "move").args, ["todo", "move", "--id", "a1", "--column", "doing", "--space", "spc1", "--json"]);
   assert.equal(todoLists(H), lists + 1);
-  assert.equal(findNode(m, "lane-doing").bg, "color:surface");
+  assert.equal(findNode(m, "lane-doing").bg, "color:chrome");
   assert.equal(findNode(m, "todo-a1").opacity, undefined);
   assert.equal(H.overlays.length, 0);
 });
@@ -466,7 +466,7 @@ test("Waiting on you never accepts a drop or lights up", async () => {
   const m = await mount("hws-work", { view: "tasks" });
   press(m, "todo-a1");
   hover(m, "lane-waiting", true);
-  assert.equal(findNode(m, "lane-waiting").bg, "color:surface");
+  assert.equal(findNode(m, "lane-waiting").bg, "color:chrome");
   await release(m, "lane-waiting", "root");
   assert.equal(moves(H).length, 0);
   assert.equal(H.overlays.length, 0);
@@ -501,7 +501,7 @@ test("a press and release on the same card opens the to-do without a visible dra
   H.hws["todo list"] = todoList(todo("a1", "Fix login"));
   const m = await mount("hws-work", { view: "tasks" });
   press(m, "todo-a1");
-  assert.equal(findNode(m, "lane-todo").bg, "color:surface");
+  assert.equal(findNode(m, "lane-todo").bg, "color:chrome");
   assert.equal(findNode(m, "todo-a1").opacity, undefined);
   await release(m, "todo-a1", "lane-todo", "root");
   assert.deepEqual(H.overlays.map((o) => o.props), [{ view: "todo", space: "spc1", id: "a1" }]);

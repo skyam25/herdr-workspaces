@@ -424,7 +424,7 @@ export default class Work extends View {
       .p(6)
       .gap(6)
       .rounded(8)
-      .bg(lit ? t.selected : t.surface)
+      .bg(lit ? t.selected : t.chrome)
       .on_hover((hovered, cx) => this.hoverLane(column.key, hovered, cx))
       .on_mouse_up("left", (_e, cx) => this.releaseOnLane(column, cx));
     return (fits ? lane.flex_1().min_w(0) : lane.flex_none().w(LANE_PX))
