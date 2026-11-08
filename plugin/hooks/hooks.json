@@ -1,0 +1,16 @@
+{
+  "description": "Register the session with its Herdr workspace and tell Claude which workspace it is in.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "timeout": 6
+          }
+        ]
+      }
+    ]
+  }
+}

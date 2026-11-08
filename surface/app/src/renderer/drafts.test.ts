@@ -1,0 +1,580 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Draft } from '../shared/ipc';
+import { DRAFT_SAVE_MS, DraftBook, onTab } from './drafts';
+
+function fakeHost(initial: Draft[] = []) {
+  const disk = new Map(initial.map((d) => [d.id, d]));
+  const files = new Map<string, string>();
+  return {
+    disk,
+    listDrafts: vi.fn(async () => [...disk.values()]),
+    saveDraft: vi.fn(async (d: Draft) => void disk.set(d.id, d)),
+    deleteDraft: vi.fn(async (id: string) => void disk.delete(id)),
+    files,
+    readSource: vi.fn(async (_sessionId: string, path: string): Promise<string | undefined> => files.get(path)),
+    watchOutput: vi.fn(async () => undefined),
+    unwatchOutput: vi.fn(async () => undefined),
+    onOutputChanged: vi.fn(() => () => undefined),
+  };
+}
+
+const saved = (id: string, patch: Partial<Draft> = {}): Draft => ({
+  id,
+  body: id,
+  status: 'note',
+  rank: 0,
+  createdAt: 1,
+  updatedAt: 1,
+  ...patch,
+});
+
+let t = 100;
+beforeEach(() => {
+  vi.useFakeTimers();
+  t = 100;
+});
+afterEach(() => vi.useRealTimers());
+
+describe('DraftBook', () => {
+  it('keeps a new note off disk until it has words, and drops it when left empty', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    const note = book.create();
+    expect(book.create().id).toBe(note.id);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.size).toBe(0);
+
+    book.edit(note.id, 'Fix the login redirect');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.get(note.id)?.body).toBe('Fix the login redirect');
+
+    const other = book.create();
+    book.select(note.id);
+    expect(book.get(other.id)).toBeUndefined();
+  });
+
+  it('keeps an outline draft, whose file holds its words, and follows its title', async () => {
+    const host = fakeHost([saved('memo', { body: '', title: 'Memo', sessionId: 's1', outline: { path: 'docs/memo.outline.md' } })]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.select('memo');
+    book.select(book.create('', undefined, 's1').id);
+    expect(book.get('memo')).toBeDefined();
+    expect(host.deleteDraft).not.toHaveBeenCalledWith('memo');
+
+    book.retitle('memo', 'Onboarding memo');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.get('memo')).toMatchObject({ title: 'Onboarding memo', outline: { path: 'docs/memo.outline.md' } });
+  });
+
+  it('takes the id main asks for, in place of the open empty note', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    const empty = book.create();
+    const note = book.create('', 'from-main');
+    expect(note.id).toBe('from-main');
+    expect(book.selectedId).toBe('from-main');
+    expect(book.get(empty.id)).toBeUndefined();
+    expect(book.create('', 'from-main').id).toBe('from-main');
+  });
+
+  it('files a new note under a session, and moves it between sessions', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    const unfiled = book.create();
+    const filed = book.create('', undefined, 's1');
+    expect(filed.id).not.toBe(unfiled.id);
+    expect(filed.sessionId).toBe('s1');
+
+    book.edit(filed.id, 'For s1');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.get(filed.id)?.sessionId).toBe('s1');
+
+    book.file(filed.id, 's2');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.get(filed.id)?.sessionId).toBe('s2');
+
+    book.file(filed.id, undefined);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.get(filed.id)).not.toHaveProperty('sessionId');
+  });
+
+  it('keeps the output file a note was copied from, through edits and saves', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    book.create();
+    const copy = book.create('# Pricing', 'out-1', 's1', { path: 'docs/pricing.md' });
+    expect(copy.id).toBe('out-1');
+    expect(book.selected?.source).toEqual({ path: 'docs/pricing.md' });
+    book.edit(copy.id, '# Pricing, revised');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.get('out-1')).toMatchObject({ sessionId: 's1', source: { path: 'docs/pricing.md' } });
+  });
+
+  it('keeps its own filing over disk while that filing is unsaved', async () => {
+    const host = fakeHost([saved('mine')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.file('mine', 's2');
+    host.disk.set('mine', { ...host.disk.get('mine')!, sessionId: 's1' });
+
+    await book.load();
+    expect(book.get('mine')?.sessionId).toBe('s2');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.get('mine')?.sessionId).toBe('s2');
+  });
+
+  it('deletes a saved note that was emptied and then left', async () => {
+    const host = fakeHost([saved('a')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.select('a');
+    book.edit('a', '  ');
+    book.select(undefined);
+    await vi.runAllTimersAsync();
+    expect(host.disk.has('a')).toBe(false);
+  });
+
+  it('queues Ready drafts at the end and reorders them', async () => {
+    const host = fakeHost([saved('a'), saved('b'), saved('c')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    for (const id of ['a', 'b', 'c']) book.setReady(id, true);
+    expect(book.ready.map((d) => d.id)).toEqual(['a', 'b', 'c']);
+
+    book.move('c', 0);
+    expect(book.ready.map((d) => d.id)).toEqual(['c', 'a', 'b']);
+    await book.flush();
+    expect([...host.disk.values()].sort((x, y) => x.rank - y.rank).map((d) => d.id)).toEqual(['c', 'a', 'b']);
+
+    book.setReady('a', false);
+    expect(book.ready.map((d) => d.id)).toEqual(['c', 'b']);
+  });
+
+  it('links one draft per board', async () => {
+    const host = fakeHost([saved('a'), saved('b')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.link('a', 'flow');
+    book.link('b', 'flow');
+    expect(book.linkedTo('flow')?.id).toBe('b');
+    expect(book.get('a')?.board).toBeUndefined();
+    book.renameBoard('flow', 'checkout');
+    expect(book.linkedTo('checkout')?.id).toBe('b');
+  });
+
+  it('lets go of a draft main used up, without deleting it again', async () => {
+    const host = fakeHost([saved('a')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.select('a');
+    book.consume('a', { body: 'a' });
+    expect(book.selected).toBeUndefined();
+    expect(host.deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it('keeps and saves again text typed while the Send was on its way', async () => {
+    const host = fakeHost([saved('a')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('a', 'a and more');
+    host.disk.delete('a');
+    book.consume('a', { body: 'a' });
+    await book.flush();
+    expect(host.disk.get('a')?.body).toBe('a and more');
+  });
+
+  it('keeps edits not saved yet when it reloads from disk', async () => {
+    const host = fakeHost([saved('a')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('a', 'newer');
+    const fresh = book.create('brand new');
+    await book.load();
+    expect(book.get('a')?.body).toBe('newer');
+    expect(book.get(fresh.id)?.body).toBe('brand new');
+    await book.flush();
+    expect(host.disk.get('a')?.body).toBe('newer');
+  });
+
+  it('retries a failed save and reports why until it succeeds', async () => {
+    const host = fakeHost();
+    host.saveDraft.mockRejectedValueOnce(new Error('disk full')).mockRejectedValueOnce(new Error('disk full'));
+    const book = new DraftBook(host, () => t++);
+    const note = book.create('keep me');
+    await book.flush();
+    expect(book.saveError).toBe('disk full');
+    expect(host.disk.has(note.id)).toBe(false);
+    await book.flush();
+    expect(host.disk.get(note.id)?.body).toBe('keep me');
+    expect(book.saveError).toBeUndefined();
+  });
+});
+
+describe('DraftBook during a Send or a save', () => {
+  it('flush waits for an already-running draft save', async () => {
+    const host = fakeHost([saved('a')]);
+    let release!: () => void;
+    host.saveDraft.mockImplementationOnce((draft) => new Promise<undefined>((resolve) => {
+      release = () => { host.disk.set(draft.id, draft); resolve(undefined); };
+    }));
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('a', 'new');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    let finished = false;
+    const flushing = book.flush().then(() => { finished = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finished).toBe(false);
+    release();
+    await flushing;
+    expect(host.disk.get('a')?.body).toBe('new');
+  });
+
+  it('saves edits made during an in-flight save in order and protects them from reload', async () => {
+    const host = fakeHost([saved('a')]);
+    let release!: () => void;
+    host.saveDraft.mockImplementationOnce((draft) => new Promise<undefined>((resolve) => {
+      release = () => { host.disk.set(draft.id, draft); resolve(undefined); };
+    }));
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('a', 'first');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    book.edit('a', 'latest');
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.saveDraft).toHaveBeenCalledTimes(1);
+    await book.load();
+    expect(book.get('a')?.body).toBe('latest');
+    release();
+    await book.flush();
+    expect(host.disk.get('a')?.body).toBe('latest');
+    expect(host.saveDraft.mock.calls.map(([draft]) => draft.body)).toEqual(['first', 'latest']);
+  });
+
+  it('keeps a board attached while the Send was on its way', async () => {
+    const host = fakeHost([saved('a')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.link('a', 'flow');
+    book.consume('a', { body: 'a' });
+    expect(book.get('a')?.board).toBe('flow');
+  });
+
+  it('keeps an edit whose save is still on its way when a reload lands', async () => {
+    const host = fakeHost([saved('a')]);
+    let release!: () => void;
+    host.saveDraft.mockImplementationOnce(
+      (d: Draft) => new Promise<undefined>((r) => (release = () => r(void host.disk.set(d.id, d)))),
+    );
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('a', 'newer');
+    const stale = [...host.disk.values()];
+    host.listDrafts.mockResolvedValueOnce(stale);
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    await book.load();
+    expect(book.get('a')?.body).toBe('newer');
+    release();
+  });
+
+  it('flush tries a failed save once more before giving up', async () => {
+    const host = fakeHost();
+    host.saveDraft.mockRejectedValueOnce(new Error('busy'));
+    const book = new DraftBook(host, () => t++);
+    const note = book.create('keep me');
+    await book.flush();
+    expect(host.disk.get(note.id)?.body).toBe('keep me');
+  });
+});
+
+describe('DraftBook pictures', () => {
+  const png = 'data:image/png;base64,AAAA';
+  const gif = 'data:image/gif;base64,BBBB';
+
+  it('keeps a pasted picture while the body references it, and saves it with the draft', async () => {
+    const host = fakeHost([saved('a')]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.attach('a', 'shot01', png);
+    book.edit('a', 'Look at this\n\n![login form](att:shot01)');
+    await book.flush();
+    expect(host.disk.get('a')?.attachments).toEqual({ shot01: png });
+  });
+
+  it('drops a picture once the body no longer references it, and removes the field when none remain', async () => {
+    const host = fakeHost([saved('a', { body: '![](att:shot01) ![](att:shot02)', attachments: { shot01: png, shot02: gif } })]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('a', '![](att:shot02)');
+    expect(book.get('a')?.attachments).toEqual({ shot02: gif });
+    book.edit('a', 'words only');
+    expect(book.get('a')).not.toHaveProperty('attachments');
+    await book.flush();
+    expect(host.disk.get('a')).not.toHaveProperty('attachments');
+  });
+
+  it('brings a dropped picture back when an undo restores its reference', async () => {
+    const book = new DraftBook(fakeHost([saved('a')]), () => t++);
+    await book.load();
+    book.attach('a', 'shot01', png);
+    book.edit('a', '![](att:shot01)');
+    book.edit('a', '');
+    book.edit('a', '![](att:shot01)');
+    expect(book.get('a')?.attachments).toEqual({ shot01: png });
+  });
+
+  it('finds a picture pasted from another draft', async () => {
+    const book = new DraftBook(fakeHost([saved('a', { body: '![](att:shot01)', attachments: { shot01: png } }), saved('b')]), () => t++);
+    await book.load();
+    book.edit('b', 'Same as before ![](att:shot01)');
+    expect(book.get('b')?.attachments).toEqual({ shot01: png });
+  });
+
+  it('counts a draft holding only a picture as not empty', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    const note = book.create();
+    book.attach(note.id, 'shot01', png);
+    book.edit(note.id, '![](att:shot01)');
+    book.create();
+    expect(book.get(note.id)?.attachments).toEqual({ shot01: png });
+    await book.flush();
+    expect(host.disk.has(note.id)).toBe(true);
+  });
+});
+
+describe('onTab', () => {
+  it('puts a filed note on its session tab, and unfiled or orphaned notes on Notes', async () => {
+    const tabs = ['s1'];
+    const unfiled = saved('u');
+    const filed = saved('f', { sessionId: 's1' });
+    const orphan = saved('o', { sessionId: 'gone' });
+    expect([unfiled, filed, orphan].map((d) => onTab(d, 's1', tabs))).toEqual([false, true, false]);
+    expect([unfiled, filed, orphan].map((d) => onTab(d, undefined, tabs))).toEqual([true, false, true]);
+
+    const book = new DraftBook(fakeHost([saved('e', { body: ' ', sessionId: 's1' }), filed, orphan]), () => t++);
+    await book.load();
+    expect(book.firstOnTab('s1', tabs)?.id).toBe('f');
+    expect(book.firstOnTab(undefined, tabs)?.id).toBe('o');
+    expect(book.firstOnTab('s2', tabs)).toBeUndefined();
+  });
+});
+
+describe('DraftBook reviews', () => {
+  const jpg = 'data:image/jpeg;base64,CCCC';
+  const anchor = { selector: 'h2', tag: 'h2', fx: 0.5, fy: 0.5, rect: { x: 0, y: 0, width: 1, height: 1 }, scrollY: 0, viewport: { width: 1, height: 1 } };
+  const pin = (id: string, picture?: string) => ({ id, text: '', anchor, createdAt: 1, ...(picture ? { picture } : {}) });
+
+  it('keeps an empty review off disk, and saves it once it has a pin with its picture', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    const review = book.create('', undefined, 's1', undefined, { path: 'site/index.html', comments: [] });
+    await vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS);
+    expect(host.disk.size).toBe(0);
+    book.addComment(review.id, pin('c1', 'crop0001'), jpg);
+    await book.flush();
+    expect(host.disk.get(review.id)?.review?.comments.map((c) => c.id)).toEqual(['c1']);
+    expect(host.disk.get(review.id)?.attachments).toEqual({ crop0001: jpg });
+  });
+
+  it('keeps comment pictures when the overall note changes, and lets one go with its pin', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    const review = book.create('', undefined, 's1', undefined, { path: 'a.html', comments: [] });
+    book.addComment(review.id, pin('c1', 'crop0001'), jpg);
+    book.addComment(review.id, pin('c2'));
+    book.edit(review.id, 'Overall, tighter.');
+    expect(book.get(review.id)?.attachments).toEqual({ crop0001: jpg });
+    book.removeComment(review.id, 'c1');
+    expect(book.get(review.id)?.attachments).toBeUndefined();
+    expect(book.get(review.id)?.review?.comments.map((c) => c.id)).toEqual(['c2']);
+  });
+
+  it('moves a pin to another element with its words, and swaps its picture', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    const review = book.create('', undefined, 's1', undefined, { path: 'a.html', comments: [] });
+    book.addComment(review.id, { ...pin('c1', 'crop0001'), text: 'Shorter' }, jpg);
+    const p = { ...anchor, selector: 'p', tag: 'p' };
+    book.moveComment(review.id, 'c1', p, { id: 'crop0002', data: 'data:image/jpeg;base64,DDDD' });
+    expect(book.get(review.id)?.review?.comments[0]).toMatchObject({ id: 'c1', text: 'Shorter', anchor: { tag: 'p' }, picture: 'crop0002' });
+    expect(book.get(review.id)?.attachments).toEqual({ crop0002: 'data:image/jpeg;base64,DDDD' });
+    book.moveComment(review.id, 'c1', anchor);
+    expect(book.get(review.id)?.review?.comments[0]).not.toHaveProperty('picture');
+    expect(book.get(review.id)?.attachments).toBeUndefined();
+  });
+
+  it('adds heard words to a pin or the overall note', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    const review = book.create('Start.', undefined, 's1', undefined, { path: 'a.html', comments: [] });
+    book.addComment(review.id, pin('c1'));
+    book.appendTo(review.id, 'c1', ' bigger heading ');
+    book.appendTo(review.id, 'c1', 'and bolder');
+    book.appendTo(review.id, undefined, 'Darker overall.');
+    expect(book.get(review.id)?.review?.comments[0]?.text).toBe('bigger heading and bolder');
+    expect(book.get(review.id)?.body).toBe('Start. Darker overall.');
+  });
+
+  it('adds heard words to a note comment or the overall words, never to the note itself', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    const note = book.create('# Recap', undefined, 's1');
+    book.addNoteComment(note.id, { id: 'n1', quote: 'Recap', occurrence: 0, text: '', createdAt: 1 });
+    book.appendTo(note.id, 'n1', 'Too short.');
+    book.appendTo(note.id, undefined, 'Shorter overall.');
+    expect(book.get(note.id)?.annotations).toEqual({
+      comments: [{ id: 'n1', quote: 'Recap', occurrence: 0, text: 'Too short.', createdAt: 1 }],
+      overall: 'Shorter overall.',
+    });
+    expect(book.get(note.id)?.body).toBe('# Recap');
+    expect(book.ownerOfNoteComment('n1')?.id).toBe(note.id);
+    book.removeNoteComment(note.id, 'n1');
+    book.setOverall(note.id, '');
+    expect(book.get(note.id)?.annotations).toBeUndefined();
+  });
+
+  it('takes a note replaced on disk after the last local edit, and drops the queued save', async () => {
+    const host = fakeHost([saved('n', { body: 'Old' })]);
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('n', 'Old, edited');
+    host.disk.set('n', saved('n', { body: 'Revised by Claude', updatedAt: 10_000 }));
+    await book.load();
+    expect(book.get('n')?.body).toBe('Revised by Claude');
+    await vi.runAllTimersAsync();
+    expect(host.disk.get('n')?.body).toBe('Revised by Claude');
+
+    // A local edit after the outside write still wins.
+    book.edit('n', 'Mine, later');
+    host.disk.set('n', saved('n', { body: 'Stale', updatedAt: 1 }));
+    await book.load();
+    expect(book.get('n')?.body).toBe('Mine, later');
+  });
+
+  it('takes a replaced note while its save is still running', async () => {
+    const host = fakeHost([saved('n', { body: 'Old' })]);
+    let finish = () => {};
+    host.saveDraft.mockImplementationOnce(() => new Promise<undefined>((ok) => (finish = () => ok(undefined))));
+    const book = new DraftBook(host, () => t++);
+    await book.load();
+    book.edit('n', 'Old, edited');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(host.saveDraft).toHaveBeenCalledTimes(1);
+    host.disk.set('n', saved('n', { body: 'Revised by Claude', updatedAt: 10_000 }));
+    await book.load();
+    expect(book.get('n')?.body).toBe('Revised by Claude');
+    finish();
+    await vi.runAllTimersAsync();
+    expect(host.saveDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears only the comments a Send delivered', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    const note = book.create('# Recap', undefined, 's1');
+    const c = (id: string, text: string) => ({ id, quote: 'Recap', occurrence: 0, text, createdAt: 1 });
+    book.addNoteComment(note.id, c('a', 'Sent'));
+    book.addNoteComment(note.id, c('b', 'Sent too'));
+    book.setOverall(note.id, 'Overall');
+    const sent = book.get(note.id)!.annotations!;
+    book.editNoteComment(note.id, 'b', 'Changed while sending');
+    book.addNoteComment(note.id, c('c', 'New'));
+    book.clearSent(note.id, sent);
+    expect(book.get(note.id)?.annotations).toEqual({ comments: [c('b', 'Changed while sending'), c('c', 'New')] });
+  });
+
+  it('opens a new review instead of reusing an empty note', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    const note = book.create('', undefined, 's1');
+    const review = book.create('', undefined, 's1', undefined, { path: 'a.html', comments: [] });
+    expect(review.id).not.toBe(note.id);
+    expect(book.selected?.review?.path).toBe('a.html');
+  });
+});
+
+describe('a note opened from a file', () => {
+  const opened = (book: DraftBook, text: string) => book.create(text, 'n1', 's1', { path: 'doc.md', text });
+
+  it('keeps reading and watching the original source after refiling or unfiling', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    opened(book, 'Original');
+    book.file('n1', 's2');
+    book.file('n1', undefined);
+    expect(book.get('n1')!.source?.sessionId).toBe('s1');
+    host.files.set('doc.md', 'Agent revision');
+    expect(await book.refreshSource('n1')).toBe('updated');
+    expect(host.readSource).toHaveBeenCalledWith('s1', 'doc.md');
+    const stop = book.watchSource('n1');
+    expect(host.watchOutput).toHaveBeenCalledWith('s1', 'doc.md');
+    stop();
+    expect(host.unwatchOutput).toHaveBeenCalledWith('s1', 'doc.md');
+    await book.flush();
+    expect(host.disk.get('n1')!.source?.sessionId).toBe('s1');
+  });
+
+  it('advances the baseline when the file catches up to local edits', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    opened(book, 'Original');
+    book.edit('n1', 'User edit');
+    expect(book.syncSource('n1', 'User edit')).toBe('same');
+    expect(book.syncSource('n1', 'Next agent revision')).toBe('updated');
+    expect(book.get('n1')!.body).toBe('Next agent revision');
+  });
+
+  it('takes the file\'s new text when nobody edited it, and keeps its comments', async () => {
+    const host = fakeHost();
+    const book = new DraftBook(host, () => t++);
+    opened(book, '# Doc\n\nOld line\n');
+    book.addNoteComment('n1', { id: 'c1', quote: 'Doc', occurrence: 0, text: 'Shorter', createdAt: 1 });
+    host.files.set('doc.md', '# Doc\n\nNew line\n');
+
+    expect(await book.refreshSource('n1')).toBe('updated');
+    expect(book.get('n1')!.body).toBe('# Doc\n\nNew line\n');
+    expect(book.get('n1')!.source).toEqual({ path: 'doc.md', text: '# Doc\n\nNew line\n' });
+    expect(book.get('n1')!.annotations!.comments).toHaveLength(1);
+    expect(book.changedSource('n1')).toBeUndefined();
+  });
+
+  it('keeps an edited note\'s text when the file changed, until Reload', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    opened(book, 'Old line\n');
+    book.edit('n1', 'Old line, edited');
+
+    expect(book.syncSource('n1', 'New line\n')).toBe('changed');
+    expect(book.get('n1')!.body).toBe('Old line, edited');
+    expect(book.changedSource('n1')).toBe('New line\n');
+
+    book.reloadSource('n1');
+    expect(book.get('n1')!.body).toBe('New line\n');
+    expect(book.changedSource('n1')).toBeUndefined();
+  });
+
+  it('leaves an edited note alone while its file stays the same', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    opened(book, 'Old line\n');
+    book.edit('n1', 'Old line, edited');
+    expect(book.syncSource('n1', 'Old line\n')).toBe('same');
+    expect(book.get('n1')!.body).toBe('Old line, edited');
+  });
+
+  it('counts the editor trimming the last newline as no edit', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    opened(book, 'Old line\n');
+    book.edit('n1', 'Old line');
+    expect(book.syncSource('n1', 'New line\n')).toBe('updated');
+  });
+
+  it('flags a note saved before notes kept the file\'s text, since its edits are unknown', () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    book.create('Old line', 'n1', 's1', { path: 'doc.md' });
+    expect(book.syncSource('n1', 'New line')).toBe('changed');
+    expect(book.syncSource('n1', 'Old line')).toBe('same');
+    expect(book.get('n1')!.source).toEqual({ path: 'doc.md', text: 'Old line' });
+    expect(book.changedSource('n1')).toBeUndefined();
+  });
+
+  it('leaves the note as it is when the file is gone', async () => {
+    const book = new DraftBook(fakeHost(), () => t++);
+    opened(book, 'Old line');
+    expect(await book.refreshSource('n1')).toBe('same');
+    expect(book.get('n1')!.body).toBe('Old line');
+  });
+});

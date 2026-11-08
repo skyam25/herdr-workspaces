@@ -1,0 +1,7 @@
+{
+  "global": {
+    "cmd-shift-n": "mod.open:hws-new",
+    "cmd-shift-o": "mod.open:hws-panel",
+    "cmd-shift-b": "mod.open:hws-brief"
+  }
+}

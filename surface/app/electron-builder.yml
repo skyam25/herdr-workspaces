@@ -1,0 +1,69 @@
+# pnpm dist builds dist/mac-arm64/Agent Brief.app, signed with the
+# Developer ID cert. APPLE_KEYCHAIN_PROFILE also notarizes it (pnpm dist:notarize).
+# pnpm release builds the notarized zip and latest-mac.yml and publishes them
+# as a GitHub release, which installed copies update from.
+appId: com.agentbrief.app
+productName: Agent Brief
+directories:
+  output: dist
+  buildResources: build
+# Main, preload and renderer are bundled, so the app needs no node_modules.
+files:
+  - out/**
+  - package.json
+  - build/icons/trayTemplate.png
+  - build/icons/trayTemplate@2x.png
+  - '!**/node_modules/**'
+  - '!**/*.map'
+extraResources:
+  # electron-updater reads this before every download. electron-builder only
+  # generates it for zip and dmg targets, so a --dir build needs this copy.
+  - from: build/app-update.yml
+    to: app-update.yml
+  - from: bin/agent-brief.mjs
+    to: bin/agent-brief.mjs
+  - from: bin/agent-brief
+    to: bin/agent-brief
+  # The CLI's old name, kept for scripts that still call it.
+  - from: bin/agent-brief
+    to: bin/companion
+  # Live dictation on Apple's speech engine. pnpm build compiles it from native/.
+  - from: bin/agent-brief-dictate
+    to: bin/agent-brief-dictate
+  # The Claude Code plugin, laid out as a marketplace. Claude Code reads it in
+  # place, so it updates with the app. The filter matches what a git clone holds.
+  - from: ../.claude-plugin
+    to: plugin/.claude-plugin
+  - from: ../mod/agent-brief
+    to: plugin/mod/agent-brief
+    filter:
+      - '**/*'
+      - '!tests/**'
+      - '!.claude-plugin/types/**'
+      - '!**/.DS_Store'
+electronDist: node_modules/electron/dist
+# The UI is English only. Each locale.pak is signed and timestamped one at a
+# time, so dropping the other ~220 cuts minutes from signing and notarizing.
+electronLanguages:
+  - en
+npmRebuild: false
+nodeGypRebuild: false
+asar: true
+publish:
+  provider: github
+  owner: skyam25
+  repo: agent-brief
+mac:
+  target:
+    - target: zip
+      arch: arm64
+  artifactName: Agent-Brief-${version}-${arch}.${ext}
+  icon: build/icons/icon.icns
+  category: public.app-category.productivity
+  identity: Simon K Yam (KFDNEQ68KH)
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: Records your voice while you sketch so Claude hears what you mean.
+    NSAppleEventsUsageDescription: Opens Claude Code sessions in your terminal and brings them forward when you click a session.

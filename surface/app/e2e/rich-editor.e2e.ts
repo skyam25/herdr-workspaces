@@ -1,0 +1,446 @@
+import { expect, test, type Page } from '@playwright/test';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { DeliveriesResponse } from '../src/protocol';
+import { draftBody, launch, type Launched, RESULTS, sendToSession, showPanel, sock, tempDataDir } from './helpers';
+
+let ctx: Launched;
+let socketPath: string;
+let dataDir: string;
+
+test.beforeEach(async () => {
+  dataDir = tempDataDir();
+  socketPath = join(dataDir, 'companion.sock');
+  ctx = await launch(dataDir);
+  await showPanel(ctx.app, ctx.page);
+  await expect.poll(() => existsSync(socketPath)).toBe(true);
+  await ctx.page.getByTestId('mode-write').click();
+});
+
+test.afterEach(async () => {
+  await ctx.app.close();
+});
+
+const editor = (page: Page) => page.getByTestId('draft-body');
+const draftsOnDisk = () =>
+  readdirSync(join(dataDir, 'drafts'))
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => JSON.parse(readFileSync(join(dataDir, 'drafts', f), 'utf8')));
+
+/**
+ * Pastes a small PNG into the editor. Electron's clipboard is off limits in
+ * tests, so this builds the file in the page and fires a synthetic paste.
+ */
+async function pastePng(page: Page, width = 120, height = 80): Promise<void> {
+  await page.evaluate(
+    async ({ width, height }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const g = canvas.getContext('2d')!;
+      g.fillStyle = '#3b82f6';
+      g.fillRect(0, 0, width, height);
+      g.fillStyle = '#fbbf24';
+      g.fillRect(width / 4, height / 4, width / 2, height / 2);
+      const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
+      const data = new DataTransfer();
+      data.items.add(new File([blob], 'shot.png', { type: 'image/png' }));
+      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data });
+      document.querySelector('[data-testid="draft-body"]')!.dispatchEvent(event);
+    },
+    { width, height },
+  );
+}
+
+/** Inserts a block through the slash menu. */
+async function slash(page: Page, query: string, title: string): Promise<void> {
+  await page.keyboard.type(`/${query}`);
+  await expect(page.getByTestId('slash-menu')).toBeVisible();
+  await page.getByTestId('slash-item').filter({ hasText: title }).first().click();
+  await expect(page.getByTestId('slash-menu')).toHaveCount(0);
+}
+
+test('Markdown shortcuts make lists, tasks and headings, saved as Markdown', async () => {
+  const { page } = ctx;
+  await editor(page).click();
+  await page.keyboard.type('# Plan\n');
+  await page.keyboard.type('- one\ntwo\n\n');
+  await page.keyboard.type('1. first\nsecond\n\n');
+  await page.keyboard.type('[] check the login');
+
+  await expect(editor(page).locator('h1')).toHaveText('Plan');
+  await expect(editor(page).locator('ul:not([data-type="taskList"]) > li')).toHaveText(['one', 'two']);
+  await expect(editor(page).locator('ol > li')).toHaveText(['first', 'second']);
+  const task = editor(page).locator('ul[data-type="taskList"] > li');
+  await expect(task.locator(':scope > div')).toHaveText(['check the login']);
+  await expect(task.locator('input[type="checkbox"]')).not.toBeChecked();
+
+  const markdown = '# Plan\n\n- one\n- two\n\n1. first\n2. second\n\n- [ ] check the login';
+  await expect.poll(() => draftBody(page)).toBe(markdown);
+  await expect.poll(() => draftsOnDisk().map((d) => d.body)).toEqual([markdown]);
+});
+
+test('nested numbered lists go 1, a, i, and a right-click sets the format of one list', async () => {
+  const { page } = ctx;
+  await editor(page).click();
+  await page.keyboard.type('1. one\ntwo');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('\nthree');
+  await page.keyboard.press('Tab');
+
+  const styles = () =>
+    editor(page)
+      .locator('ol')
+      .evaluateAll((lists) => lists.map((l) => getComputedStyle(l).listStyleType));
+  await expect.poll(styles).toEqual(['decimal', 'lower-alpha', 'lower-roman']);
+  await expect.poll(() => draftBody(page)).toBe('1. one\n   a. two\n      i. three');
+
+  const three = editor(page).locator('li', { hasText: /^three$/ }).locator('p');
+  const menu = page.getByTestId('list-format-menu');
+  await three.click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('[aria-checked="true"]')).toHaveAttribute('data-format', 'i');
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(editor(page)).toBeVisible();
+
+  await three.click({ button: 'right' });
+  await menu.locator('[data-format="1"]').click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(styles).toEqual(['decimal', 'lower-alpha', 'decimal']);
+  await expect.poll(() => draftBody(page)).toBe('1. one\n   a. two\n      1. three');
+  await expect.poll(() => draftsOnDisk().map((d) => d.body)).toEqual(['1. one\n   a. two\n      1. three']);
+});
+
+test('a list started right after another, or one that comes to touch it, keeps counting', async () => {
+  const { page } = ctx;
+  const numbers = () => editor(page).locator(':scope > .ProseMirror > ol, :scope > ol');
+  await editor(page).click();
+  await page.keyboard.type('1. How\nSetup\n');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('Allow\n\n\n1. Follow up');
+  await expect.poll(() => draftBody(page)).toBe('1. How\n2. Setup\n   a. Allow\n3. Follow up');
+  await expect(numbers()).toHaveCount(1);
+
+  await page.keyboard.type('\n\nnote\n1. Release');
+  await expect(numbers()).toHaveCount(2);
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('End');
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Backspace');
+  await expect.poll(() => draftBody(page)).toBe('1. How\n2. Setup\n   a. Allow\n3. Follow up\n4. Release');
+  await expect(numbers()).toHaveCount(1);
+});
+
+/** The centre of the first occurrence of `word` in the editor. */
+async function wordCentre(page: Page, word: string): Promise<{ x: number; y: number }> {
+  return page.evaluate((word) => {
+    const walker = document.createTreeWalker(document.querySelector('[data-testid="draft-body"]')!, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent!.indexOf(word);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + word.length);
+      const r = range.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+    throw new Error(`no ${word}`);
+  }, word);
+}
+
+// The off-screen window never marks misspellings, so its text menu has no guesses. Unit tests cover those.
+test('a right-click on a misspelled word in a list gets the text menu, not the list menu', async () => {
+  const { page, app } = ctx;
+  const textMenu = () => app.evaluate(() => globalThis.__companion.panel.lastTextMenu.map((i) => i.role ?? i.label ?? i.type));
+  const rightClick = async (word: string) => {
+    await app.evaluate(() => void (globalThis.__companion.panel.lastTextMenu = []));
+    const at = await wordCentre(page, word);
+    await page.mouse.click(at.x, at.y, { button: 'right' });
+  };
+  const listMenu = page.getByTestId('list-format-menu');
+  await editor(page).click();
+  await page.keyboard.type('1. send the eligibilty packet');
+  await expect(editor(page).locator('ol > li')).toHaveText(['send the eligibilty packet']);
+
+  await rightClick('eligibilty');
+  await expect.poll(textMenu).toEqual(['cut', 'copy', 'paste', 'separator', 'selectAll']);
+  await expect(listMenu).toHaveCount(0);
+
+  await rightClick('packet');
+  await expect(listMenu).toBeVisible();
+  expect(await textMenu()).toEqual([]);
+});
+
+test('⌘B bolds a selection, and the format bar shows while text is selected', async () => {
+  const { page } = ctx;
+  await editor(page).click();
+  await page.keyboard.type('plain then loud');
+  await expect(page.getByTestId('format-bar')).toBeHidden();
+
+  // ProseMirror reads a burst of typed keys a moment later. A caret key sent before then is lost.
+  await page.waitForTimeout(100);
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await expect(page.getByTestId('format-bar')).toBeVisible();
+  await expect(page.getByTestId('format-bold')).toHaveAttribute('aria-pressed', 'false');
+
+  await page.keyboard.press('Meta+B');
+  await expect(editor(page).locator('strong')).toHaveText('loud');
+  await expect(page.getByTestId('format-bold')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => draftBody(page)).toBe('plain then **loud**');
+});
+
+test('the format bar turns a selected line into a heading, a list, and back to text', async () => {
+  const { page } = ctx;
+  await editor(page).click();
+  await page.keyboard.type('Goals');
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Shift+Home');
+
+  const kind = page.getByTestId('format-kind');
+  await expect(kind).toHaveText('Text');
+  await kind.click();
+  await expect(page.getByTestId('kind-menu')).toBeVisible();
+  await page.screenshot({ path: join(RESULTS, 'format-kind-menu.png') });
+  await page.getByTestId('kind-item').and(page.locator('[data-key="h2"]')).click();
+  await expect(page.getByTestId('kind-menu')).toHaveCount(0);
+  await expect(editor(page).locator('h2')).toHaveText('Goals');
+  await expect(kind).toHaveText('Heading 2');
+  await expect.poll(() => draftBody(page)).toBe('## Goals');
+
+  await kind.click();
+  await page.getByTestId('kind-item').and(page.locator('[data-key="bullet"]')).click();
+  await expect(editor(page).locator('ul > li')).toHaveText(['Goals']);
+  await expect.poll(() => draftBody(page)).toBe('- Goals');
+
+  await kind.click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('kind-menu')).toHaveCount(0);
+  await expect(editor(page)).toBeVisible();
+
+  await kind.click();
+  await page.getByTestId('kind-item').and(page.locator('[data-key="text"]')).click();
+  await expect.poll(() => draftBody(page)).toBe('Goals');
+});
+
+test('the gutter + opens the block menu on an empty line, and below a hovered block', async () => {
+  const { page } = ctx;
+  const plus = page.getByTestId('block-plus');
+  await editor(page).click();
+  await expect(plus).toBeVisible();
+  await page.screenshot({ path: join(RESULTS, 'block-plus-empty.png') });
+  await plus.click();
+  await expect(page.getByTestId('slash-menu')).toBeVisible();
+  await expect(plus).toHaveCount(0);
+  await page.getByTestId('slash-item').and(page.locator('[data-key="h1"]')).click();
+  await page.keyboard.type('Plan');
+  await expect(editor(page).locator('h1')).toHaveText('Plan');
+
+  await editor(page).locator('h1').hover();
+  await expect(plus).toBeVisible();
+  await plus.click();
+  await expect(page.getByTestId('slash-menu')).toBeVisible();
+  await page.getByTestId('slash-item').and(page.locator('[data-key="todo"]')).click();
+  await page.keyboard.type('write tests');
+  await expect.poll(() => draftBody(page)).toBe('# Plan\n\n- [ ] write tests');
+});
+
+test('the gutter + lines up with the hovered list item and adds the next item', async () => {
+  const { page } = ctx;
+  const plus = page.getByTestId('block-plus');
+  await editor(page).click();
+  await page.keyboard.type('- first');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('second');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('third, a longer item that runs on');
+  const items = editor(page).locator('li');
+  await expect(items).toHaveCount(3);
+
+  const last = (await items.nth(2).boundingBox())!;
+  await page.mouse.move(last.x + 40, last.y + 6);
+  await expect
+    .poll(async () => {
+      const box = (await plus.boundingBox())!;
+      return Math.abs(box.y + box.height / 2 - (last.y + 11));
+    }, { timeout: 2000 })
+    .toBeLessThan(8);
+  await page.screenshot({ path: join(RESULTS, 'block-plus-list.png') });
+
+  await plus.click();
+  await expect(page.getByTestId('slash-menu')).toBeVisible();
+  await expect(items).toHaveCount(4);
+  await expect(items.nth(3)).toHaveText('/');
+});
+
+test('the gutter + follows the caret to a new line while the pointer rests on the old one', async () => {
+  const { page } = ctx;
+  const plus = page.getByTestId('block-plus');
+  await editor(page).click();
+  await page.keyboard.type('first line');
+  const line = editor(page).locator('p').first();
+  await line.hover();
+  await expect(plus).toBeVisible();
+
+  await page.keyboard.press('Enter');
+  const fresh = (await editor(page).locator('p').nth(1).boundingBox())!;
+  await expect
+    .poll(async () => {
+      const box = (await plus.boundingBox())!;
+      return Math.abs(box.y + box.height / 2 - (fresh.y + fresh.height / 2));
+    }, { timeout: 2000 })
+    .toBeLessThan(6);
+});
+
+test('an empty draft offers its templates as chips, and a chip fills the draft', async () => {
+  const { page } = ctx;
+  const chips = page.getByTestId('starter-chip');
+  await expect(chips).toHaveText(['One-pager', 'User story', 'Prototype', 'Status update']);
+  await page.screenshot({ path: join(RESULTS, 'starter-chips.png') });
+  await chips.filter({ hasText: 'Prototype' }).click();
+  await expect(page.getByTestId('starter-chips')).toHaveCount(0);
+  await expect.poll(() => draftBody(page)).toMatch(/^Prototype \{\{the idea\}\}/);
+  await page.keyboard.type('a pricing page');
+  await expect.poll(() => draftBody(page)).toMatch(/^Prototype a pricing page/);
+});
+
+test('/table inserts a table that grows by row and column, saved as a GFM table', async () => {
+  const { page } = ctx;
+  await editor(page).click();
+  await slash(page, 'table', 'Table');
+  const table = editor(page).locator('table');
+  await expect(table.locator('tr')).toHaveCount(3);
+  await expect(table.locator('tr').first().locator('th')).toHaveCount(3);
+
+  await page.keyboard.type('Name');
+  await table.locator('tr').nth(1).locator('td').first().click();
+  await page.keyboard.type('Ada');
+  await expect(page.getByTestId('table-menu')).toBeVisible();
+  await page.getByTestId('table-row-below').click();
+  await page.getByTestId('table-col-right').click();
+  await expect(table.locator('tr')).toHaveCount(4);
+  await expect(table.locator('tr').first().locator('th')).toHaveCount(4);
+
+  await expect
+    .poll(async () => (await draftBody(page)).split('\n').filter((l) => l.startsWith('|')).length, { message: 'header, rule and three rows' })
+    .toBe(5);
+  const lines = (await draftBody(page)).split('\n');
+  expect(lines[0]).toMatch(/^\|\s*Name\s*\|(\s*\|){3}$/);
+  expect(lines[1]).toMatch(/^\|(\s*:?-{3,}:?\s*\|){4}$/);
+  expect(lines[2]).toMatch(/^\|\s*Ada\s*\|(\s*\|){3}$/);
+});
+
+test('a pasted picture becomes an attachment and goes out as a bundle file', async () => {
+  const { page } = ctx;
+  const cwd = mkdtempSync(join(tmpdir(), 'project-'));
+  await sock(socketPath, 'POST', '/sessions', { sessionId: 's1', cwd, title: 'Login work' });
+  await editor(page).click();
+  await page.keyboard.type('The header overlaps here\n');
+  await pastePng(page);
+
+  await expect(page.getByTestId('draft-image')).toHaveCount(1);
+  // Typing after a paste goes below the picture and keeps it.
+  await page.keyboard.type('Fix this first.');
+  await expect(page.getByTestId('draft-image')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => Object.keys(window.__drafts.selected!.attachments ?? {}).length)).toBe(1);
+  const [id, data] = await page.evaluate(() => Object.entries(window.__drafts.selected!.attachments!)[0] as [string, string]);
+  expect(id).toMatch(/^[a-z0-9]{6,24}$/);
+  expect(data).toMatch(/^data:image\/png;base64,/);
+  await expect.poll(() => draftBody(page)).toBe(`The header overlaps here\n\n![](att:${id})\n\nFix this first.`);
+  await expect.poll(() => draftsOnDisk()[0]?.attachments).toEqual({ [id]: data });
+
+  await sendToSession(page, 'Login work');
+  await expect.poll(() => ctx.app.evaluate(() => globalThis.__companion.panel.isVisible())).toBe(false);
+  const [d] = (await sock<DeliveriesResponse>(socketPath, 'GET', '/deliveries?session=s1&wait=0')).body.deliveries;
+  const line = `@.feedback/sketches/${d.id}/images/${id}.png`;
+  expect(readdirSync(join(d.dir, 'images'))).toEqual([`${id}.png`]);
+  expect(readFileSync(join(d.dir, 'images', `${id}.png`))).toEqual(Buffer.from(data.split(',')[1], 'base64'));
+  const draftMd = readFileSync(join(d.dir, 'draft.md'), 'utf8');
+  for (const text of [d.draft, draftMd]) {
+    expect(text).toBe(`The header overlaps here\n\n${line}\n\nFix this first.`);
+    expect(text).not.toContain('att:');
+  }
+});
+
+test('a plain-text draft from before the editor opens as paragraphs and stays as written', async () => {
+  await ctx.app.close();
+  const drafts = join(dataDir, 'drafts');
+  mkdirSync(drafts, { recursive: true });
+  const old = { id: 'old-note', body: 'First line\nsecond line', status: 'note', rank: 0, createdAt: 1_700_000_000_000, updatedAt: 1_700_000_000_000 };
+  writeFileSync(join(drafts, 'old-note.json'), JSON.stringify(old));
+
+  ctx = await launch(dataDir);
+  const { app, page } = ctx;
+  await showPanel(app, page);
+  await page.getByTestId('mode-write').click();
+  const row = page.getByTestId('draft-row').filter({ hasText: 'First line' });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('.title')).toHaveText('First line');
+  await row.click();
+  await expect(editor(page)).toContainText('First line');
+  await expect(editor(page)).toContainText('second line');
+
+  // Opening a note is no edit, so it keeps its text and its place in the list.
+  await page.waitForTimeout(500);
+  const [onDisk] = draftsOnDisk();
+  expect(onDisk).toMatchObject({ body: old.body, updatedAt: old.updatedAt });
+});
+
+test('⌘F finds in the note, steps through matches, and Escape leaves the cursor on the match', async () => {
+  const { page } = ctx;
+  const filler = Array.from({ length: 40 }, (_, i) => `Filler line ${i + 1}.`).join('\n\n');
+  await page.evaluate((body) => window.__drafts.create(body), `# Login\n\n${filler}\n\n## Rollout\n\nRemember **SSO** for the login page.\n\nAsk about sso again.`);
+  await expect(editor(page)).toContainText('Rollout');
+
+  await editor(page).click();
+  await page.keyboard.press('Meta+f');
+  const input = page.getByTestId('find-input');
+  await expect(input).toBeFocused();
+  await input.fill('sso');
+  await expect(page.getByTestId('find-count')).toHaveText('1 of 2');
+  await expect(page.locator('.find-hit')).toHaveCount(2);
+
+  // The match in focus scrolls into view.
+  await expect(page.locator('.find-hit.current')).toBeInViewport();
+  await page.screenshot({ path: join(RESULTS, 'find-in-note.png') });
+
+  await input.press('Enter');
+  await expect(page.getByTestId('find-count')).toHaveText('2 of 2');
+  await page.keyboard.press('Meta+g');
+  await expect(page.getByTestId('find-count')).toHaveText('1 of 2');
+  await page.keyboard.press('Shift+Meta+g');
+  await expect(page.getByTestId('find-count')).toHaveText('2 of 2');
+
+  // Edits keep the count right.
+  await page.evaluate(() => window.__drafts.edit(window.__drafts.selected!.id, `${window.__drafts.selected!.body}\n\nOne more SSO.`));
+  await expect(page.getByTestId('find-count')).toHaveText('2 of 3');
+
+  await input.fill('nothing like this');
+  await expect(page.getByTestId('find-count')).toHaveText('No matches');
+  await input.fill('remember sso');
+  await expect(page.getByTestId('find-count')).toHaveText('1 of 1');
+
+  await input.press('Escape');
+  await expect(page.getByTestId('find-bar')).toHaveCount(0);
+  await expect(page.locator('.find-hit')).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('Remember SSO');
+
+  // ⌘F with words selected looks for them.
+  await page.keyboard.press('Meta+f');
+  await expect(page.getByTestId('find-input')).toHaveValue('Remember SSO');
+});
+
+test('opening a note from a filtered list finds the search words in it', async () => {
+  const { page } = ctx;
+  await page.evaluate(() => {
+    window.__drafts.create('A note about lunch.');
+    window.__drafts.create('# Plan\n\nThe rollout needs SSO first.');
+    window.__drafts.select(undefined);
+  });
+  await page.getByTestId('draft-search').fill('rollout');
+  await page.locator('.draft-row', { hasText: 'Plan' }).click();
+  await expect(page.getByTestId('find-input')).toHaveValue('rollout');
+  await expect(page.getByTestId('find-count')).toHaveText('1 of 1');
+  await expect(page.locator('.find-hit.current')).toHaveText('rollout');
+});

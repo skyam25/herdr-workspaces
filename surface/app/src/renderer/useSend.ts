@@ -1,0 +1,313 @@
+/** Send: builds what each mode hands over, delivers it, and clears what went out. */
+
+import { useRef, type RefObject } from 'react';
+import { hasAnnotations } from '../shared/annotations';
+import { hasBoardComments, type BoardComments } from '../shared/board-comments';
+import { draftImages, inWrite } from '../shared/drafts';
+import { hasReviewContent } from '../shared/review';
+import type { NoteAnnotations } from '../shared/annotations';
+import type { CompanionApi, Decision, Draft, Launcher, Mode, Outgoing, SendResult } from '../shared/ipc';
+import { isLocalUrl } from '../shared/outputs';
+import { findSlots } from '../shared/slots';
+import type { BoardCommentsStore } from './board-comments';
+import type { BoardController } from './controller';
+import type { DraftBook, SentRevision } from './drafts';
+import { focusFirstSlot } from './editor/RichEditor';
+import { DISCOVER_PROMPT } from './initiatives';
+import type { ItemsStore } from './items';
+import type { ReviewVoice } from './review-voice';
+import type { ToastKind } from './Toast';
+
+/** A fixed text to hand a session, such as Feedback's decisions. `onSent` runs once it went out and throws when its follow-up failed. */
+export interface FixedSend {
+  text: string;
+  onSent?: () => Promise<void>;
+}
+
+/** The decisions an Items Send delivers, so success can clear them. */
+interface Decided {
+  sessionId: string;
+  decisions: Decision[];
+}
+
+export interface SendDeps {
+  host: CompanionApi;
+  book: DraftBook;
+  controller: BoardController;
+  comments: BoardCommentsStore;
+  items: ItemsStore;
+  reviewVoice: ReviewVoice;
+  modeRef: RefObject<Mode>;
+  /** The session tab on show, which Review mode sends decisions for. */
+  activeBrief: string | undefined;
+  targetSessionId?: string;
+  notify: (text: string, kind?: ToastKind) => void;
+  setChooserOpen: (open: boolean) => void;
+  /** On a surface the host reports the outcome, and the work stays until the pane closes. */
+  surface?: boolean;
+}
+
+export interface PanelSend {
+  send: () => Promise<void>;
+  sendTo: (sessionId: string) => Promise<void>;
+  sendNew: (cwd: string, via: Launcher) => Promise<void>;
+  copyPrompt: (cwd: string) => Promise<void>;
+  openChooser: (open: boolean) => void;
+  /** Hands the open board, or in Review the open page, to the paired iPad. Its answer returns to `sessionId`. */
+  handOffToIpad: (sessionId: string) => Promise<void>;
+  /** Hands a running session what `build` makes, or says why `build` made nothing. */
+  sendText: (sessionId: string, build: () => Promise<FixedSend | string>) => Promise<void>;
+}
+
+/** What a Send does with its draft: uses it up, or keeps it for Claude to revise and clears the comments it delivered. */
+type DraftUse = { sent: SentRevision } | { annotated: { id: string; sent: NoteAnnotations } };
+
+/** The draft's own payload fields, and what the Send does with it. A commented note with no file behind it is revised in place. */
+const draftOut = (draft: Draft): { own: Outgoing & { text: string }; use: DraftUse } => {
+  const inPlace = hasAnnotations(draft.annotations) && !draft.source;
+  return {
+    own: { text: draft.body, ...(inPlace ? {} : { draftId: draft.id, draftRevision: draft.updatedAt }), ...fromDraft(draft) },
+    use: inPlace ? { annotated: { id: draft.id, sent: draft.annotations! } } : { sent: { body: draft.body, board: draft.board, updatedAt: draft.updatedAt } },
+  };
+};
+
+/** The payload fields a draft adds: the pictures its body references, the output file it was copied from, and its comments, when it has them. */
+const fromDraft = (draft: Draft) => {
+  const images = draftImages(draft);
+  // A note with no file behind it is revised in place, so Claude gets its id.
+  const annotations = hasAnnotations(draft.annotations)
+    ? { ...draft.annotations!, ...(draft.title ? { title: draft.title } : {}), ...(draft.source ? {} : { noteId: draft.id }) }
+    : undefined;
+  return {
+    ...(images.length ? { images } : {}),
+    ...(draft.source ? { sourcePath: draft.source.path } : {}),
+    ...((draft.source || draft.review) && (draft.source?.sessionId ?? draft.sessionId) ? { fileSessionId: draft.source?.sessionId ?? draft.sessionId } : {}),
+    ...(annotations ? { annotations } : {}),
+  };
+};
+
+/** The project HTML file a review draft shows, which an iPad can review as a page. Undefined for a dev server's page. */
+export const reviewPage = (draft: Draft | undefined): string | undefined =>
+  draft?.review && !isLocalUrl(draft.review.path) ? draft.review.path : undefined;
+
+export function useSend({ host, book, controller, comments, items, reviewVoice, modeRef, activeBrief, targetSessionId, notify, setChooserOpen, surface }: SendDeps): PanelSend {
+  /** The text whose empty slots were already pointed out, so a second Send goes through. */
+  const slotsWarned = useRef<string>(undefined);
+  /** True from the press of Send until main answers, so a second press cannot send twice. */
+  const sending = useRef(false);
+
+  const checkSlots = (text: string): string | undefined => {
+    const count = findSlots(text).length;
+    if (!count || slotsWarned.current === text) return undefined;
+    slotsWarned.current = text;
+    return `${count === 1 ? '1 empty slot' : `${count} empty slots`}. Send again to send anyway.`;
+  };
+
+  /** Why a note opened from a file cannot go out yet: the file changed since the note last matched it. */
+  const sourceBlocker = async (id: string): Promise<string | undefined> => {
+    const sync = await book.refreshSource(id);
+    if (sync === 'updated') return 'The file changed, so the note now shows its new text. Look it over, then Send again.';
+    if (sync === 'changed') return 'The file changed since you edited this note. Reload the note in Write, or copy your edits first.';
+    return undefined;
+  };
+
+  /** Why Send in Review mode has no decisions to send, if it has not. */
+  const itemsBlocker = (): string | undefined => {
+    if (!activeBrief) return "Open a session's items first.";
+    if (items.decisions(activeBrief).length === 0) return 'Decide something first.';
+    return undefined;
+  };
+
+  /**
+   * What Send hands over. Sketch mode sends the board with any draft pulled in.
+   * Write mode sends the open draft with the board it carries, if any.
+   * Review mode sends the open review, or the decisions on the session's items.
+   * Initiative mode sends the discover prompt.
+   */
+  const outgoing = async (): Promise<
+    | {
+        payload: Outgoing;
+        clearsBoard: boolean;
+        sent?: SentRevision;
+        annotated?: { id: string; sent: NoteAnnotations };
+        decided?: Decided;
+        pinned?: { board: string; sent: BoardComments };
+        onSent?: () => Promise<void>;
+      }
+    | string
+  > => {
+    if (modeRef.current === 'initiative') return { payload: { text: DISCOVER_PROMPT }, clearsBoard: false };
+    if (modeRef.current === 'review') {
+      const open = book.selected;
+      if (open?.review) {
+        if (book.behaviorEditing.has(open.id)) return 'Save or cancel the behavior edit before sending.';
+        if (!hasReviewContent(open.review, open.body)) return 'Pin a comment first.';
+        // Words still turning into text land before the Send reads the draft.
+        await reviewVoice.stop();
+        await book.flush();
+        const d = book.get(open.id) ?? open;
+        const review = { ...d.review!, ...(d.body.trim() ? { body: d.body } : {}) };
+        return { payload: { text: d.body, draftId: d.id, draftRevision: d.updatedAt, review, ...fromDraft(d) }, clearsBoard: false, sent: { body: d.body, updatedAt: d.updatedAt } };
+      }
+      const blocked = itemsBlocker();
+      if (blocked) return blocked;
+      const decided = { sessionId: activeBrief!, decisions: items.decisions(activeBrief!) };
+      const { draft } = await host.saveDecisions(decided.sessionId, decided.decisions);
+      return { payload: { text: draft }, clearsBoard: false, decided };
+    }
+    if (modeRef.current === 'sketch') {
+      const linked = book.linkedTo(controller.board);
+      const unfilled = linked && checkSlots(linked.body);
+      if (unfilled) return unfilled;
+      await book.flush();
+      // Words still turning into text land on their pins before the Send reads them.
+      await reviewVoice.stop();
+
+      // Comments review the board, so a Send with them keeps the board and clears only the pins.
+      const board = controller.board;
+      const pinned = comments.of(board);
+      const reviewed = hasBoardComments(pinned);
+      const payload = { ...(await controller.payload(reviewed ? pinned.pins : undefined)), ...(reviewed ? { comments: pinned } : {}) };
+      const kept = reviewed ? { clearsBoard: false, pinned: { board, sent: pinned } } : { clearsBoard: true };
+      if (!linked) return { payload, ...kept };
+      const stale = await sourceBlocker(linked.id);
+      if (stale) return stale;
+      const { own, use } = draftOut(book.get(linked.id) ?? linked);
+      return { payload: { ...payload, ...own }, ...kept, ...use };
+    }
+    const open = book.selected?.review ? undefined : book.selected;
+    if (!open || (!open.body.trim() && !open.board)) return 'Write something first.';
+    const unfilled = checkSlots(open.body);
+    if (unfilled) {
+      focusFirstSlot('draft-body');
+      return unfilled;
+    }
+    // Words still turning into text land on their comments before the Send reads them.
+    await reviewVoice.stop();
+    await book.flush();
+    const stale = await sourceBlocker(open.id);
+    if (stale) return stale;
+    const draft = book.get(open.id) ?? open;
+    const { own, use } = draftOut(draft);
+    if (!draft.board) return { payload: own, clearsBoard: false, ...use };
+    if (draft.board !== controller.board) await controller.switchTo(draft.board);
+    return { payload: { ...(await controller.payload()), ...own }, clearsBoard: true, ...use };
+  };
+
+  const fixedOutgoing = async (build: () => Promise<FixedSend | string>): ReturnType<typeof outgoing> => {
+    const fixed = await build();
+    return typeof fixed === 'string' ? fixed : { payload: { text: fixed.text }, clearsBoard: false, onSent: fixed.onSent };
+  };
+
+  /** Builds the payload, or a fixed one, hands it over, and hides the panel once it went out. */
+  const deliver = async (handOff: (payload: Outgoing) => Promise<SendResult>, fixed?: () => Promise<FixedSend | string>, before?: () => Promise<void>) => {
+    if (sending.current) return;
+    sending.current = true;
+    setChooserOpen(false);
+    notify('Preparing…', 'progress');
+    try {
+      const out = fixed ? await fixedOutgoing(fixed) : await outgoing();
+      // A picked session stays the target after a warning, so the next Send reaches it.
+      await before?.();
+      if (typeof out === 'string') {
+        notify(out);
+        return;
+      }
+      const result = await handOff(out.payload);
+      if (result.ok && surface) return;
+      // A follow-up that failed keeps the panel up, so the user sees what is left undone.
+      if (result.ok && out.onSent) {
+        const failed = await out.onSent().then(() => undefined, (err: Error) => err.message);
+        if (failed) {
+          notify(`Sent, but ${failed}`, 'error');
+          return;
+        }
+      }
+      notify(result.message, result.ok ? 'sent' : 'error');
+      if (result.ok) {
+        let cleanupError: unknown;
+        if ('png' in out.payload) {
+          try { await controller.finishSend(out.payload, out.clearsBoard, (board) => !hasBoardComments(comments.of(board))); }
+          catch (err) { cleanupError = err; }
+        }
+        if (out.pinned) {
+          const board = comments.consume(out.pinned.board, out.pinned.sent);
+          if (board && controller.board === board && !hasBoardComments(comments.of(board))) comments.setTool(false);
+        }
+        if (out.payload.draftId && out.sent) book.consume(out.payload.draftId, out.sent);
+        if (out.annotated) book.clearSent(out.annotated.id, out.annotated.sent);
+        if (out.decided) {
+          items.clear(out.decided.sessionId, out.decided.decisions);
+          void items.load(out.decided.sessionId).catch(() => undefined);
+        }
+        try { await Promise.all([book.flush(), comments.flush()]); }
+        catch (err) { cleanupError ??= err; }
+        if (cleanupError) {
+          notify(`Sent, but could not save the remaining work: ${(cleanupError as Error).message}`, 'error');
+          return;
+        }
+        host.hidePanel();
+      }
+    } catch (err) {
+      notify(`Send failed: ${(err as Error).message}`, 'error');
+    } finally {
+      sending.current = false;
+    }
+  };
+
+  const send = () => {
+    if (!targetSessionId) { notify('Choose a session to send to.'); return Promise.resolve(); }
+    return deliver((p) => host.send(p, targetSessionId));
+  };
+  const sendTo = (sessionId: string) => deliver((p) => host.send(p, sessionId), undefined, () => host.setTarget(sessionId));
+  const sendText = (sessionId: string, build: () => Promise<FixedSend | string>) =>
+    deliver((p) => host.send(p, sessionId), build, () => host.setTarget(sessionId));
+  const sendNew = (cwd: string, via: Launcher) => deliver((p) => host.sendNew(p, { cwd, via }));
+  const copyPrompt = (cwd: string) => deliver((p) => host.copyPrompt(p, cwd));
+  const handOffToIpad = async (sessionId: string) => {
+    if (sending.current) return;
+    sending.current = true;
+    try {
+      const page = modeRef.current === 'review' ? reviewPage(book.selected) : undefined;
+      if (page) {
+        await host.setTarget(sessionId);
+        await host.ipadHandoff(sessionId, { page });
+        setChooserOpen(false);
+        notify(book.selected?.review?.comments.length ? 'Sent the page to your iPad. Comments stay on this Mac.' : 'Sent the page to your iPad.');
+        return;
+      }
+      const board = controller.board;
+      await Promise.all([controller.flush(), comments.flush()]);
+      await host.setTarget(sessionId);
+      await host.ipadHandoff(sessionId, { board });
+      setChooserOpen(false);
+      notify(hasBoardComments(comments.of(board)) ? 'Sent to your iPad. Comments stay on this Mac.' : 'Sent to your iPad.');
+    } catch (err) {
+      notify(`Could not hand off to the iPad: ${(err as Error).message}`, 'error');
+    } finally {
+      sending.current = false;
+    }
+  };
+  /** An empty note says so before any session is picked. */
+  const openChooser = (open: boolean) => {
+    const blocked = open ? chooserBlocker() : undefined;
+    if (blocked) {
+      notify(blocked);
+      return;
+    }
+    setChooserOpen(open);
+  };
+  /** Why the session picker has nothing to send yet, if it has not. */
+  const chooserBlocker = (): string | undefined => {
+    const draft = book.selected;
+    if (modeRef.current === 'review') {
+      if (!draft?.review) return itemsBlocker();
+      return hasReviewContent(draft.review, draft.body) ? undefined : 'Pin a comment first.';
+    }
+    if (modeRef.current !== 'write') return undefined;
+    const note = draft && inWrite(draft) ? draft : undefined;
+    return !note || (!note.body.trim() && !note.board) ? 'Write something first.' : undefined;
+  };
+
+  return { send, sendTo, sendNew, copyPrompt, openChooser, handOffToIpad, sendText };
+}

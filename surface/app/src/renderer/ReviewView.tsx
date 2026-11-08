@@ -1,0 +1,910 @@
+import type { BehaviorDocument, BehaviorDecision, FeedbackDocument } from '../protocol';
+import { BehaviorPanel } from './BehaviorPanel';
+import { FeedbackPanel, openCount, useFeedbackDoc, type FeedbackHost, type SendFeedback } from './FeedbackPanel';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { concerns, type CompanionApi, type Draft } from '../shared/ipc';
+import { isLocalUrl } from '../shared/outputs';
+import { anchorLabel, baseName, commentCount, sitePage, type DraftReview, type ReviewAnchor, type ReviewComment, type ReviewRect } from '../shared/review';
+import type { InsertKind, ReviewEdit, SelectedElement } from '../shared/review-edit';
+import { isTagged, pagePin, REVIEW_SOURCE, type FromPage, type PagePin, type ToPage } from '../review/messages';
+import type { DraftBook } from './drafts';
+import { newPictureId } from './editor/pictures';
+import { useStore } from './hooks';
+import { CloseIcon, CommentIcon, ExpandIcon, ExternalIcon, LinkIcon, PencilIcon, ReloadIcon, SidebarIcon, TrashIcon } from './Icons';
+import { Inspector } from './Inspector';
+import { useOutputWatch, type OutputWatchHost } from './output-watch';
+import { PageFind } from './PageFind';
+import { OVERALL, type ReviewVoice } from './review-voice';
+import { VoiceState } from './VoiceState';
+import { useItemWorkspace, WorkspaceLayer, type WorkspaceHost } from './WorkspaceLayer';
+import type { WorkspaceSnapshot } from '../shared/feedback-workspace';
+import { cleanError } from './ipc-error';
+
+export type ReviewHost = FeedbackHost & WorkspaceHost & OutputWatchHost & Pick<CompanionApi, 'readBehavior' | 'decideBehavior' | 'onBehaviorChanged' | 'reviewUrl' | 'reviewEdit' | 'reviewUndo' | 'reviewRedo' | 'capturePanel' | 'openLink' | 'openOutputElsewhere'>;
+
+export type ReviewDraft = Draft & { review: DraftReview };
+
+/** A draft keeps 40 pictures. Pins past this many go without one. */
+const MAX_PICTURES = 36;
+/** Room around an element's crop. */
+const CROP_PAD = 12;
+/** How long a page has to answer before the pane says it cannot add pins. */
+const READY_WAIT_MS = 2000;
+/** How long the page has to measure an element for a workspace snapshot. */
+const MEASURE_WAIT_MS = 1500;
+/** How long a workspace capture waits for the page to load. */
+const PAGE_WAIT_MS = 8000;
+
+/** The side column's width: its default, its narrowest, and its widest share of the pane. */
+const NOTES_WIDTH = 300;
+const NOTES_MIN = 260;
+const NOTES_MAX_SHARE = 0.7;
+const WIDTH_KEY = 'agent-brief.review-notes-width';
+
+const savedWidth = () => {
+  try {
+    const n = Number(localStorage.getItem(WIDTH_KEY));
+    return Number.isFinite(n) && n >= NOTES_MIN ? n : NOTES_WIDTH;
+  } catch {
+    return NOTES_WIDTH;
+  }
+};
+
+const newCommentId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+const editable = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || t.matches('input, textarea, select'));
+
+/** Open review pages' find bars, so the Edit menu's Find can reach them. */
+const finders = new Set<() => void>();
+
+/** Opens the find bar on the review page on show. */
+export function openPageFind(): void {
+  for (const open of finders) open();
+}
+
+/** Open items, and closed ones a later round raised again, need a look. */
+const needsLook = (doc: FeedbackDocument) => doc.items.some((i) => i.state === 'open' || i.raisedAgain !== undefined);
+
+/** The part of `view`, padded, that lies inside the frame, in window pixels. */
+function cropRect(frame: DOMRect, view: ReviewRect): ReviewRect {
+  const left = Math.max(frame.left, frame.left + view.x - CROP_PAD);
+  const top = Math.max(frame.top, frame.top + view.y - CROP_PAD);
+  const right = Math.min(frame.right, frame.left + view.x + view.width + CROP_PAD);
+  const bottom = Math.min(frame.bottom, frame.top + view.y + view.height + CROP_PAD);
+  return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+}
+
+/** Where a page sits on its site, as the pane keys pins: a project path, or a dev server's path and query. */
+const siteHref = (site: boolean, base: string, page: string) =>
+  site ? new URL(page, base).href : new URL(`/${page.split('/').map(encodeURIComponent).join('/')}`, base).href;
+
+/**
+ * Reviews a session's HTML file, or a page a dev server on this Mac serves: the live page on the left,
+ * its pinned comments on the right. Comment mode turns a click or a text selection into a pin, and
+ * the mic sends what you say to the selected pin. Pins keep the page they sit on, so a link can lead on.
+ * Edit mode changes a file's elements in place and saves each change to the file, with the inspector on the right.
+ * When the file has feedback items, the side column walks Claude's items and your comments float over the page.
+ * The side column's left edge drags to resize it, and its expand button widens it to half the pane.
+ */
+export function ReviewView(props: {
+  host: ReviewHost;
+  book: DraftBook;
+  draft: ReviewDraft;
+  voice: ReviewVoice;
+  /** Whether the list beside the pane shows. The pane's first button hides or shows it. */
+  listOpen: boolean;
+  /** Undefined hides the toggle. */
+  onToggleList?: () => void;
+  onSend: () => void;
+  onSendFeedback: SendFeedback;
+  /** The session runs, so Send decisions can reach it. */
+  canSend: boolean;
+  onError: (message: string) => void;
+  /** Opens another output's feedback item, from the graph. */
+  onOpenFeedbackItem?: (output: string, n: number) => void;
+  /** Copies a line that brings this page into another Claude Code session. */
+  onCopyReference: () => void;
+}) {
+  const { book, draft, host } = props;
+  const voice = useStore(props.voice);
+  const { review } = draft;
+  /** A dev server's page, which has no file behind it to edit, watch or give feedback items. */
+  const site = isLocalUrl(review.path);
+  const fileSession = site ? undefined : draft.sessionId;
+  /** The review's own page, as pins key it. */
+  const home = site ? sitePage(review.path) : review.path;
+  const [side, setSide] = useState<'comments' | 'behavior' | 'feedback'>('comments');
+  const sideRef = useRef(side);
+  sideRef.current = side;
+  const feedback = useFeedbackDoc(host, fileSession, review.path);
+  const [behavior, setBehavior] = useState<BehaviorDocument>();
+  const [behaviorError, setBehaviorError] = useState<string>();
+  const behaviorRequest = useRef(0);
+  const loadBehavior = useCallback(async () => {
+    if (!draft.sessionId || site) return;
+    const request = ++behaviorRequest.current;
+    try {
+      const doc = await host.readBehavior(draft.sessionId, review.path);
+      if (request !== behaviorRequest.current) return;
+      setBehavior(doc);
+      setBehaviorError(undefined);
+      book.setBehavior(draft.id, doc);
+    } catch (err) { if (request === behaviorRequest.current) setBehaviorError((err as Error).message); }
+  }, [host, book, draft.id, draft.sessionId, review.path, site]);
+  useEffect(() => {
+    setBehavior(undefined);
+    void loadBehavior();
+    const off = host.onBehaviorChanged((c) => concerns(c, draft.sessionId) && void loadBehavior());
+    return () => { ++behaviorRequest.current; off(); };
+  }, [loadBehavior, host, draft.sessionId]);
+  const decideBehavior = useCallback(async (decision: BehaviorDecision) => {
+    if (!draft.sessionId) return false;
+    try {
+      const doc = await host.decideBehavior(draft.sessionId, review.path, decision);
+      ++behaviorRequest.current;
+      setBehavior(doc);
+      setBehaviorError(undefined);
+      book.setBehavior(draft.id, doc);
+      return true;
+    } catch (err) {
+      await loadBehavior();
+      setBehaviorError(cleanError(err));
+      return false;
+    }
+  }, [host, book, draft.id, draft.sessionId, review.path, loadBehavior]);
+  const behaviorBusy = useCallback((busy: boolean) => {
+    if (busy) book.behaviorEditing.add(draft.id);
+    else book.behaviorEditing.delete(draft.id);
+  }, [book, draft.id]);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [url, setUrl] = useState<string>();
+  const [failed, setFailed] = useState<string>();
+  const [loaded, setLoaded] = useState(false);
+  const [silent, setSilent] = useState(false);
+  const [reloads, setReloads] = useState(0);
+  const [commenting, setCommentingState] = useState(review.comments.length === 0);
+  const [editing, setEditingState] = useState(false);
+  const [pageEditable, setPageEditable] = useState(false);
+  const [selected, setSelected] = useState<SelectedElement | null>(null);
+  /** Bumped to open the find bar and focus it. Undefined while it is closed. */
+  const [finding, setFinding] = useState<number>();
+  const findOpen = useRef(false);
+  findOpen.current = finding !== undefined;
+  const openFind = useCallback(() => setFinding(Date.now()), []);
+  const closeFind = useCallback(() => {
+    setFinding(undefined);
+    frame.current?.focus();
+  }, []);
+  useEffect(() => {
+    finders.add(openFind);
+    return () => void finders.delete(openFind);
+  }, [openFind]);
+  // Comment and edit mode never run together.
+  const setCommenting = useCallback((next: boolean | ((on: boolean) => boolean)) => {
+    setCommentingState((on) => {
+      const value = typeof next === 'function' ? next(on) : next;
+      if (value) setEditingState(false);
+      return value;
+    });
+  }, []);
+  const setEditing = useCallback((next: boolean | ((on: boolean) => boolean)) => {
+    setEditingState((on) => {
+      const value = typeof next === 'function' ? next(on) : next;
+      if (value) setCommentingState(false);
+      if (!value) setSelected(null);
+      return value;
+    });
+  }, []);
+  // The review opens on Feedback when /open asks, or when items need a look. A tab picked first stays.
+  const tabChosen = useRef(false);
+  const pickSide = useCallback((next: typeof side) => {
+    tabChosen.current = true;
+    setSide(next);
+  }, []);
+  const showFeedback = useCallback(() => {
+    pickSide('feedback');
+    setCommenting(false);
+  }, [pickSide, setCommenting]);
+  useEffect(() => {
+    const take = () => {
+      if (book.takeTab(draft.id) === 'feedback') showFeedback();
+    };
+    take();
+    return book.subscribe(take);
+  }, [book, draft.id, showFeedback]);
+  useEffect(() => {
+    if (tabChosen.current || !feedback.doc) return;
+    tabChosen.current = true;
+    if (needsLook(feedback.doc)) showFeedback();
+  }, [feedback.doc, showFeedback]);
+
+  const [activeId, setActiveId] = useState<string>();
+  const [missing, setMissing] = useState<string[]>([]);
+  /** The page the frame shows, keyed as pins key it. */
+  const [pagePath, setPagePath] = useState<string>();
+  const pageHref = useRef<string>(undefined);
+  /** Counts page loads, so a page a link opened hears the pane's modes too. */
+  const [pageLoads, setPageLoads] = useState(0);
+  const onPage = pagePath === undefined || pagePath === home;
+  const shownPage = pagePath ?? home;
+  /** A comment picked on another page, shown once that page loads. */
+  const showOnLoad = useRef<string>(undefined);
+  /** The feedback items on the element clicked last. */
+  const [pointed, setPointed] = useState<number[]>();
+  /** The feedback item the next pin joins. */
+  const [picked, setPicked] = useState<number>();
+  const items = feedback.doc?.items ?? [];
+  /** Claude's items fill the side column, so your comments move onto the page. */
+  const queue = !site && items.length > 0;
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const shownSide = queue && side === 'comments' ? 'feedback' : side;
+
+  const root = useRef<HTMLDivElement>(null);
+  const [notesWidth, setNotesWidth] = useState(savedWidth);
+  /** The width to go back to after the column was widened. */
+  const narrowWidth = useRef<number>(undefined);
+  const keepWidth = (w: number) => {
+    setNotesWidth(w);
+    try {
+      localStorage.setItem(WIDTH_KEY, String(Math.round(w)));
+    } catch {
+      /* storage off: the width lasts until the view closes */
+    }
+  };
+  const [paneWidth, setPaneWidth] = useState(0);
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const watch = new ResizeObserver(() => setPaneWidth(el.clientWidth));
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+  const clampWidth = (w: number) => Math.round(Math.min(Math.max(w, NOTES_MIN), Math.max(NOTES_MIN, paneWidth * NOTES_MAX_SHARE)));
+  const half = () => Math.round(paneWidth / 2);
+  const wide = paneWidth > 0 && notesWidth >= half() - 4;
+  const toggleWide = () => {
+    if (wide) {
+      keepWidth(clampWidth(narrowWidth.current ?? NOTES_WIDTH));
+      narrowWidth.current = undefined;
+    } else {
+      narrowWidth.current = notesWidth;
+      keepWidth(clampWidth(half()));
+    }
+  };
+  /** Drags the column's left edge. The frame ignores the pointer meanwhile, so the drag survives crossing it. */
+  const startResize = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const edge = e.currentTarget as HTMLElement;
+    edge.setPointerCapture(e.pointerId);
+    const right = root.current?.getBoundingClientRect().right ?? window.innerWidth;
+    root.current?.classList.add('resizing');
+    const move = (ev: PointerEvent) => setNotesWidth(clampWidth(right - ev.clientX));
+    const end = (ev: PointerEvent) => {
+      edge.removeEventListener('pointermove', move);
+      edge.removeEventListener('pointerup', end);
+      edge.removeEventListener('pointercancel', end);
+      root.current?.classList.remove('resizing');
+      narrowWidth.current = undefined;
+      keepWidth(clampWidth(right - ev.clientX));
+    };
+    edge.addEventListener('pointermove', move);
+    edge.addEventListener('pointerup', end);
+    edge.addEventListener('pointercancel', end);
+  };
+
+  // The latest values, for the message handler.
+  // Edits go to the page the frame shows, which a link may have moved off the output.
+  const editPath = pagePath ?? review.path;
+  const live = useRef({ draftId: draft.id, sessionId: draft.sessionId, path: review.path, home, site, editPath, shownPage, commenting, editing, onPage, items, picked, queue });
+  live.current = { draftId: draft.id, sessionId: draft.sessionId, path: review.path, home, site, editPath, shownPage, commenting, editing, onPage, items, picked, queue };
+  /** Shows your comments: the floating panel beside Claude's items, or the Comments tab. */
+  const showComments = useCallback(() => {
+    if (live.current.queue) setCommentsOpen(true);
+    else setSide('comments');
+  }, []);
+  /** The items whose `Where:` is among the selectors an element matched. */
+  const itemsAt = useCallback((matches: string[] = []) => live.current.items.filter((i) => i.where && matches.includes(i.where)).map((i) => i.n), []);
+
+  useEffect(() => {
+    if (!draft.sessionId) {
+      setFailed('File this review under its session to open the page.');
+      return;
+    }
+    let gone = false;
+    host
+      .reviewUrl(draft.sessionId, review.path)
+      .then((u) => !gone && setUrl(u))
+      .catch((err: Error) => !gone && setFailed(cleanError(err)));
+    return () => {
+      gone = true;
+    };
+  }, [host, draft.sessionId, review.path]);
+
+  // Words start out meant for the overall note. Leaving the review closes the mic, and words already heard still land.
+  useEffect(() => {
+    props.voice.aim(OVERALL);
+    return () => void props.voice.stop();
+  }, [props.voice]);
+
+  // Talking through the page shows the comments and turns comment mode on, so each click pins what you say next.
+  const wasRecording = useRef(voice.recording);
+  useEffect(() => {
+    const started = voice.recording && !wasRecording.current;
+    wasRecording.current = voice.recording;
+    if (!started) return;
+    showComments();
+    setCommenting(true);
+  }, [voice.recording, setCommenting, showComments]);
+
+  const post = useCallback((m: ToPage) => frame.current?.contentWindow?.postMessage({ source: REVIEW_SOURCE, ...m }, '*'), []);
+
+  /** Hands a drag from the inspector's Add buttons to the page, in the frame's own pixels. */
+  const dragInsert = useCallback(
+    (what: InsertKind, clientX: number, clientY: number, phase: 'move' | 'drop' | 'cancel') => {
+      const r = frame.current?.getBoundingClientRect();
+      if (r) post({ type: 'insert-drag', what, x: clientX - r.left, y: clientY - r.top, phase });
+    },
+    [post],
+  );
+
+  // The page's overlay says ready once it loads. A capture waits for that, so an early open still gets its picture.
+  const ready = useRef(false);
+  const readyWaiters = useRef(new Set<() => void>());
+  const pageReady = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        if (ready.current) return resolve(true);
+        const done = (ok: boolean) => {
+          clearTimeout(timer);
+          readyWaiters.current.delete(onReady);
+          resolve(ok);
+        };
+        const onReady = () => done(true);
+        const timer = setTimeout(() => done(false), PAGE_WAIT_MS);
+        readyWaiters.current.add(onReady);
+      }),
+    [],
+  );
+
+  // Opening an item's workspace first crops its element from the page.
+  const measures = useRef(new Map<string, (view?: ReviewRect) => void>());
+  const capture = useCallback(
+    async (selector: string): Promise<WorkspaceSnapshot | undefined> => {
+      if (!(await pageReady()) || !live.current.onPage) return undefined;
+      const id = newCommentId();
+      const view = await new Promise<ReviewRect | undefined>((resolve) => {
+        const timer = setTimeout(() => measures.current.get(id)?.(), MEASURE_WAIT_MS);
+        measures.current.set(id, (v) => {
+          clearTimeout(timer);
+          measures.current.delete(id);
+          resolve(v);
+        });
+        post({ type: 'measure', id, selector });
+      });
+      const box = frame.current?.getBoundingClientRect();
+      if (!view || !box) return undefined;
+      const rect = cropRect(box, view);
+      const data = await host.capturePanel(rect);
+      return data ? { data, width: rect.width, height: rect.height } : undefined;
+    },
+    [host, post, pageReady],
+  );
+  const workspace = useItemWorkspace({ host, sessionId: fileSession, path: review.path, capture, onError: props.onError });
+  const layerOpen = useRef(false);
+  layerOpen.current = !!workspace.open;
+
+  const select = useCallback(
+    (id: string | undefined, focus = false, at?: number) => {
+      setActiveId(id);
+      props.voice.aim(id ?? OVERALL, at);
+      if (id && focus) requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(`[data-comment="${id}"] textarea`)?.focus());
+      if (id) requestAnimationFrame(() => document.querySelector(`[data-comment="${id}"]`)?.scrollIntoView({ block: 'nearest' }));
+    },
+    [props.voice],
+  );
+
+  /** Where the page last rested, and where the next load goes back to. */
+  const scroll = useRef<{ x: number; y: number } | undefined>(undefined);
+  const restore = useRef<{ x: number; y: number } | undefined>(undefined);
+  const reload = useCallback(() => {
+    ready.current = false;
+    setLoaded(false);
+    setPagePath(undefined);
+    setSelected(null);
+    setReloads((n) => n + 1);
+    scroll.current = undefined;
+    void loadBehavior();
+  }, [loadBehavior]);
+
+  // An outside write to the file reloads the page where it rested. A linked page the user went to stays.
+  useOutputWatch(host, fileSession, review.path, () => {
+    if (!live.current.onPage) return;
+    restore.current = scroll.current;
+    reload();
+  });
+
+  /** Saves one page edit and hands main's answer back to the page. A refused edit reloads the page. */
+  const saveEdit = useCallback(
+    async (version: string, edit: ReviewEdit) => {
+      const { sessionId, editPath, onPage, draftId } = live.current;
+      if (!sessionId) return;
+      const result = await host.reviewEdit(sessionId, editPath, version, edit).catch((err: Error) => ({ ok: false as const, error: err.message }));
+      post({ type: 'edited', result });
+      if (result.ok) book.addEdit(draftId, onPage ? result.summary : `${editPath}: ${result.summary}`);
+      else {
+        props.onError(result.error);
+        reload();
+      }
+    },
+    [host, book, post, reload, props.onError],
+  );
+
+  const history = useCallback(
+    async (way: 'undo' | 'redo') => {
+      const { sessionId, editPath, onPage, draftId } = live.current;
+      if (!sessionId) return;
+      const result = await (way === 'undo' ? host.reviewUndo(sessionId, editPath) : host.reviewRedo(sessionId, editPath)).catch((err: Error) => ({ ok: false as const, error: err.message }));
+      if (!result.ok) {
+        props.onError(result.error);
+        return;
+      }
+      book.addEdit(draftId, onPage ? result.summary : `${editPath}: ${result.summary}`);
+      reload();
+    },
+    [host, book, reload, props.onError],
+  );
+
+  const addPin = useCallback(
+    async (anchor: ReviewAnchor, view: ReviewRect, matches?: string[], clickedAt = Date.now()) => {
+      const box = frame.current?.getBoundingClientRect();
+      const current = book.get(live.current.draftId);
+      if (!box || !current?.review) return;
+      // With feedback items, a pin on the output joins the picked item, else the items on its element.
+      const { picked, onPage, shownPage } = live.current;
+      const feedback = live.current.items.length && onPage ? (picked !== undefined ? [picked] : itemsAt(matches)) : undefined;
+      setPicked(undefined);
+      const room = Object.keys(current.attachments ?? {}).length < MAX_PICTURES;
+      const picture = room ? await host.capturePanel(cropRect(box, view)).catch(() => undefined) : undefined;
+      const comment: ReviewComment = { id: newCommentId(), text: '', anchor: onPage ? anchor : { ...anchor, page: shownPage }, createdAt: Date.now(), ...(picture ? { picture: newPictureId() } : {}), ...(feedback ? { feedback } : {}) };
+      book.addComment(current.id, comment, picture);
+      if (live.current.queue) setCommentsOpen(true);
+      else pickSide('comments');
+      // The crop above takes a moment, so the voice moves to the pin from the click.
+      select(comment.id, true, clickedAt);
+    },
+    [book, host, select, itemsAt, pickSide],
+  );
+
+  /** A marker dragged onto another element: the comment keeps its words and takes the new anchor and picture. */
+  const movePin = useCallback(
+    async (id: string, anchor: ReviewAnchor, view: ReviewRect) => {
+      const box = frame.current?.getBoundingClientRect();
+      const current = book.get(live.current.draftId);
+      if (!box || !current?.review?.comments.some((c) => c.id === id)) return;
+      const data = await host.capturePanel(cropRect(box, view)).catch(() => undefined);
+      book.moveComment(current.id, id, anchor, data ? { id: newPictureId(), data } : undefined);
+      select(id, true);
+    },
+    [book, host, select],
+  );
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (!frame.current || e.source !== frame.current.contentWindow || !isTagged(e.data)) return;
+      const m = e.data as unknown as FromPage;
+      if (m.type === 'ready') {
+        ready.current = true;
+        for (const fn of [...readyWaiters.current]) fn();
+        setLoaded(true);
+        setSilent(false);
+        const page = live.current.site && m.href ? sitePage(m.href) : m.path;
+        pageHref.current = m.href;
+        setPagePath(page);
+        setPageEditable(!!m.editable);
+        setSelected(null);
+        setPageLoads((n) => n + 1);
+        if (restore.current && page === live.current.home) post({ type: 'scroll-to', ...restore.current });
+        restore.current = undefined;
+        if (showOnLoad.current) post({ type: 'show', id: showOnLoad.current });
+        showOnLoad.current = undefined;
+      }
+      if (m.type === 'scrolled') scroll.current = { x: m.x, y: m.y };
+      if (m.type === 'edit') void saveEdit(m.version, m.edit);
+      if (m.type === 'selected') setSelected(m.element);
+      if (m.type === 'reload') reload();
+      if (m.type === 'key' && m.key === 'e') setEditing((on) => !on);
+      if (m.type === 'key' && (m.key === 'undo' || m.key === 'redo')) void history(m.key);
+      if (m.type === 'pin') void addPin(m.anchor, m.view, m.matches, m.at);
+      if (m.type === 'move-pin') void movePin(m.id, m.anchor, m.view);
+      if (m.type === 'pointed') setPointed(itemsAt(m.matches));
+      if (m.type === 'open-pin') {
+        if (live.current.queue) setCommentsOpen(true);
+        select(m.id, true);
+      }
+      if (m.type === 'behavior-missing') props.onError(sideRef.current === 'feedback' ? 'That element is not on the page now. Ask Claude to update the item\'s Where line.' : 'That element is not visible. Open the indicated prototype state, or ask the agent to update its target.');
+      if (m.type === 'missing') setMissing(m.ids);
+      if (m.type === 'measured') measures.current.get(m.id)?.(m.view);
+      if (m.type === 'link') void host.openLink(m.href).catch(() => props.onError('Could not open that link.'));
+      if (m.type === 'key' && m.key === 'c') setCommenting((on) => !on);
+      if (m.type === 'key' && m.key === 'find') openFind();
+      if (m.type === 'key' && (m.key === 'find-next' || m.key === 'find-prev') && findOpen.current) post({ type: 'find-step', dir: m.key === 'find-next' ? 1 : -1 });
+      if (m.type === 'key' && m.key === 'Escape' && findOpen.current) closeFind();
+      else if (m.type === 'key' && m.key === 'Escape') {
+        setCommenting(false);
+        setEditing(false);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [addPin, movePin, select, host, props.onError, saveEdit, reload, history, setCommenting, setEditing, itemsAt, post, openFind, closeFind]);
+
+  // The page reports clicks on elements that feedback items name.
+  const wheres = JSON.stringify([...new Set(items.flatMap((i) => (i.where ? [i.where] : [])))]);
+  useEffect(() => {
+    if (loaded) post({ type: 'where', selectors: JSON.parse(wheres) as string[] });
+  }, [loaded, wheres, post]);
+
+  // C toggles comment mode, E edit mode, and Escape leaves either, unless a field has the keys.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      // The workspace board takes its own keys.
+      if (layerOpen.current) return;
+
+      // ⌘F finds on the page, from anywhere in the pane. ⌘G steps through the matches.
+      const key = e.key.toLowerCase();
+      if (e.metaKey && !e.ctrlKey && !e.altKey && key === 'f' && !e.shiftKey) {
+        e.preventDefault();
+        openFind();
+        return;
+      }
+      if (e.metaKey && !e.ctrlKey && !e.altKey && key === 'g' && findOpen.current) {
+        e.preventDefault();
+        post({ type: 'find-step', dir: e.shiftKey ? -1 : 1 });
+        return;
+      }
+      if (editable(e.target)) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && live.current.editing) {
+        e.preventDefault();
+        void history(e.shiftKey ? 'redo' : 'undo');
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        setCommenting((on) => !on);
+      }
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        setEditing((on) => !on);
+      }
+      if (e.key === 'Escape' && findOpen.current) {
+        closeFind();
+        return;
+      }
+      if (e.key === 'Escape' && live.current.commenting) setCommenting(false);
+      if (e.key === 'Escape' && live.current.editing) setEditing(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [history, setCommenting, setEditing, openFind, closeFind, post]);
+
+  const pins: PagePin[] = review.comments.flatMap((c, i) =>
+    (c.anchor.page ?? home) === shownPage ? [pagePin(c.id, i + 1, c.anchor, c.id === activeId)] : [],
+  );
+  const pinKey = JSON.stringify(pins);
+  useEffect(() => {
+    if (loaded) post({ type: 'pins', pins });
+  }, [loaded, pinKey, post]);
+  useEffect(() => {
+    if (loaded) post({ type: 'commenting', on: commenting });
+  }, [loaded, pageLoads, commenting, post]);
+  const isEditing = editing && pageEditable;
+  useEffect(() => {
+    if (loaded) post({ type: 'editing', on: isEditing });
+  }, [loaded, pageLoads, isEditing, post]);
+  const settled = useRef({ reloads, loaded });
+  settled.current = { reloads, loaded };
+  /** A page whose overlay never says hello blocks added scripts. */
+  const onFrameLoad = () => {
+    const at = reloads;
+    setTimeout(() => {
+      if (at === settled.current.reloads && !settled.current.loaded) setSilent(true);
+    }, READY_WAIT_MS);
+  };
+
+  const openElsewhere = () => {
+    if (site) void host.openLink(pageHref.current ?? review.path).catch(() => props.onError('Could not open that link.'));
+    else if (draft.sessionId) void host.openOutputElsewhere(draft.sessionId, review.path).catch((err: Error) => props.onError(err.message));
+  };
+
+  /** Shows a comment's pin, loading its page first when the frame is elsewhere. */
+  const showComment = (c: ReviewComment) => {
+    select(c.id);
+    const page = c.anchor.page ?? home;
+    if (page === shownPage || !url) {
+      post({ type: 'show', id: c.id });
+      return;
+    }
+    showOnLoad.current = c.id;
+    if (page === home) reload();
+    else post({ type: 'go', href: siteHref(site, url, page) });
+  };
+  const sendKeys = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && e.metaKey) {
+      e.preventDefault();
+      props.onSend();
+    }
+  };
+  const remove = (id: string) => {
+    book.removeComment(draft.id, id);
+    if (activeId === id) select(undefined);
+  };
+
+  // A dev server's address keeps its query, which names the page, so a reload remounts the frame instead.
+  const src = url && (reloads && !site ? `${url}?reload=${reloads}` : url);
+  const count = review.comments.length;
+
+  const comments = (
+    <>
+      <label className={activeId === undefined && voice.recording ? 'review-overall listening' : 'review-overall'}>
+        <span className="section-head">Overall</span>
+        <textarea
+          placeholder="Anything about the page as a whole"
+          value={draft.body}
+          onChange={(e) => book.edit(draft.id, e.target.value)}
+          onFocus={() => select(undefined)}
+          onKeyDown={sendKeys}
+          data-testid="review-overall"
+        />
+        <VoiceState voice={voice} target={OVERALL} />
+      </label>
+      <h3 className="section-head">
+        Comments{count > 0 && <span className="count">{count}</span>}
+      </h3>
+      {count === 0 ? (
+        <p className="muted review-empty" data-testid="review-empty">
+          Click anything on the page to pin a comment, or turn on the mic and talk as you go.
+        </p>
+      ) : (
+        <ol className="review-cards">
+          {review.comments.map((c, i) => (
+            <CommentCard
+              key={c.id}
+              comment={c}
+              n={i + 1}
+              active={c.id === activeId}
+              missing={missing.includes(c.id)}
+              voice={voice}
+              onSelect={() => showComment(c)}
+              onEdit={(text) => book.editComment(draft.id, c.id, text)}
+              onRemove={() => remove(c.id)}
+              onKeyDown={sendKeys}
+            />
+          ))}
+        </ol>
+      )}
+      <footer className="muted review-foot">
+        {count > 0 ? `${commentCount(count)} · ⌘↩ sends with pictures` : 'Send hands Claude each comment with a picture of its element.'}
+      </footer>
+    </>
+  );
+
+  return (
+    <div ref={root} className="review" style={{ gridTemplateColumns: `minmax(0, 1fr) min(${notesWidth}px, ${NOTES_MAX_SHARE * 100}%)` }} data-testid="review" data-escape-owner={commenting || isEditing ? '' : undefined}>
+      <header className="review-bar">
+        {props.onToggleList && <button
+          className="ghost icon-button"
+          title={props.listOpen ? 'Hide the list' : 'Show the list'}
+          aria-label={props.listOpen ? 'Hide the list' : 'Show the list'}
+          aria-pressed={props.listOpen}
+          onClick={props.onToggleList}
+          data-testid="review-list-toggle"
+        >
+          <SidebarIcon />
+        </button>}
+        <span className="review-title" title={site ? (pageHref.current ?? review.path) : review.path}>
+          Review <span className="muted">· {site ? `${new URL(review.path).host}${shownPage === '/' ? '' : shownPage}` : baseName(review.path)}</span>
+        </span>
+        <span className="spacer" />
+        <button
+          className={commenting ? 'chip on' : 'chip'}
+          aria-pressed={commenting}
+          disabled={silent}
+          title={commenting ? 'Stop commenting (Esc)' : 'Click or select on the page to pin a comment (C)'}
+          onClick={() => setCommenting((on) => !on)}
+          data-testid="review-comment"
+        >
+          <CommentIcon /> Comment <kbd>C</kbd>
+        </button>
+        {queue && (
+          <button
+            className={commentsOpen ? 'chip on' : 'chip'}
+            aria-pressed={commentsOpen}
+            title={commentsOpen ? 'Hide your comments' : 'Show your comments over the page'}
+            onClick={() => setCommentsOpen((o) => !o)}
+            data-testid="review-comments-toggle"
+          >
+            Comments{count > 0 ? ` · ${count}` : ''}
+          </button>
+        )}
+        {!site && <button
+          className={isEditing ? 'chip on' : 'chip'}
+          aria-pressed={isEditing}
+          disabled={silent || !pageEditable}
+          title={!pageEditable && loaded ? 'This page has no markup edit mode can change' : isEditing ? 'Stop editing (Esc)' : 'Select, move, resize and retype elements; each change saves to the file (E)'}
+          onClick={() => setEditing((on) => !on)}
+          data-testid="review-edit"
+        >
+          <PencilIcon /> Edit <kbd>E</kbd>
+        </button>}
+        <button className="ghost icon-button" title="Reload the page" aria-label="Reload the page" onClick={reload} data-testid="review-reload">
+          <ReloadIcon />
+        </button>
+        <button className="ghost icon-button" title="Copy reference" aria-label="Copy reference" onClick={props.onCopyReference} data-testid="review-copy-reference">
+          <LinkIcon />
+        </button>
+        <button className="ghost icon-button" title="Open in the browser" aria-label="Open in the browser" onClick={openElsewhere} data-testid="review-external">
+          <ExternalIcon />
+        </button>
+      </header>
+      <div className={commenting ? 'review-page commenting' : isEditing ? 'review-page editing' : 'review-page'}>
+        {finding !== undefined && !silent && <PageFind frame={frame} post={post} focusKey={finding} onClose={closeFind} />}
+        {src && (
+          <iframe
+            key={`${src}|${reloads}`}
+            ref={frame}
+            src={src}
+            title={`Page under review: ${review.path}`}
+            sandbox="allow-scripts allow-same-origin allow-forms"
+            onLoad={onFrameLoad}
+            data-testid="review-frame"
+          />
+        )}
+        {failed && (
+          <div className="review-message" data-testid="review-failed">
+            <p>{failed}</p>
+            <button className="ghost link" onClick={openElsewhere}>
+              Open in the browser
+            </button>
+          </div>
+        )}
+        {!onPage && !site && (
+          <div className="review-banner" data-testid="review-elsewhere">
+            Showing {pagePath}. Pins and edits here go with that page.
+            <button className="ghost link" onClick={reload}>
+              Go back
+            </button>
+          </div>
+        )}
+        {silent && <div className="review-banner">This page blocks the script that adds pins. Comment in the overall note instead.</div>}
+        {commenting && loaded && (
+          <div className="review-hint" data-testid="review-hint">
+            Click to pin · drag across text to quote · <kbd>⌘</kbd>-click a link to follow it · <kbd>Esc</kbd> to browse
+          </div>
+        )}
+        {isEditing && loaded && !selected && (
+          <div className="review-hint" data-testid="review-edit-hint">
+            Click to select · drag to move · double-click to retype · <kbd>Esc</kbd> to browse
+          </div>
+        )}
+        {queue && commentsOpen && !isEditing && (
+          <section className="review-comments-float" aria-label="Your comments" data-testid="review-comments-float">
+            <header className="review-comments-float-head">
+              <span>Your comments</span>
+              <button className="ghost icon-button small" title="Hide your comments" aria-label="Hide your comments" onClick={() => setCommentsOpen(false)} data-testid="review-comments-close">
+                <CloseIcon />
+              </button>
+            </header>
+            {comments}
+          </section>
+        )}
+      </div>
+      {/* An item's workspace covers the page and the list beside it. */}
+      {workspace.open && draft.sessionId && (
+        <WorkspaceLayer
+          key={workspace.open.board}
+          host={host}
+          sessionId={draft.sessionId}
+          path={review.path}
+          board={workspace.open.board}
+          n={workspace.open.n}
+          item={feedback.doc?.items.find((i) => i.n === workspace.open!.n)}
+          onBack={workspace.close}
+          onError={props.onError}
+        />
+      )}
+      <div className="review-notes-edge" role="separator" aria-orientation="vertical" aria-label="Resize the side column" onPointerDown={startResize} onDoubleClick={toggleWide} data-testid="review-notes-edge" />
+      {isEditing ? (
+        <Inspector
+          selected={selected}
+          edits={review.edits?.length ?? 0}
+          onStyle={(set) => post({ type: 'style', set })}
+          onText={(text) => post({ type: 'text', text })}
+          onAct={(act) => post({ type: 'act', act })}
+          onInsert={(what) => post({ type: 'insert', what })}
+          onDragInsert={dragInsert}
+        />
+      ) : (
+        <aside className="review-notes" aria-label="Review details">
+          <div className="behavior-tabs review-notes-tabs" role="tablist" aria-label="Review details">
+            {!site && !queue && <button className={shownSide === 'comments' ? 'chip on' : 'chip'} role="tab" aria-selected={shownSide === 'comments'} onClick={() => pickSide('comments')}>Comments</button>}
+            {!site && <button className={shownSide === 'behavior' ? 'chip on' : 'chip'} role="tab" aria-selected={shownSide === 'behavior'} data-testid="behavior-tab" onClick={() => { pickSide('behavior'); setCommenting(false); void loadBehavior(); }}>Behavior{behavior?.rules.some((r) => r.status === 'proposed') ? ` · ${behavior.rules.filter((r) => r.status === 'proposed').length} open` : ''}</button>}
+            {!site && <button className={shownSide === 'feedback' ? 'chip on' : 'chip'} role="tab" aria-selected={shownSide === 'feedback'} data-testid="feedback-tab" onClick={() => { showFeedback(); feedback.refresh(); }}>Feedback{openCount(feedback.doc) ? ` · ${openCount(feedback.doc)} open` : ''}</button>}
+            <span className="spacer" />
+            <button className={wide ? 'ghost icon-button small on' : 'ghost icon-button small'} aria-pressed={wide} title={wide ? 'Narrow the column' : 'Widen the column to half the pane'} aria-label={wide ? 'Narrow the column' : 'Widen the column'} onClick={toggleWide} data-testid="review-notes-wide">
+              <ExpandIcon />
+            </button>
+          </div>
+          {shownSide === 'feedback' ? <FeedbackPanel key={draft.id} host={host} sessionId={draft.sessionId} feedback={feedback} canSend={props.canSend} onSend={props.onSendFeedback} onError={props.onError} beforeRecord={() => props.voice.stop()} onShow={(selector) => post({ type: 'show-behavior', selector })} onFollow={(selector) => post({ type: 'show-behavior', selector, quiet: true })} pointed={pointed} picked={picked} onPick={setPicked} onOpenItem={props.onOpenFeedbackItem} onWorkspace={(item) => { setCommenting(false); setCommentsOpen(false); void workspace.openItem(item); }} workspaceOpening={workspace.opening} yieldSend={commentsOpen} /> : shownSide === 'behavior' ? <BehaviorPanel key={draft.id} doc={behavior} error={behaviorError} onRefresh={() => void loadBehavior()} onDecide={decideBehavior} onBusy={behaviorBusy} onShow={(selector) => post({ type: 'show-behavior', selector })} /> : comments}
+        </aside>
+      )}
+    </div>
+  );
+}
+
+function CommentCard(props: {
+  comment: ReviewComment;
+  n: number;
+  active: boolean;
+  missing: boolean;
+  voice: ReviewVoice;
+  onSelect: () => void;
+  onEdit: (text: string) => void;
+  onRemove: () => void;
+  onKeyDown: (e: KeyboardEvent) => void;
+}) {
+  const { comment: c } = props;
+  const listening = props.voice.recording && props.voice.target === c.id;
+  return (
+    <li
+      className={`review-card${props.active ? ' active' : ''}${listening ? ' listening' : ''}`}
+      data-comment={c.id}
+      data-testid="review-card"
+      onClick={(e) => {
+        if (!(e.target as HTMLElement).closest('button, textarea')) props.onSelect();
+      }}
+    >
+      <div className="review-card-head">
+        <button className="ghost pin-badge" title="Show it on the page" onClick={props.onSelect} data-testid="review-pin">
+          {props.n}
+        </button>
+        <span className="review-anchor" title={c.anchor.selector}>
+          {c.anchor.quote ? c.anchor.tag : anchorLabel(c.anchor, 40)}
+        </span>
+        {!!c.feedback?.length && (
+          <span className="kind-tag" title="The feedback items this pin is about" data-testid="review-feedback">
+            {c.feedback.map((n) => `#${n}`).join(' ')}
+          </span>
+        )}
+        {props.missing && (
+          <span className="review-missing" title="The page no longer has this element" data-testid="review-missing">
+            Gone
+          </span>
+        )}
+        <button className="ghost icon-button small" aria-label={`Delete comment ${props.n}`} title="Delete" onClick={props.onRemove} data-testid="review-delete">
+          <TrashIcon />
+        </button>
+      </div>
+      {c.anchor.page && (
+        <span className="muted review-card-page" title="The page this pin sits on" data-testid="review-card-page">
+          on {c.anchor.page}
+        </span>
+      )}
+      {c.anchor.quote && (
+        <blockquote className="review-quote" data-testid="review-quote">
+          {c.anchor.quote}
+        </blockquote>
+      )}
+      <textarea
+        placeholder={listening ? 'Listening…' : 'What should change here?'}
+        value={c.text}
+        rows={2}
+        onChange={(e) => props.onEdit(e.target.value)}
+        onFocus={props.onSelect}
+        onKeyDown={props.onKeyDown}
+        data-testid="review-text"
+      />
+      <VoiceState voice={props.voice} target={c.id} />
+    </li>
+  );
+}

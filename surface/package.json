@@ -1,0 +1,12 @@
+{
+  "name": "herdr-workspaces-surface",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Runs Agent Brief's board, Write and Review in one Herdr pane through Pixel.",
+  "license": "MIT",
+  "main": "host.cjs",
+  "dependencies": {
+    "@zenbu-labs/pixel": "0.2.10",
+    "react": "18.3.1"
+  }
+}

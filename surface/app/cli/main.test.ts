@@ -1,0 +1,462 @@
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { bashRequestOf, type ReadResponse } from '../src/protocol';
+import { main } from './main';
+import { fail, useFakeApp } from './testkit';
+
+const { app, run } = useFakeApp();
+
+describe('status, sessions, boards, open', () => {
+  it('prints health', async () => {
+    app.handler = () => ({ json: { ok: true, version: 1, pid: 42, panelVisible: true, currentBoard: 'main' } });
+    const r = await run(['status']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('running');
+    expect(r.stdout).toContain('pid 42');
+    expect(app.seen[0]).toMatchObject({ method: 'GET', url: '/health' });
+  });
+
+  it('prints raw JSON with --json', async () => {
+    const health = { ok: true, version: 1, pid: 1, panelVisible: false, currentBoard: 'x' };
+    app.handler = () => ({ json: health });
+    const r = await run(['status', '--json']);
+    expect(JSON.parse(r.stdout)).toEqual(health);
+  });
+
+  it('marks the target session', async () => {
+    app.handler = () => ({
+      json: {
+        sessions: [
+          { sessionId: 's1', cwd: '/a' },
+          { sessionId: 's2', cwd: '/b', title: 'work' },
+        ],
+        targetSessionId: 's2',
+      },
+    });
+    const r = await run(['sessions']);
+    expect(r.stdout).toContain('  s1  /a');
+    expect(r.stdout).toContain('* s2  /b  "work"');
+  });
+
+  it('handles an empty session list', async () => {
+    app.handler = () => ({ json: { sessions: [] } });
+    expect((await run(['sessions'])).stdout).toContain('no sessions');
+  });
+
+  it('lists boards and marks the current one', async () => {
+    app.handler = () => ({
+      json: { boards: [{ name: 'a', updatedAt: 0, elementCount: 1 }, { name: 'b', updatedAt: 0, elementCount: 3 }], current: 'b' },
+    });
+    const r = await run(['boards']);
+    expect(r.stdout).toContain('  a  1 element  ');
+    expect(r.stdout).toContain('* b  3 elements');
+  });
+
+  it('opens with board, prompt and session', async () => {
+    app.handler = () => ({ json: { board: 'flow', targetSessionId: 's9' } });
+    const r = await run(['open', '--board', 'flow', '--prompt', 'Sketch it', '--session=s9']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('"flow"');
+    expect(app.seen[0]).toEqual({
+      method: 'POST',
+      url: '/open',
+      body: { board: 'flow', prompt: 'Sketch it', sessionId: 's9' },
+    });
+  });
+
+  it('hands a dev server URL to the review pane as it is', async () => {
+    app.handler = ({ method }) => ({ json: method === 'GET' ? { sessionId: 's1', cwd: '/project' } : { board: 'main', opened: 'review' } });
+    const r = await run(['open', '--output', 'http://localhost:5173/settings', '--session', 's1']);
+    expect(r.code).toBe(0);
+    expect(app.seen.at(-1)?.body).toEqual({ sessionId: 's1', output: { path: 'http://localhost:5173/settings' } });
+    expect(r.stdout).toContain('opened http://localhost:5173/settings in the review pane');
+    expect((await run(['open', '--output', 'http://localhost:5173', '--feedback', '--session', 's1'])).code).toBe(2);
+  });
+
+  it('opens feedback on any file with --output --feedback', async () => {
+    app.handler = ({ method }) => ({ json: method === 'GET' ? { sessionId: 's1', cwd: '/project' } : { board: 'main', opened: 'review' } });
+    const r = await run(['open', '--output', '/project/brief.docx', '--feedback', '--session', 's1']);
+    expect(r.code).toBe(0);
+    expect(app.seen.at(-1)?.body).toEqual({ sessionId: 's1', output: { path: 'brief.docx', tab: 'feedback' } });
+    expect((await run(['open', '--feedback'])).code).toBe(2);
+  });
+
+  it('opens a saved note with --note, and refuses --note with --board', async () => {
+    app.handler = () => ({ json: { board: 'flow', opened: 'note', targetSessionId: 's9' } });
+    const r = await run(['open', '--note', 'd7']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('opened note d7 in Write');
+    expect(app.seen[0]).toEqual({ method: 'POST', url: '/open', body: { note: { id: 'd7' } } });
+    expect((await run(['open', '--note', 'd7', '--board', 'flow'])).code).toBe(2);
+    expect(app.seen).toHaveLength(1);
+  });
+
+  it('opens an initiative by title with --initiative, and refuses it with --board', async () => {
+    app.handler = ({ url }) =>
+      url === '/initiatives' ? { json: [{ id: 'i1', title: 'Pricing', lastActiveAt: '2026-10-17T10:00:00Z', line: '' }] } : { json: { board: 'main', opened: 'initiative' } };
+    const r = await run(['open', '--initiative', 'pricing']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('opened initiative "Pricing"');
+    expect(app.seen.at(-1)).toEqual({ method: 'POST', url: '/open', body: { initiative: { id: 'i1' } } });
+    expect((await run(['open', '--initiative', 'Pricing', '--board', 'flow'])).code).toBe(2);
+  });
+
+  it('opens a board in the Stack layout', async () => {
+    app.handler = () => ({ json: { board: 'shots' } });
+    const r = await run(['open', '--board', 'shots', '--layout', 'stack']);
+    expect(r.code).toBe(0);
+    expect(app.seen[0].body).toEqual({ board: 'shots', layout: 'stack' });
+  });
+
+  it('rejects an unknown layout before calling the app', async () => {
+    const r = await run(['open', '--layout', 'grid']);
+    expect(r.code).toBe(2);
+    expect(app.seen).toHaveLength(0);
+  });
+
+  it('opens with an empty body by default', async () => {
+    app.handler = () => ({ json: { board: 'main' } });
+    await run(['open']);
+    expect(app.seen[0].body).toEqual({});
+  });
+
+  const inSession = { CLAUDE_CODE_SESSION_ID: 's1' };
+  const liveAt = (cwd: string) => (r: { method: string }) =>
+    r.method === 'GET' ? { json: { sessionId: 's1', cwd } } : { json: { board: 'b', targetSessionId: 's1', opened: 'note' } };
+
+  it('binds a bare open to the Claude Code session running it', async () => {
+    app.handler = liveAt(app.dir);
+    const r = await run(['open'], '', inSession);
+    expect(r.stderr).toBe('');
+    expect(r.code).toBe(0);
+    expect(app.seen.map((s) => `${s.method} ${s.url}`)).toEqual(['GET /sessions/s1', 'POST /open']);
+    expect(app.seen[1].body).toEqual({ sessionId: 's1', reopen: true });
+  });
+
+  it('says when a reopen left the panel as it was', async () => {
+    app.handler = (r) => (r.method === 'GET' ? { json: { sessionId: 's1', cwd: app.dir } } : { json: { board: 'x', targetSessionId: 's1', opened: 'panel' } });
+    const r = await run(['open'], '', inSession);
+    expect(r.stdout).toBe('showed the panel as it was. This session has no board or note yet, send target s1\n');
+    expect((await run(['open', '--board', 'flow'], '', inSession)).code).toBe(0);
+    expect(app.seen.at(-1)!.body).toEqual({ board: 'flow', sessionId: 's1' });
+  });
+
+  it('opens without a session when the app has not met the one running it', async () => {
+    app.handler = (r) => (r.method === 'GET' ? fail('not_found', 'no session s1', 404)(r) : { json: { board: 'main' } });
+    const r = await run(['open'], '', inSession);
+    expect(r.code).toBe(0);
+    expect(app.seen[1].body).toEqual({});
+  });
+
+  it('opens an output by its path in the session project, from any folder inside it', async () => {
+    app.handler = liveAt(path.dirname(app.dir));
+    const r = await run(['open', '--output', 'docs/brief.md'], '', inSession);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe(`opened ${path.basename(app.dir)}/docs/brief.md in Write, send target s1\n`);
+    expect(app.seen[1].body).toEqual({ sessionId: 's1', output: { path: `${path.basename(app.dir)}/docs/brief.md` } });
+  });
+
+  it('refuses an output outside the project, or with no session, before opening', async () => {
+    app.handler = liveAt(app.dir);
+    expect((await run(['open', '--output', '/tmp/elsewhere.md'], '', inSession)).code).toBe(2);
+    expect((await run(['open', '--output', 'docs/brief.md'])).code).toBe(2);
+    expect((await run(['open', '--output', 'docs/brief.md', '--board', 'x'], '', inSession)).code).toBe(2);
+    expect(app.seen.filter((s) => s.method === 'POST')).toHaveLength(0);
+  });
+});
+
+describe('read', () => {
+  const response: ReadResponse = {
+    board: 'current',
+    bounds: { x: 0, y: 0, width: 1200, height: 800 },
+    elements: [
+      { id: 'r1', type: 'rectangle', x: 40, y: 40, width: 400, height: 80, label: 'Header', color: 'blue', by: 'claude' },
+      { id: 'fr', type: 'frame', x: 0, y: 200, width: 500, height: 300, label: 'Backend', by: 'claude' },
+      { id: 'r2', type: 'rectangle', x: 20.4, y: 220, width: 200, height: 80, label: 'API', by: 'claude', frameId: 'fr' },
+      { id: 'a1', type: 'arrow', x: 0, y: 0, width: 10, height: 10, by: 'claude', startId: 'r1', endId: 'r2' },
+      { id: 'f3', type: 'freedraw', x: 300, y: 420, width: 120, height: 60, by: 'user' },
+      { id: 'o1', type: 'sticky', x: 5, y: 6, width: 7, height: 8, by: 'user', frameId: 'gone' },
+    ],
+  };
+
+  it('formats compact text with frame children grouped and arrows bound', async () => {
+    app.handler = () => ({ json: response });
+    const r = await run(['read']);
+    expect(r.stdout.trimEnd().split('\n')).toEqual([
+      'board "current" · 6 elements · bounds 0,0 1200×800',
+      'r1 rectangle "Header" at 40,40 400×80 blue (claude)',
+      'fr frame "Backend" at 0,200 500×300 (claude)',
+      '  r2 rectangle "API" at 20,220 200×80 (claude)',
+      'a1 arrow r1 → r2 (claude)',
+      'f3 freedraw at 300,420 120×60 (user)',
+      'o1 sticky at 5,6 7×8 (user)',
+    ]);
+    expect(app.seen[0].url).toBe('/boards/current/elements');
+  });
+
+  it('passes board and region in the request', async () => {
+    app.handler = () => ({ json: response });
+    await run(['read', '--board', 'my board', '--region', '0,10,300,200']);
+    expect(app.seen[0].url).toBe('/boards/my%20board/elements?region=0,10,300,200');
+  });
+
+  it('prints raw JSON with --json', async () => {
+    app.handler = () => ({ json: response });
+    const r = await run(['read', '--json']);
+    expect(JSON.parse(r.stdout)).toEqual(response);
+  });
+
+  it('takes a region in the shape read prints', async () => {
+    app.handler = () => ({ json: { board: 'b', elements: [], bounds: { x: 0, y: 0, width: 0, height: 0 } } });
+    await run(['read', '--region', '840,0 760×720']);
+    await run(['read', '--region', '840,0 760,600']);
+    expect(app.seen.map((s) => s.url)).toEqual(['/boards/current/elements?region=840,0,760,720', '/boards/current/elements?region=840,0,760,600']);
+  });
+
+  it('rejects a bad region before sending', async () => {
+    const r = await run(['read', '--region', '1,2,3']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--region');
+    expect(app.seen).toHaveLength(0);
+  });
+
+  it('formats an empty board', async () => {
+    app.handler = () => ({ json: { board: 'e', elements: [], bounds: { x: 0, y: 0, width: 0, height: 0 } } });
+    expect((await run(['read'])).stdout).toBe('board "e" · 0 elements · bounds 0,0 0×0\n');
+  });
+});
+
+describe('png', () => {
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+
+  it('writes bytes to --out and prints the path', async () => {
+    app.handler = () => ({ raw: bytes });
+    const out = path.join(app.dir, 'sub', 'a.png');
+    const r = await run(['png', '--out', out]);
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe(out);
+    expect(fs.readFileSync(out).equals(bytes)).toBe(true);
+    expect(app.seen[0].url).toBe('/boards/current/png');
+  });
+
+  it('sends region and maxEdge', async () => {
+    app.handler = () => ({ raw: bytes });
+    await run(['png', '--board', 'b', '--region', '1,2,3,4', '--max-edge', '800', '--out', path.join(app.dir, 'x.png')]);
+    expect(app.seen[0].url).toBe('/boards/b/png?region=1,2,3,4&maxEdge=800');
+  });
+
+  it('defaults the path under .feedback/boards', async () => {
+    app.handler = () => ({ raw: bytes });
+    const r = await run(['png', '--board', 'b']);
+    const expected = path.join(app.dir, '.feedback/boards/b-20261010-153000.png');
+    expect(r.stdout.trim()).toBe(expected);
+    expect(fs.existsSync(expected)).toBe(true);
+  });
+
+  it('rejects a bad --max-edge', async () => {
+    const r = await run(['png', '--max-edge', 'big']);
+    expect(r.code).toBe(2);
+    expect(app.seen).toHaveLength(0);
+  });
+
+  it('prints server errors and writes nothing', async () => {
+    app.handler = fail('unavailable', 'panel is hidden', 503);
+    const r = await run(['png', '--out', path.join(app.dir, 'n.png')]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toBe('error (unavailable): panel is hidden\n');
+    expect(fs.existsSync(path.join(app.dir, 'n.png'))).toBe(false);
+  });
+});
+
+describe('update and delete', () => {
+  it('sends updates as a bare array or wrapped', async () => {
+    app.handler = () => ({ json: { ids: ['a'], batchId: 'u1' } });
+    const updates = [{ id: 'a', x: 5, label: 'New', color: 'red' }];
+    const r1 = await run(['update'], JSON.stringify(updates));
+    const r2 = await run(['update', '--board', 'b'], JSON.stringify({ updates }));
+    expect(r1.stdout).toContain('updated 1 element, batch u1');
+    expect(app.seen[0]).toEqual({ method: 'PATCH', url: '/boards/current/elements', body: { updates } });
+    expect(app.seen[1].url).toBe('/boards/b/elements');
+    expect(r2.code).toBe(0);
+  });
+
+  it('prints warnings from an update', async () => {
+    app.handler = () => ({ json: { ids: ['a'], batchId: 'u2', warnings: ['rectangle a grew from 80 to 113 px tall'] } });
+    const r = await run(['update'], JSON.stringify([{ id: 'a', label: 'Longer' }]));
+    expect(r.stdout).toContain('warning: rectangle a grew from 80 to 113 px tall');
+  });
+
+  it('names the index of a bad update', async () => {
+    const r = await run(['update'], JSON.stringify([{ id: 'a' }, { x: 3 }]));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('updates[1]: "id"');
+    expect(app.seen).toHaveLength(0);
+  });
+
+  it('deletes ids and reports unknown ones', async () => {
+    app.handler = () => ({ json: { ids: ['a'], batchId: 'd1' } });
+    const r = await run(['delete', '--board', 'b', 'a', 'zz']);
+    expect(app.seen[0]).toEqual({ method: 'DELETE', url: '/boards/b/elements', body: { ids: ['a', 'zz'] } });
+    expect(r.stdout).toContain('deleted 1 element, batch d1');
+    expect(r.stdout).toContain('not found: zz');
+  });
+
+  it('files a named board under the session after a draw or update, and keeps the result when that fails', async () => {
+    app.handler = (r) => (r.url === '/open' ? fail('bad_request', 'no live session', 400)(r) : { json: { ids: ['a'], batchId: 'd1' } });
+    const env = { CLAUDE_CODE_SESSION_ID: 's1' };
+    const drew = await run(['draw', '--board', 'options'], JSON.stringify([{ type: 'rectangle' }]), env);
+    expect(drew.code).toBe(0);
+    expect(drew.stdout).toContain('d1');
+    await run(['update', '--board', 'options'], JSON.stringify([{ id: 'a', x: 5 }]), env);
+    expect(app.seen.map((s) => `${s.method} ${s.url}`)).toEqual([
+      'POST /boards/options/draw', 'POST /open', 'PATCH /boards/options/elements', 'POST /open',
+    ]);
+    expect(app.seen[1].body).toEqual({ board: 'options', sessionId: 's1', follow: true });
+  });
+
+  it('leaves the panel alone after drawing on the current board, or outside a session', async () => {
+    app.handler = () => ({ json: { ids: ['a'], batchId: 'd1' } });
+    await run(['draw'], JSON.stringify([{ type: 'rectangle' }]), { CLAUDE_CODE_SESSION_ID: 's1' });
+    await run(['draw', '--board', 'options'], JSON.stringify([{ type: 'rectangle' }]));
+    expect(app.seen.map((s) => s.url)).toEqual(['/boards/current/draw', '/boards/options/draw']);
+  });
+
+  it('requires an id to delete', async () => {
+    const r = await run(['delete']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('at least one id');
+  });
+});
+
+describe('ipad and handoff', () => {
+  const handoff = { id: 'h1', sessionId: 's9', sessionLabel: 'x', boardName: 'ipad-h1', createdAt: 1, state: 'open' };
+
+  it('shows the paired iPads, or how to pair one', async () => {
+    app.handler = () => ({ json: { paired: true, devices: [{ id: 'd', name: 'iPad Pro', lastSeen: 1 }] } });
+    expect((await run(['ipad'])).stdout).toContain('Paired: iPad Pro');
+    app.handler = () => ({ json: { paired: false, devices: [] } });
+    expect((await run(['ipad'])).stdout).toContain('Pair iPad…');
+  });
+
+  it('hands off with a prompt and board', async () => {
+    app.handler = () => ({ json: handoff });
+    const r = await run(['handoff', '--prompt', 'Mark it up', '--board', 'flow', '--session', 's9']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('Handed off to the iPad as h1');
+    expect(app.seen[0]).toEqual({ method: 'POST', url: '/handoffs', body: { sessionId: 's9', prompt: 'Mark it up', board: 'flow' } });
+  });
+
+  it('hands off a page by its absolute path, and refuses a page with a board', async () => {
+    app.handler = () => ({ json: { ...handoff, page: 'site/plan.html' } });
+    const r = await run(['handoff', '--page', 'site/plan.html', '--session', 's9']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('Handed site/plan.html to the iPad as h1');
+    expect(app.seen[0]).toEqual({ method: 'POST', url: '/handoffs', body: { sessionId: 's9', page: path.resolve('site/plan.html') } });
+    expect((await run(['handoff', '--page', 'a.html', '--board', 'b', '--session', 's9'])).code).toBe(2);
+  });
+
+  it('needs a session', async () => {
+    const r = await run(['handoff']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--session');
+  });
+
+  it('reports no paired iPad', async () => {
+    app.handler = () => ({ status: 409, json: { error: 'No iPad is paired.', code: 'conflict' } });
+    const r = await run(['handoff', '--session', 's9']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('No iPad is paired.');
+  });
+});
+
+describe('errors and help', () => {
+  it('exits 3 with the message when the app is not running', async () => {
+    await new Promise((ok) => app.server.close(ok));
+    for (const argv of [['status'], ['read'], ['png'], ['boards']]) {
+      const r = await run(argv);
+      expect(r.code).toBe(3);
+      expect(r.stderr).toBe('Agent Brief is not running. Start it, or run /sketch in Claude Code.\n');
+    }
+    app.server = http.createServer();
+    await new Promise<void>((ok) => app.server.listen(app.socket, ok));
+  });
+
+  it('exits 3 for a socket file with no listener', async () => {
+    await new Promise((ok) => app.server.close(ok));
+    const missing = path.join(app.dir, 'missing.sock');
+    let stderr = '';
+    const code = await main(['status'], { stdin: async () => '', stdout() {}, stderr: (s) => (stderr += s), env: { COMPANION_SOCKET: missing } });
+    expect(code).toBe(3);
+    expect(stderr).toContain('not running');
+    app.server = http.createServer();
+    await new Promise<void>((ok) => app.server.listen(app.socket, ok));
+  });
+
+  it('prints a generic message for a non-JSON error body', async () => {
+    app.handler = () => ({ status: 500, raw: Buffer.from('boom'), type: 'text/plain' });
+    const r = await run(['boards']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toBe('error (internal): HTTP 500\n');
+  });
+
+  it('prints top-level help with a draw example', async () => {
+    for (const argv of [['help'], ['--help'], []]) {
+      const r = await run(argv);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toContain('"type":"arrow","start":{"id":"a"},"end":{"id":"b"}');
+    }
+  });
+
+  it('prints per-command help for every command', async () => {
+    for (const cmd of ['status', 'sessions', 'boards', 'open', 'read', 'png', 'draw', 'update', 'delete']) {
+      const r = await run([cmd, '--help']);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toContain(`agent-brief ${cmd}`);
+      expect(r.stdout).toContain('Example:');
+    }
+    expect(app.seen).toHaveLength(0);
+  });
+
+  it('rejects unknown commands and options', async () => {
+    expect((await run(['wat'])).code).toBe(2);
+    const r = await run(['read', '--bogus']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--bogus');
+  });
+});
+
+describe('show and output', () => {
+  it('show prints one request line with absolute paths, and needs no app', async () => {
+    const r = await run(['show', 'shots/a.png', '--title', 'Pricing', '--board', 'checkout']);
+    expect(r.code).toBe(0);
+    expect(app.seen).toEqual([]);
+    expect(bashRequestOf(r.stdout)).toEqual({
+      kind: 'show',
+      input: { path: path.join(app.dir, 'shots/a.png'), title: 'Pricing', board: 'checkout' },
+    });
+  });
+
+  it('show makes two to four files options, named by --labels', async () => {
+    const r = await run(['show', '/x/a.png', '/x/b.png', '--labels', 'Bold | Quiet', '--title', 'Hero']);
+    expect(bashRequestOf(r.stdout)).toEqual({
+      kind: 'show',
+      input: { options: [{ path: '/x/a.png', title: 'Bold' }, { path: '/x/b.png', title: 'Quiet' }], title: 'Hero' },
+    });
+    expect((await run(['show'])).code).toBe(2);
+    expect((await run(['show', 'a', 'b', 'c', 'd', 'e'])).code).toBe(2);
+  });
+
+  it('output needs a title and exactly one of --path or --url', async () => {
+    const r = await run(['output', 'Pricing', 'brief', '--url', 'https://claude.ai/artifact/x', '--status', 'ready']);
+    expect(bashRequestOf(r.stdout)).toEqual({
+      kind: 'output',
+      input: { title: 'Pricing brief', url: 'https://claude.ai/artifact/x', status: 'ready' },
+    });
+    expect((await run(['output', '--path', 'a.md'])).code).toBe(2);
+    expect((await run(['output', 'T'])).code).toBe(2);
+    expect((await run(['output', 'T', '--path', 'a.md', '--url', 'https://x'])).code).toBe(2);
+    expect((await run(['output', 'T', '--path', 'a.md', '--status', 'done'])).code).toBe(2);
+  });
+});

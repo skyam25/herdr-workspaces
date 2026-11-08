@@ -1,0 +1,279 @@
+html,
+body,
+#root,
+.ipad-board {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.ipad-board {
+  display: flex;
+}
+
+/* The app's own toolbar holds these. src/ipad-client/history.ts presses the hidden undo and redo. */
+.ipad-board .excalidraw .sidebar-trigger,
+.ipad-board .excalidraw .layer-ui__wrapper__footer-right,
+.ipad-board .excalidraw .undo-redo-buttons,
+.ipad-board .excalidraw [data-testid='button-undo'],
+.ipad-board .excalidraw [data-testid='button-redo'] {
+  display: none;
+}
+
+/* Touch targets reach 44pt where the toolbar has room. The narrow layout keeps its own sizes, because 44pt tools overflow it. */
+.ipad-board .excalidraw:not(.excalidraw--mobile) {
+  --lg-button-size: 2.75rem;
+  --lg-icon-size: 1.375rem;
+  --default-button-size: 2.75rem;
+  --default-icon-size: 1.375rem;
+}
+
+/* Desktop keyboard hints don't belong on a touch board. */
+.ipad-board .excalidraw .ToolIcon__keybinding,
+.ipad-board .excalidraw .HintViewer {
+  display: none;
+}
+
+/* The canvas runs under the home indicator, and the controls stay above it. */
+.ipad-board .excalidraw .layer-ui__wrapper__footer {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Comment boxes take text, though the rest of the app does not select. */
+.ipad-board textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  font-size: 16px;
+}
+
+/* The side panel: comments and the note. */
+.ipad-panel {
+  box-sizing: border-box;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: clamp(220px, 30vw, 300px);
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.ipad-panel .board-comments {
+  flex: 1;
+  width: auto;
+  border-left: none;
+}
+
+.ipad-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ipad-tabs {
+  flex: 1;
+  display: flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--line);
+}
+
+.ipad-tabs button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ipad-tabs button[aria-selected='true'] {
+  background: var(--raised);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.ipad-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.ipad-note {
+  flex: 1;
+  margin: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: none;
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.ipad-note:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Narrow screens and a fold lying flat dock the panel under the board. WorkView in Views.swift holds the same width. */
+@media (max-width: 700px) {
+  .ipad-board:not(.fold-side) {
+    flex-direction: column;
+  }
+
+  .ipad-board:not(.fold-side) .ipad-panel {
+    width: auto;
+    max-height: 38%;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .ipad-note {
+    min-height: 88px;
+  }
+}
+
+/*
+ * The keyboard shortens a phone's screen while the docked panel takes typing. The panel then takes the height, and the board waits behind.
+ * It waits for the short screen, so the tap that brings up the keyboard never moves the box under the finger.
+ */
+@media (max-width: 700px) and (max-height: 500px) {
+  .ipad-board:not(.fold-side):has(.ipad-panel :is(textarea, input):focus) .ipad-panel {
+    flex: 1;
+    max-height: none;
+  }
+
+  .ipad-board:not(.fold-side):has(.ipad-panel :is(textarea, input):focus) > :is(.canvas, .ipad-page) {
+    flex: 0 0 0;
+    overflow: hidden;
+  }
+}
+
+.ipad-board.fold-under {
+  flex-direction: column;
+}
+
+.ipad-board.fold-under .ipad-panel {
+  width: auto;
+  border-left: none;
+  border-top: 1px solid var(--line);
+}
+
+.ipad-board .canvas {
+  min-height: 0;
+}
+
+/* Words still settling read as part of the comment. */
+.ipad-panel .voice-settling {
+  font-size: 14px;
+  font-style: normal;
+  color: var(--fg);
+}
+
+/* A page hand-off shows the page in place of the board. The board stays mounted for its notes and comments. */
+.ipad-board.page-mode > .canvas {
+  display: none;
+}
+
+.ipad-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  position: relative;
+  background: #fff;
+}
+
+.ipad-page iframe {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* While Comment is on, taps on the page place pins. The hint sits low and lets taps through, so it never hides the spot. */
+.ipad-page-hint {
+  position: absolute;
+  bottom: 12px;
+  pointer-events: none;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 24px);
+  padding: 5px 5px 5px 14px;
+  border-radius: 999px;
+  background: rgb(30 30 46 / 0.9);
+  color: #fff;
+  font: 600 13px/1.2 -apple-system, system-ui, sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+}
+
+.ipad-page-hint span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ipad-page-hint button {
+  flex: none;
+  pointer-events: auto;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.18);
+  color: #fff;
+  font: inherit;
+}
+
+/* The board's width decides whether the lock and hand fit in the toolbar row. */
+.ipad-board > .canvas {
+  container: board / inline-size;
+}
+
+/* With room, the lock and hand join the end of the toolbar row instead of floating at the board's edge. */
+@container board (min-width: 500px) {
+  .ipad-board .excalidraw .mobile-misc-tools-container {
+    position: static;
+    flex-direction: row;
+    align-self: stretch;
+    margin-left: 6px;
+    border: 1px solid var(--sidebar-border-color);
+    border-radius: var(--border-radius-lg);
+  }
+
+  .ipad-board .excalidraw .mobile-misc-tools-container .ToolIcon__icon {
+    width: 2.25rem;
+    height: 100%;
+  }
+}
+
+/* A board a little short of room, such as an iPad's beside the inbox, tightens the row so the lock and hand still fit. */
+@container board (min-width: 500px) and (max-width: 559px) {
+  .ipad-board .excalidraw .App-toolbar-container .Stack_horizontal {
+    gap: 2px;
+  }
+
+  .ipad-board .excalidraw .App-toolbar-container .ToolIcon__icon,
+  .ipad-board .excalidraw .mobile-misc-tools-container .ToolIcon__icon {
+    width: 2rem;
+    height: 2rem;
+  }
+}

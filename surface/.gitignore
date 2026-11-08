@@ -1,0 +1,6 @@
+node_modules/
+__pycache__/
+app/out/
+app/bin/agent-brief.mjs
+app/bin/agent-brief-dictate
+evidence/run/

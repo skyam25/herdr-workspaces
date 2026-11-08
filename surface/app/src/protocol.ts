@@ -1,0 +1,1045 @@
+/**
+ * Agent Brief socket protocol, shared by the app, the `agent-brief` CLI and the
+ * agent-brief mod. HTTP/1.1 with JSON bodies over a Unix socket.
+ *
+ * Add fields and routes only. Never rename or remove.
+ */
+
+export const PROTOCOL_VERSION = 1;
+
+/** Overrides the socket path. Tests set it to a temp file. */
+export const SOCKET_ENV = 'COMPANION_SOCKET';
+
+/** `~/Library/Application Support/AgentBrief/agent-brief.sock`, file mode 0600. */
+export function defaultSocketPath(home: string): string {
+  return `${home}/Library/Application Support/AgentBrief/agent-brief.sock`;
+}
+
+/** Board name that resolves to the board the panel shows now. */
+export const CURRENT_BOARD = 'current';
+
+// ── Errors ────────────────────────────────────────────────────────────────
+// Every non-2xx response has this body. A body over 20 MB gets 413.
+// Requests with a body, DELETE included, must send Content-Length.
+
+export interface ErrorBody {
+  error: string;
+  code: 'not_found' | 'bad_request' | 'conflict' | 'unavailable' | 'internal';
+}
+
+// ── GET /health ───────────────────────────────────────────────────────────
+
+export interface Health {
+  ok: true;
+  version: number;
+  pid: number;
+  panelVisible: boolean;
+  currentBoard: string;
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────────
+// POST /sessions registers or refreshes a Claude Code session.
+// DELETE /sessions/:id removes one. GET /sessions lists them.
+// A session that neither re-registers nor polls for 90 s drops out.
+
+export interface SessionInfo {
+  sessionId: string;
+  /** The session's working folder. Deliveries are written under it. */
+  cwd: string;
+  title?: string;
+  pid?: number;
+  /** The user's latest typed prompt, trimmed, so two sessions in one folder look different. */
+  summary?: string;
+  /** Epoch ms when the session last finished a reply. Absent before its first one. */
+  activeAt?: number;
+  /** Epoch ms when the session's latest main-loop turn began. Later than `activeAt` while Claude works. */
+  startedAt?: number;
+  /** Epoch ms when the user's latest typed prompt began a turn, while that session's terminal is in front. */
+  promptAt?: number;
+  /** Set by the app for the panel. The session's rename, else Claude Code's title for it, from its transcript. */
+  name?: string;
+  /** Where the session runs, for its label and for jumping back to it. */
+  host?: SessionHost;
+  /** Set by the app. Epoch ms of the last register or poll. */
+  lastSeen?: number;
+  /** Set by the app. True when the user asked Claude to keep an items file for this session. */
+  trackItems?: boolean;
+  /** Set by the app when tracking is on: `<cwd>/.feedback/items/<sessionId>.md`. */
+  itemsPath?: string;
+  /** Set by the app for a live session: `<cwd>/.feedback/outputs/<sessionId>.json`, where the mod records outputs. */
+  outputsPath?: string;
+  /** The session's mode, mirrored from the mod. Absent means default. */
+  mode?: SessionMode;
+  /** The prototype fidelity, mirrored from the mod. Only set with `mode: 'prototype'`. */
+  fidelity?: PrototypeFidelity;
+}
+
+// GET   /sessions/:id              → SessionInfo, with its tracking state and mode
+// PATCH /sessions/:id              TrackingPatch | ModePatch → SessionInfo
+// Tracking is the user's choice, from the panel or `/track` in the session.
+// The app only reads the items file; Claude writes it, and the panel appends the user's decisions.
+// Mode is the mod's. The app stores and shows it; it never sets it.
+
+export interface TrackingPatch {
+  trackItems: boolean;
+}
+
+export type SessionMode = 'default' | 'product' | 'prototype' | 'orchestrate';
+
+export type PrototypeFidelity = 'wireframe' | 'styled' | 'live-patch' | 'freeze-patch' | 'interactive' | 'existing';
+
+export interface ModePatch {
+  mode: SessionMode;
+  fidelity?: PrototypeFidelity;
+}
+
+export interface SessionHost {
+  /** `TERM_PROGRAM`, such as `ghostty`, `iTerm.app`, `Apple_Terminal` or `vscode`. */
+  terminal?: string;
+  /** Bundle id of the app the terminal runs in, from `__CFBundleIdentifier`. */
+  bundleId?: string;
+  /** herdr pane id, from `HERDR_PANE_ID`, when the session runs inside herdr. */
+  herdrPane?: string;
+}
+
+/** POST /sessions answers with the full list. DELETE /sessions/:id answers with this. */
+export interface RemoveSessionResponse {
+  removed: boolean;
+}
+
+export interface SessionsResponse {
+  sessions: SessionInfo[];
+  /**
+   * The session Send delivers to. Only `/open` with a session id or an explicit
+   * pick sets it, and it clears when that session leaves.
+   */
+  targetSessionId?: string;
+  /** True when at least one iPad is paired, so the mod can offer the iPad hand-off. */
+  ipadPaired?: boolean;
+}
+
+// ── iPad hand-offs ────────────────────────────────────────────────────────
+// A hand-off asks the paired iPad for a sketch or note and ties the answer to one session.
+// GET  /ipad            → IpadStatus
+// POST /handoffs        HandoffRequest → Handoff. `sessionId` must be live. With no paired iPad, 409 `conflict`.
+// GET  /handoffs        → HandoffsResponse, optionally `?sessionId=`
+// DELETE /handoffs/:id  → RemoveHandoffResponse
+
+export interface IpadDevice {
+  id: string;
+  name: string;
+  /** Epoch ms of its last authenticated request. */
+  lastSeen: number;
+  /** Epoch ms when it paired with this Mac. */
+  pairedAt?: number;
+}
+
+export interface IpadStatus {
+  paired: boolean;
+  devices: IpadDevice[];
+}
+
+export interface HandoffRequest {
+  sessionId: string;
+  /** What Claude or the user asks for. The iPad's inbox shows it. */
+  prompt?: string;
+  /** Board the iPad starts from. Absent starts a blank one. */
+  board?: string;
+  /** An HTML file in the session's project, relative to it. The device opens it as a page to review, in place of a board. */
+  page?: string;
+}
+
+export type HandoffState = 'open' | 'delivered' | 'filed';
+
+export interface Handoff {
+  id: string;
+  sessionId: string;
+  /** The session's name when the hand-off was made. */
+  sessionLabel: string;
+  prompt?: string;
+  /** The board the iPad's work is saved as on the Mac. */
+  boardName: string;
+  /** The name of the Mac board the iPad starts from. Absent for a blank hand-off. */
+  fromBoard?: string;
+  /** The project HTML file the device reviews as a page. Absent for a board. */
+  page?: string;
+  createdAt: number;
+  /** `filed` means the session had ended by Send, so the board waits on the Mac under that session. */
+  state: HandoffState;
+}
+
+export interface HandoffsResponse {
+  handoffs: Handoff[];
+}
+
+export interface RemoveHandoffResponse {
+  removed: boolean;
+}
+
+// ── POST /open ────────────────────────────────────────────────────────────
+// Shows the panel. Picks the target session when one is given.
+
+export interface OpenRequest {
+  /** Board to show. Created when missing. Defaults to the current board. */
+  board?: string;
+  /** Makes this session the Send target. */
+  sessionId?: string;
+  /** Text shown at the top of the panel, such as what Claude asked for. */
+  prompt?: string;
+  /** `write` opens Write mode on a new note instead of the board. Defaults to `sketch`. */
+  mode?: 'sketch' | 'write';
+  /** In Write mode, the new note's text. */
+  text?: string;
+  /** Sets the board's layout. Absent leaves it as it is. */
+  layout?: BoardLayout;
+  /**
+   * Opens this output of `sessionId` instead of a board: a Markdown file as a note in Write, an HTML file in the review pane. Project-relative. Needs `sessionId`.
+   * `tab: 'feedback'` opens an HTML review on its Feedback tab, or any other project file in the full-width Feedback view.
+   */
+  output?: { path: string; tab?: 'feedback' };
+  /** Opens this saved note in Write instead of a board. `POST /notes` returns the id as `draftId`. */
+  note?: { id: string };
+  /** Opens the Initiative view on this initiative instead of a board. An unknown id answers 404. */
+  initiative?: { id: string };
+  /**
+   * With `sessionId` and no `board`, shows the board or note the session last had open and makes no board.
+   * A session with neither leaves the panel as it is.
+   */
+  reopen?: boolean;
+  /**
+   * Set after Claude draws on `board`, with `sessionId`. Files the board under the session.
+   * The panel shows it when hidden or already on that session. A panel on another session stays as it is.
+   */
+  follow?: boolean;
+}
+
+export interface OpenResponse {
+  board: string;
+  /** The server's target after the request, whatever the backend returned. */
+  targetSessionId?: string;
+  /** True when Write mode started the new note with the request's text. */
+  noteText?: boolean;
+  /**
+   * What the panel shows now: the board, a note in Write, an HTML file in the review pane, an initiative, or what it showed before a `reopen`.
+   * `filed` means a `follow` only filed the board, because the panel shows another session.
+   */
+  opened?: 'board' | 'note' | 'review' | 'panel' | 'filed' | 'initiative';
+}
+
+// ── POST /notes ───────────────────────────────────────────────────────────
+// Files a note in Write mode without showing or focusing the panel. With a
+// live session it goes under that session's tab, else under Notes. The open
+// panel lists it at once and keeps the note it shows.
+
+export interface NoteRequest {
+  /** Markdown, as Write mode keeps it. */
+  text: string;
+  /** The name the note list shows. Absent, the list shows the text's first line. */
+  title?: string;
+  /** Files the note under this session. It must be live. */
+  sessionId?: string;
+  /**
+   * Replaces this saved note's text, and its title when one is given, instead of adding a note.
+   * The note stays where it is filed, so `sessionId` is ignored. An unknown id answers 400.
+   */
+  draftId?: string;
+}
+
+export interface NoteResponse {
+  ok: true;
+  draftId: string;
+}
+
+// ── Outputs file ──────────────────────────────────────────────────────────
+// `<cwd>/.feedback/outputs/<sessionId>.json`. The mod writes it; the app only
+// reads it. Claude declares a deliverable with the `declare_output` tool, and
+// the mod's hook on Write, Edit and NotebookEdit records every document-type
+// file the session touches. One record per `ref`.
+
+export function outputsFile(cwd: string, sessionId: string): string {
+  return `${cwd}/.feedback/outputs/${sessionId}.json`;
+}
+
+/** Extensions the hook records, lower case, without the dot. */
+export const DOCUMENT_EXTENSIONS: readonly string[] = ['md', 'markdown', 'mdx', 'html', 'htm', 'pdf', 'docx', 'pptx', 'xlsx'];
+
+/** Folders under the cwd whose files are never outputs. */
+export const OUTPUT_SKIP_DIRS: readonly string[] = ['.feedback', '.claude', 'node_modules'];
+
+export type OutputKind = 'markdown' | 'html' | 'pdf' | 'docx' | 'pptx' | 'xlsx' | 'artifact' | 'other';
+
+/** `declared` when Claude named it with `declare_output`; `detected` when only the hook saw it. */
+export type OutputTier = 'declared' | 'detected';
+
+export type OutputStatus = 'drafting' | 'ready';
+
+/** `created` when the session made the file, or replaced most of it; `edited` otherwise. */
+export type OutputOrigin = 'created' | 'edited';
+
+export interface OutputRecord {
+  /** The path relative to the session's cwd, or the URL. The record's key. */
+  ref: string;
+  /** Present when `ref` is a URL. */
+  url?: string;
+  title?: string;
+  kind: OutputKind;
+  tier: OutputTier;
+  /** Only a declared output has a status. */
+  status?: OutputStatus;
+  origin?: OutputOrigin;
+  /** Epoch ms of the latest `declare_output` call. */
+  declaredAt?: number;
+  /** Epoch ms of the hook's first and latest write. Absent for a URL. */
+  firstWriteAt?: number;
+  lastWriteAt?: number;
+  /** How many writes the hook saw. */
+  writes?: number;
+}
+
+export interface OutputsFile {
+  version: 1;
+  sessionId: string;
+  outputs: OutputRecord[];
+}
+
+// ── Bash requests ─────────────────────────────────────────────────────────
+// `agent-brief show` and `agent-brief output` print one line: this mark, then
+// a BashRequest as JSON. The mod's Bash hook reads it and rewrites the output.
+// This path works where an organization's policy stops plugins adding tools.
+
+export const BASH_REQUEST_MARK = 'agent-brief:request ';
+
+/** One picture `agent-brief show` names. `path` is absolute. */
+export interface ShowRequestItem {
+  path: string;
+  title?: string;
+}
+
+export type BashRequest =
+  | { kind: 'show'; input: { path?: string; title?: string; board?: string; url?: string; options?: ShowRequestItem[] } }
+  | { kind: 'output'; input: { title: string; path?: string; url?: string; status?: OutputStatus } };
+
+export const bashRequestLine = (request: BashRequest): string => `${BASH_REQUEST_MARK}${JSON.stringify(request)}`;
+
+/** The request in a command's output, or undefined when it has none. */
+export function bashRequestOf(stdout: string): BashRequest | undefined {
+  const line = stdout.split('\n').find((l) => l.startsWith(BASH_REQUEST_MARK));
+  if (line === undefined) return undefined;
+  try {
+    const value = JSON.parse(line.slice(BASH_REQUEST_MARK.length)) as Partial<BashRequest>;
+    const isKind = value.kind === 'show' || value.kind === 'output';
+    return isKind && typeof value.input === 'object' && value.input !== null ? (value as BashRequest) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ── Deliveries ────────────────────────────────────────────────────────────
+// GET /deliveries?session=<id>&wait=<seconds> long-polls. It answers at once
+// when deliveries are queued, else after `wait` seconds (max 30) with none.
+// POST /deliveries/:id/ack removes one from the queue.
+
+export interface Delivery {
+  id: string;
+  sessionId: string;
+  /** Absolute path of the bundle, `<cwd>/.feedback/sketches/<id>/`. */
+  dir: string;
+  /** Prompt text to put in the box. Paths are relative to the session's cwd. */
+  draft: string;
+  /** `fill` puts the draft in the prompt box. `submit` sends it at once. */
+  mode: 'fill' | 'submit';
+  createdAt: number;
+}
+
+export interface DeliveriesResponse {
+  deliveries: Delivery[];
+}
+
+/** An unknown id answers 200 with `acked: false`, so a retried ack is harmless. */
+export interface AckResponse {
+  acked: boolean;
+}
+
+// ── Boards ────────────────────────────────────────────────────────────────
+// GET    /boards                         → BoardsResponse
+// GET    /boards/:name/elements[?region=x,y,w,h] → ReadResponse
+// GET    /boards/:name/png[?region=x,y,w,h&maxEdge=1400] → image/png
+// POST   /boards/:name/draw              DrawRequest   → DrawResponse
+// PATCH  /boards/:name/elements          UpdateRequest → MutateResponse
+// DELETE /boards/:name/elements          DeleteRequest → MutateResponse
+// :name may be `current`.
+
+/**
+ * `freeform` is the plain whiteboard. `stack` files each drop or paste of
+ * screenshots as a numbered group, one group per row, newest at the bottom.
+ */
+export type BoardLayout = 'freeform' | 'stack';
+
+export interface BoardsResponse {
+  boards: {
+    name: string;
+    updatedAt: number;
+    elementCount: number;
+    /** Absent for a freeform board. */
+    layout?: BoardLayout;
+    /** The session whose brief holds this board. Absent for an unfiled board. */
+    sessionId?: string;
+    /** The user pinned it to the top of the sidebar. */
+    pinned?: boolean;
+    /** It was sent or marked done and has not changed since, so the sidebar folds it away. */
+    done?: boolean;
+  }[];
+  current: string;
+}
+
+export type ShapeType =
+  | 'rectangle'
+  | 'ellipse'
+  | 'diamond'
+  | 'text'
+  | 'sticky'
+  | 'arrow'
+  | 'line'
+  | 'frame'
+  | 'image'
+  | 'freedraw';
+
+/** Named colours keep agent drawings consistent with the palette. */
+export type ColorName =
+  | 'black'
+  | 'gray'
+  | 'red'
+  | 'orange'
+  | 'yellow'
+  | 'green'
+  | 'blue'
+  | 'violet'
+  | 'pink';
+
+export type Endpoint = { id: string } | { x: number; y: number };
+
+/** What an agent sends to draw. The app fills in defaults and layout. */
+export interface Skeleton {
+  /** Caller-chosen id, so arrows in the same request can bind to it. */
+  id?: string;
+  type: Exclude<ShapeType, 'freedraw'>;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  /** Text inside a shape, sticky or frame title. The text of a `text` element. */
+  label?: string;
+  /** How a label lines up inside its shape or sticky. Left when a line starts with `- ` or `• `, else center. */
+  align?: 'left' | 'center';
+  color?: ColorName;
+  /** Arrow and line ends. */
+  start?: Endpoint;
+  end?: Endpoint;
+  /** Line points relative to x,y. */
+  points?: [number, number][];
+  /** Puts the element inside a frame. */
+  frameId?: string;
+  /** An `image` element's picture, as a `data:image/png|jpeg|webp|gif;base64,` URL. Needs width and height. */
+  image?: string;
+}
+
+export interface DrawRequest {
+  elements: Skeleton[];
+}
+
+export interface DrawResponse {
+  /** Ids in request order. */
+  ids: string[];
+  /** One undo step removes the whole batch. */
+  batchId: string;
+  /** Problems the drawing has, such as an arrow its label hides. */
+  warnings?: string[];
+  /** The new elements as `read` lists them, in request order. */
+  elements?: ElementSummary[];
+}
+
+export interface ElementSummary {
+  id: string;
+  type: ShapeType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string;
+  color?: string;
+  by: 'user' | 'claude';
+  frameId?: string;
+  /** Bound arrow ends. */
+  startId?: string;
+  endId?: string;
+  /** Epoch ms when the element was added. */
+  createdAt?: number;
+}
+
+export interface ReadResponse {
+  board: string;
+  elements: ElementSummary[];
+  /** The scene's bounding box, for picking a region. */
+  bounds: { x: number; y: number; width: number; height: number };
+}
+
+export interface ElementUpdate {
+  id: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  label?: string;
+  color?: ColorName;
+}
+
+export interface UpdateRequest {
+  updates: ElementUpdate[];
+}
+
+export interface DeleteRequest {
+  ids: string[];
+}
+
+export interface MutateResponse {
+  /** Ids that changed. Unknown ids are left out. */
+  ids: string[];
+  batchId: string;
+  /** Problems the change made, such as a box that grew over its neighbour. */
+  warnings?: string[];
+}
+
+// ── Initiatives ───────────────────────────────────────────────────────────
+// An initiative is a standing brief above sessions, kept as `<Title> brief.md`
+// in the initiative's own folder. Its front matter holds `agent_brief_id`, so a
+// rename or move survives. The app indexes briefs in `<data>/initiatives.json`
+// with revisions, session bindings and lastActiveAt. The CLI reads the index
+// and the briefs directly when the app is closed. Writes need the app.
+// While a live session is attached, the app adds each output it declares ready
+// to the brief's Outputs section. It never removes a row.
+//
+// GET    /initiatives                 → InitiativeSummary[], latest lastActiveAt first
+// GET    /initiatives/recent?limit=3  → InitiativeSummary[]
+// GET    /initiatives/find?q=<words>  → InitiativeSummary[], the top 3 with `score`
+// POST   /initiatives                 InitiativeCreateRequest → Initiative
+// GET    /initiatives/:id             → Initiative
+// PUT    /initiatives/:id             InitiativeUpdateRequest → Initiative, 409 on a stale revision
+// GET    /initiatives/:id/history     → InitiativeRevision[], newest first
+// GET    /sessions/:id/initiative     → InitiativeSnapshot, or 204 when none is attached
+// PUT    /sessions/:id/initiative     SessionInitiativeRequest → InitiativeSnapshot. The session must be live.
+// DELETE /sessions/:id/initiative     → { detached: boolean }
+
+/** The part a folder plays in an initiative's map. */
+export type InitiativeRole = 'working' | 'sources' | 'decisions' | 'grounding' | 'outputs';
+
+export const INITIATIVE_ROLES: readonly InitiativeRole[] = ['working', 'sources', 'decisions', 'grounding', 'outputs'];
+
+/** The most Understanding a snapshot carries. A longer one is cut and ends with `…`. */
+export const INITIATIVE_UNDERSTANDING_CAP = 2400;
+
+export interface InitiativeFolder {
+  /** As the brief writes it. `~/` is allowed. */
+  path: string;
+  role: InitiativeRole;
+  note?: string;
+}
+
+export interface Initiative {
+  id: string;
+  title: string;
+  /** The brief file, absolute. */
+  path: string;
+  understanding: string;
+  /** Raw lines without the leading `- `. */
+  decisions: string[];
+  open: string[];
+  folders: InitiativeFolder[];
+  /** The brief's Outputs rows, without the leading `- `. Absent when it has none. */
+  outputs?: string[];
+  revision: number;
+  /** ISO time of the latest revision. */
+  updatedAt: string;
+  /** `PM`, `Claude · <sessionId>`, or `Agent Brief · <sessionId>` when the app filed a session's ready outputs. */
+  updatedBy: string;
+  /** ISO time of the latest attach, update or creation. */
+  lastActiveAt: string;
+  /** The sessions attached now. */
+  sessions?: string[];
+  /** True when the brief file is gone and no moved copy turned up. */
+  missing?: boolean;
+}
+
+export type InitiativeSummary = Pick<Initiative, 'id' | 'title' | 'lastActiveAt'> & {
+  /** The first sentence of Understanding. */
+  line: string;
+  /** Term overlap. Only `find` sets it. */
+  score?: number;
+};
+
+export interface InitiativeSnapshot {
+  id: string;
+  title: string;
+  revision: number;
+  /** Bumps on every attach to this session, so a re-attach sends the snapshot again. */
+  attachmentRevision: number;
+  /** At most INITIATIVE_UNDERSTANDING_CAP characters. */
+  understanding: string;
+  decisions: string[];
+  open: string[];
+  folders: InitiativeFolder[];
+  /** The brief's Outputs rows, without the leading `- `. Absent when it has none. */
+  outputs?: string[];
+}
+
+export interface InitiativeRevision {
+  revision: number;
+  updatedAt: string;
+  updatedBy: string;
+  /** The sections the revision changed, such as `understanding`. Absent for an edit made outside the app. */
+  changed?: string[];
+}
+
+export interface InitiativeCreateRequest {
+  title: string;
+  /** Absolute folder the brief goes in. Created when missing. */
+  folder: string;
+  understanding?: string;
+  /** Defaults to the folder as `working`. */
+  folders?: InitiativeFolder[];
+  decisions?: string[];
+  open?: string[];
+  /** Rows for the Working section, without the leading `- `. */
+  working?: string[];
+  /** Defaults to `PM`. */
+  updatedBy?: string;
+}
+
+export interface InitiativeUpdateRequest {
+  /** The revision the change was made against. */
+  revision: number;
+  understanding?: string;
+  decisions?: string[];
+  open?: string[];
+  folders?: InitiativeFolder[];
+  updatedBy: string;
+}
+
+export interface SessionInitiativeRequest {
+  initiativeId: string;
+}
+
+export interface DetachInitiativeResponse {
+  detached: boolean;
+}
+/** Behavior specifications live beside an HTML prototype, across sessions.
+ * GET/PUT /sessions/:id/behavior?path=<project-relative HTML path>.
+ * PUT takes BehaviorUpdate. The socket is the agent; PM decisions use panel IPC.
+ */
+export interface BehaviorRule {
+  id: string;
+  text: string;
+  status: 'proposed' | 'confirmed';
+  source: { kind: 'brief' | 'comment' | 'decision' | 'assumption'; ref: string };
+  target?: { selector: string; state?: string };
+  note?: string;
+  delivery: 'planned' | 'implemented' | 'verified';
+  evidence?: string;
+}
+
+export interface BehaviorChange {
+  revision: number;
+  at: string;
+  by: string;
+  before: BehaviorRule[];
+  after: BehaviorRule[];
+  limitationsBefore: string[];
+  limitationsAfter: string[];
+}
+
+export interface BehaviorSpec {
+  schema: 1;
+  revision: number;
+  rules: BehaviorRule[];
+  limitations: string[];
+  history: BehaviorChange[];
+}
+
+export interface BehaviorDocument extends BehaviorSpec {
+  path: string;
+  /** Content hash; detects hand edits even if revision was not incremented. */
+  version: string;
+}
+
+export interface BehaviorUpdate {
+  version: string;
+  upsert?: BehaviorRule[];
+  limitations?: string[];
+}
+
+export interface BehaviorDecision {
+  version: string;
+  id: string;
+  text: string;
+  status: 'proposed' | 'confirmed';
+  note?: string;
+}
+
+/** Feedback items live beside any output, across sessions, in `<output>.feedback.md`.
+ * GET /sessions/:id/feedback?path=<project-relative output path> answers FeedbackDocument.
+ * POST takes FeedbackUpdate and answers FeedbackUpdateResult; 409 on a stale version.
+ * GET /sessions/:id/feedback/project answers FeedbackProject.
+ * GET also reads a feedback file whose output was deleted.
+ * The socket writes as Claude; the panel writes as You through IPC.
+ */
+export type FeedbackState = 'open' | 'accepted' | 'rejected' | 'done';
+
+/** `## Round N · label · date · source`, newest first in the file. */
+export interface FeedbackRound {
+  n: number;
+  label: string;
+  date: string;
+  source?: string;
+}
+
+/** One indented line under an item, in file order. `key` is empty for a note. */
+export interface FeedbackLine {
+  key: string;
+  text: string;
+}
+
+/** `Src: <round> · <speaker> · <time> · "<quote>"`. */
+export interface FeedbackSource {
+  round: number;
+  speaker: string;
+  time: string;
+  quote: string;
+}
+
+/** A dated `Claude:`, `You:`, `Workspace:` or `Review:` line. `detail` is everything after the verb. */
+export interface FeedbackEvent {
+  key: string;
+  date: string;
+  verb: string;
+  detail: string;
+}
+
+export interface FeedbackItem {
+  n: number;
+  title: string;
+  /** The `- [x]` checkbox. Mirrors the closed states. */
+  checked: boolean;
+  /** From the last state verb. */
+  state: FeedbackState;
+  /** The `Round:` line, the round it first came up in. */
+  round?: number;
+  /** Every round the item came up in: its first round, then `Src:` rounds, ascending. */
+  rounds: number[];
+  sources: FeedbackSource[];
+  /** The last `Change:` and `Where:` lines. Earlier `Change:` lines stay as history. */
+  change?: string;
+  where?: string;
+  /** `Option: <letter> · <text>` lines, by letter. A later line for a letter replaces it. */
+  options?: { key: string; text: string }[];
+  /** The option the standing accept picked, from `You: … · accept · option B`. */
+  chosen?: string;
+  /** On a closed item, the newest round of a `Src:` line after the line that closed it. */
+  raisedAgain?: number;
+  /** A `Change:` or `Option:` line came after the last accept, so the accept no longer stands and the item is open. */
+  revised?: boolean;
+  related: { path: string; n: number }[];
+  before: string[];
+  after: string[];
+  events: FeedbackEvent[];
+  notes: string[];
+  lines: FeedbackLine[];
+}
+
+export interface FeedbackDoc {
+  title: string;
+  rounds: FeedbackRound[];
+  items: FeedbackItem[];
+}
+
+export interface FeedbackDocument extends FeedbackDoc {
+  /** The feedback file, relative to the project. */
+  path: string;
+  /** The output it belongs to, relative to the project. */
+  output: string;
+  /** Content hash, or `missing` before the file exists. */
+  version: string;
+  /** False when the output is gone and only its feedback file is left. It reads; writes and snapshots need the output. */
+  outputExists?: false;
+}
+
+export type FeedbackOp =
+  /** Returns the round already in the file with this source, or this label and no source, and writes nothing.
+   * Otherwise it reuses the number of a project round with the same source, or takes the project's highest plus one.
+   * `date` is the round's ISO date, today when absent. */
+  | { op: 'addRound'; label: string; source?: string; date?: string }
+  /** Numbered after the highest item. `round` defaults to the newest round. */
+  | { op: 'addItem'; title: string; round?: number; lines?: FeedbackLine[] }
+  /** Event keys take `verb · detail` and get the date in front. */
+  | { op: 'append'; item: number; key: string; text: string }
+  | { op: 'close'; item: number }
+  | { op: 'open'; item: number };
+
+export interface FeedbackUpdate {
+  /** Writes only at this version. Without it, the ops apply to the file as it stands, since they only add. */
+  version?: string;
+  ops: FeedbackOp[];
+}
+
+export interface FeedbackUpdateResult extends FeedbackDocument {
+  /** Numbers the update gave new rounds and items, in op order. */
+  added: { rounds: number[]; items: number[] };
+}
+
+export interface FeedbackFileSummary {
+  path: string;
+  output: string;
+  outputExists: boolean;
+  title: string;
+  rounds: number;
+  items: number;
+  open: number;
+  accepted: number;
+  rejected: number;
+  done: number;
+}
+
+export interface FeedbackProject {
+  files: FeedbackFileSummary[];
+  /** The scan stopped at its file or folder limit. */
+  truncated?: boolean;
+  /** How the scanned files' rounds, items, outputs and workspaces link. */
+  graph?: FeedbackGraph;
+}
+
+/**
+ * The project graph, built from the feedback files. Node ids:
+ * `source:<label> · <source>` for a round with a source, else `source:<feedback file>#<n>`;
+ * `item:<output>#<n>`, `output:<output>` and `workspace:<board>`.
+ */
+export interface FeedbackGraphNode {
+  id: string;
+  kind: 'source' | 'item' | 'output' | 'workspace';
+  label: string;
+  /** Item and output nodes: the output, relative to the project. */
+  output?: string;
+  /** Item nodes: the item number. */
+  n?: number;
+  state?: FeedbackState;
+  /** An output file that is gone, or a `Related:` item no scanned file holds. */
+  missing?: boolean;
+  /** Longer text for a tooltip, such as a source's rounds. */
+  detail?: string;
+}
+
+export interface FeedbackGraphEdge {
+  from: string;
+  to: string;
+  /** raised: source to item. about: item to output. related: item to item. worked in: item to workspace. */
+  kind: 'raised' | 'about' | 'related' | 'worked in';
+}
+
+export interface FeedbackGraph {
+  nodes: FeedbackGraphNode[];
+  edges: FeedbackGraphEdge[];
+}
+
+/**
+ * POST /sessions/:id/feedback/snap?path=<HTML output> captures the item's `Where:`
+ * element, or the whole page without one, into `<output>.feedback/<n>-r<round>-<side>.png`,
+ * and appends a `Before:` or `After:` line. `round` defaults to the item's latest round.
+ * Pictures never change: a retake is `<n>-r<round>-<side>-<rev>.png` with its own line.
+ */
+export interface FeedbackSnapRequest {
+  item: number;
+  side: 'before' | 'after';
+  round?: number;
+}
+
+export interface FeedbackSnapResult extends FeedbackDocument {
+  /** The picture, relative to the project. */
+  picture: string;
+  /** The element or page was taller, and the picture shows only its top this many CSS pixels. */
+  clipped?: number;
+}
+
+/** An item's workspace board, as POST /sessions/:id/feedback/workspace?path=<output>&item=<n> answers it.
+ * The call makes the board when missing and adds a `Round N` frame for the item's newest round.
+ */
+export interface FeedbackWorkspace {
+  board: string;
+  /** The round the newest frame is for. */
+  round: number;
+  /** This call made the board. */
+  created: boolean;
+  /** This call added the round's frame. */
+  framed: boolean;
+}
+
+/**
+ * Outline-first authoring. An outline lives in the project as `<name>.outline.md`, beside the
+ * document or page it generates. The panel and Claude both write it through version-checked ops.
+ * GET /sessions/:id/outline?path=<project-relative .outline.md> answers OutlineDocument, with version `missing` when absent.
+ * POST takes OutlineUpdate and answers OutlineUpdateResult; 409 on a stale version. Version `missing` creates the file.
+ * GET /sessions/:id/outline/project answers OutlineProject.
+ */
+export type OutlineKind = 'document' | 'page';
+
+/** What a check found: the source supports the point, partly does, does not, or could not be opened. Absent means unchecked. */
+export type CiteMark = 'supports' | 'partly' | 'not' | 'unknown';
+
+export interface OutlineCite {
+  /** A source id, such as `S1`. */
+  source: string;
+  /** Where in the source, such as `p.3` or `wait times`. */
+  location?: string;
+  mark?: CiteMark;
+  /** Why the mark, such as `pilot of 12 accounts only`. */
+  note?: string;
+}
+
+export interface OutlinePoint {
+  /** `p1`, `p2`, … unique in the file. */
+  id: string;
+  /** `open` is a question the document must not silently answer. */
+  kind: 'point' | 'open';
+  text: string;
+  cites: OutlineCite[];
+  /** How to express the point: tone, emphasis, qualification. */
+  guide?: string;
+  /** A fact, decision or exact wording that must survive any rewrite. */
+  keep?: string;
+  /** For an open point, the default the draft adopts until it is answered. */
+  default?: string;
+  /** Sub-lines the parser did not recognize, kept verbatim. */
+  extra?: string[];
+}
+
+export interface OutlineSection {
+  /** `s1`, `s2`, … unique in the file. */
+  id: string;
+  title: string;
+  points: OutlinePoint[];
+  extra?: string[];
+}
+
+export interface OutlineSource {
+  /** `S1`, `S2`, … unique in the file. */
+  id: string;
+  title: string;
+  /** A project path or URL. */
+  ref?: string;
+  /** What the source establishes. */
+  supports?: string;
+  /** What it does not establish. */
+  notShown?: string;
+  /** The date of the last check, `YYYY-MM-DD`. */
+  checked?: string;
+  extra?: string[];
+}
+
+/** An intent line, such as `Reader: …`, `Goal: …`, `Message: …` or `Guide: …`. */
+export interface OutlineIntentLine {
+  key: string;
+  text: string;
+}
+
+/** How far a revision reaches: edit passages, rewrite affected sections, or regenerate the whole target. */
+export type DirectionScope = 'edit' | 'sections' | 'regenerate';
+
+/** Claude's reading of a round of feedback on the target, before the target changes. */
+export interface OutlineDirection {
+  /** `YYYY-MM-DD`. */
+  date: string;
+  state: 'proposed' | 'accepted';
+  scope: DirectionScope;
+  /** Where the feedback came from, such as `3 comments on docs/memo.md`. */
+  from?: string;
+  /** The revised direction, 3 to 6 bullets. */
+  bullets: string[];
+  /** What changed in the outline, such as `replaced · Intent goal`. */
+  changes: string[];
+}
+
+export interface OutlineDoc {
+  title: string;
+  /** The document or page Generate writes, relative to the project. */
+  target?: string;
+  kind: OutlineKind;
+  intent: OutlineIntentLine[];
+  direction?: OutlineDirection;
+  sections: OutlineSection[];
+  sources: OutlineSource[];
+  /** Top-level lines the parser did not recognize, kept verbatim. */
+  extra?: string[];
+}
+
+export interface OutlineDocument extends OutlineDoc {
+  /** The outline file, relative to the project. */
+  path: string;
+  /** A hash of the file, or `missing`. */
+  version: string;
+  /** False when `target` is set and the file is not there yet. */
+  targetExists?: boolean;
+}
+
+export type OutlineOp =
+  | { op: 'setMeta'; title?: string; target?: string | null; kind?: OutlineKind }
+  | { op: 'setIntent'; lines: OutlineIntentLine[] }
+  /**
+   * `after` is a section id; `null` puts it first; absent puts it last.
+   * `label` names the new id for later ops in the same batch, which refer to it as `@<label>`. Each add op takes one.
+   */
+  | { op: 'addSection'; title: string; after?: string | null; label?: string }
+  | { op: 'editSection'; id: string; title: string }
+  | { op: 'moveSection'; id: string; after: string | null }
+  | { op: 'removeSection'; id: string }
+  /** `after` is a point id in `section`; `null` puts it first; absent puts it last. */
+  | { op: 'addPoint'; section: string; text: string; kind?: 'point' | 'open'; after?: string | null; cites?: OutlineCite[]; guide?: string; keep?: string; default?: string; label?: string }
+  /** Given fields replace the old ones whole; `null` clears one. */
+  | { op: 'editPoint'; id: string; text?: string; kind?: 'point' | 'open'; cites?: OutlineCite[]; guide?: string | null; keep?: string | null; default?: string | null }
+  | { op: 'movePoint'; id: string; section: string; after: string | null }
+  | { op: 'removePoint'; id: string }
+  /** Without `id`, the next free `S<n>`. */
+  | { op: 'addSource'; title: string; id?: string; ref?: string; supports?: string; notShown?: string; label?: string }
+  | { op: 'editSource'; id: string; title?: string; ref?: string | null; supports?: string | null; notShown?: string | null; checked?: string | null }
+  /** Also drops the cites that name it. */
+  | { op: 'removeSource'; id: string }
+  /** Without `date`, today. */
+  | { op: 'setDirection'; direction: Omit<OutlineDirection, 'date'> & { date?: string } }
+  | { op: 'clearDirection' };
+
+export interface OutlineUpdate {
+  /** Writes only at this version, and `missing` creates the file. Without it, the ops apply to the file as it stands, since they target ids. */
+  version?: string;
+  ops: OutlineOp[];
+}
+
+export interface OutlineUpdateResult extends OutlineDocument {
+  /** Ids the ops created, in op order. */
+  added: string[];
+}
+
+export interface OutlineSummary {
+  path: string;
+  title: string;
+  target?: string;
+  kind: OutlineKind;
+  sections: number;
+  points: number;
+  open: number;
+  cites: number;
+  /** Cites with no mark. */
+  unchecked: number;
+  /** Cites marked `partly`, `not` or `unknown`. */
+  flagged: number;
+  direction?: OutlineDirection['state'];
+}
+
+export interface OutlineProject {
+  files: OutlineSummary[];
+  truncated?: boolean;
+}

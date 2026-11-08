@@ -1,0 +1,9 @@
+{
+  "name": "herdr-workspaces",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "bin": { "hws": "bin/hws" },
+  "scripts": {
+    "test": "node --test core/test/*.test.js"
+  }
+}

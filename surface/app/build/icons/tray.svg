@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="18" height="18">
+  <title>Agent Brief menu bar template</title>
+  <defs>
+    <mask id="fold" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><path d="M445 615 L860 200" stroke="#000" stroke-width="60" stroke-linecap="round"/></mask>
+  </defs>
+  <g transform="translate(40 40) scale(0.95)">
+    <path mask="url(#fold)" d="M140 500 L860 200 L560 860 L460 620 Z" fill="#000" stroke="#000" stroke-width="50" stroke-linejoin="round"/>
+    <circle cx="255" cy="760" r="58" fill="#000"/>
+    <circle cx="125" cy="890" r="42" fill="#000"/>
+  </g>
+</svg>

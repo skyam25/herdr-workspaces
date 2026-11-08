@@ -1,0 +1,50 @@
+{
+  "board_glued": {
+    "agent_draw": true,
+    "no_tcp_listener": true,
+    "done_called": true,
+    "artifact": true,
+    "bundle_files": true,
+    "prompt_absolute": true,
+    "hws_survived_hangup": true,
+    "host_exited_on_hangup": true
+  },
+  "note_new": {
+    "cmd_enter_done": true,
+    "text_in_prompt": true,
+    "ctrl_q": true
+  },
+  "note_file": {
+    "artifact": true,
+    "names_project_path": true,
+    "draft_has_edit": true,
+    "bundle_left_project": true
+  },
+  "page": {
+    "artifact": true,
+    "comment_in_review": true,
+    "no_project_paths": true
+  },
+  "standalone": {
+    "copy_makes_artifact": true,
+    "copy_runs_link": true,
+    "clipboard": true,
+    "open_terminal_runs": true,
+    "unchanged_reuses_artifact": true,
+    "changed_makes_new_artifact": true,
+    "still_open": true
+  },
+  "terminal_ended": {
+    "artifact": true,
+    "still_open": true,
+    "copy_link_after_flip": true
+  },
+  "failing": {
+    "still_open": true
+  },
+  "two": {
+    "both_alive": true,
+    "first_status": true,
+    "second_status": true
+  }
+}

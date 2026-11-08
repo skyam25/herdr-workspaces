@@ -1,0 +1,978 @@
+import type { BehaviorDocument, BehaviorDecision, FeedbackDocument, FeedbackProject, FeedbackUpdate, FeedbackUpdateResult, Handoff, IpadDevice } from '../protocol';
+import type { FeedbackWorkspace, OutlineDocument, OutlineKind, OutlineProject, OutlineUpdate, OutlineUpdateResult } from '../protocol';
+import type { OutlineChanges } from './outline-changes';
+import type { WorkspaceSnapshot } from './feedback-workspace';
+/** IPC between the main process and the panel renderer. */
+
+import type { AnnotationsPayload, NoteAnnotations } from './annotations';
+import type { BoardComments, BoardPin } from './board-comments';
+import type { DraftReview, ReviewPayload, ReviewRect } from './review';
+import type { EditResult, HistoryResult, ReviewEdit } from './review-edit';
+import type {
+  BoardLayout,
+  SessionHost,
+  BoardsResponse,
+  DeleteRequest,
+  DrawRequest,
+  DrawResponse,
+  Initiative,
+  InitiativeFolder,
+  InitiativeRevision,
+  InitiativeSummary,
+  MutateResponse,
+  OutputRecord,
+  PrototypeFidelity,
+  ReadResponse,
+  SessionMode,
+  SessionsResponse,
+  UpdateRequest,
+} from '../protocol';
+import type { Region } from '../server/contract';
+import type { StrokeEvent } from '../voice/types';
+import type { Decision, ItemsDoc } from './items';
+
+export type { Decision } from './items';
+
+/** Requests main sends to the renderer, which owns the Excalidraw scene. */
+export interface BoardOps {
+  read: { args: { board: string; region?: Region }; result: ReadResponse };
+  draw: { args: { board: string; req: DrawRequest; batchId: string }; result: DrawResponse };
+  update: { args: { board: string; req: UpdateRequest; batchId: string }; result: MutateResponse };
+  remove: { args: { board: string; req: DeleteRequest; batchId: string }; result: MutateResponse };
+  /** `pins` draw numbered badges with their words in a strip under the picture, as a workspace Save does. */
+  png: { args: { board: string; region?: Region; maxEdge: number; pins?: BoardPin[] }; result: Uint8Array };
+  /** Makes `board` the visible board. A tab switch leaves the mode to the renderer. */
+  show: { args: { board: string; fromSwitch?: boolean }; result: void };
+  /** Builds what Send hands over, from the visible board. */
+  payload: { args: Record<string, never>; result: SendPayload };
+  /** Forgets the stroke log and clips after a Send that used them. */
+  resetSession: { args: Record<string, never>; result: void };
+  /** Writes pending scene and notes saves to disk. */
+  flush: { args: Record<string, never>; result: void };
+  /** Sets a board's layout. */
+  layout: { args: { board: string; layout: BoardLayout }; result: void };
+  /** Shows new content on a board if it is open. False means the open board has edits of its own, or a recording, so it stayed as it was. */
+  replaceBoard: { args: { board: string; scene: string; notes: string }; result: boolean };
+}
+
+export type BoardOpName = keyof BoardOps;
+
+export interface BoardRequest<K extends BoardOpName = BoardOpName> {
+  id: number;
+  op: K;
+  args: BoardOps[K]['args'];
+}
+
+export type BoardReply =
+  | { id: number; ok: true; result: unknown }
+  | { id: number; ok: false; error: { message: string; code?: string } };
+
+export interface SendPayload {
+  boardName: string;
+  /** PNG bytes, long edge 1400 px or less, with user strokes numbered. */
+  png: Uint8Array;
+  /** Full Excalidraw scene. */
+  scene: unknown;
+  notes: string;
+  /** Board changes since the last Send, in ms from the session start. */
+  strokes: StrokeEvent[];
+  /** Voice clips, timed on the same clock as `strokes`. */
+  segments: { name: string; data: Uint8Array; startMs: number; mimeType: string }[];
+  /** Speech already turned into text, on the same clock as `strokes`. Takes the place of transcribing `segments`. */
+  utterances?: { t: number; tEnd: number; text: string }[];
+  /** The board's bounding box, for position words in the timeline. */
+  bounds: { x: number; y: number; width: number; height: number };
+  /** A written draft that leads the prompt. */
+  text?: string;
+  /** The draft this Send uses up. Main deletes it once the Send goes out. */
+  draftId?: string;
+  /** Revision included in this Send; newer autosaves must survive delivery. */
+  draftRevision?: number;
+  /** The pictures the draft text references, as `att:<id>`. */
+  images?: DraftImage[];
+  /** The project-relative file the draft was opened from. The prompt asks Claude to apply the draft to it. */
+  sourcePath?: string;
+  /** The session owning the reviewed file, independent of where the note is filed. */
+  fileSessionId?: string;
+  /** Comments pinned to an HTML file. The prompt points Claude at review.md. */
+  review?: ReviewPayload;
+  /** Comments pinned to the board. The prompt points Claude at comments.md. */
+  comments?: BoardComments;
+  /** Comments on passages of the draft. The prompt points Claude at annotations.md. */
+  annotations?: AnnotationsPayload;
+}
+
+/** A picture a draft carries, as the Send hands it over. */
+export interface DraftImage {
+  id: string;
+  /** A data URL: png, jpeg, webp or gif. */
+  data: string;
+}
+
+/** A written draft with no sketch. */
+export interface TextPayload {
+  text: string;
+  draftId?: string;
+  /** Revision included in this Send; newer autosaves must survive delivery. */
+  draftRevision?: number;
+  /** The pictures the text references, as `att:<id>`. */
+  images?: DraftImage[];
+  /** The project-relative file the draft was opened from. The prompt asks Claude to apply the draft to it. */
+  sourcePath?: string;
+  /** The session owning the reviewed file, independent of where the note is filed. */
+  fileSessionId?: string;
+  /** Comments pinned to an HTML file. The prompt points Claude at review.md. */
+  review?: ReviewPayload;
+  /** Comments on passages of the draft. The prompt points Claude at annotations.md. */
+  annotations?: AnnotationsPayload;
+}
+
+/** What Send hands to main from either mode. */
+export type Outgoing = SendPayload | TextPayload;
+
+export const isTextPayload = (p: Outgoing): p is TextPayload => !('png' in p);
+
+/** The panel shows the board, the drafts, the active session's items, or the initiatives. */
+export type Mode = 'sketch' | 'write' | 'review' | 'initiative';
+
+/** An initiative with its revisions, newest first, as the Initiative view shows it. */
+export interface InitiativeDetail {
+  initiative: Initiative;
+  history: InitiativeRevision[];
+}
+
+/** What the panel changes in a brief. Main records it as the PM's revision. */
+export interface InitiativePatch {
+  revision: number;
+  understanding?: string;
+  decisions?: string[];
+  open?: string[];
+  folders?: InitiativeFolder[];
+}
+
+/** A conflict carries the brief as it is now, so the view can show it. */
+/** A board, note or initiative, for a line a new session can act on. */
+export type ItemReference =
+  | { kind: 'board'; name: string }
+  | { kind: 'note'; id: string; title: string }
+  | { kind: 'initiative'; id: string; title: string }
+  /** `ref` is the output's project-relative path or link, as its row holds it. */
+  | { kind: 'output'; sessionId: string; ref: string; title: string };
+
+export type InitiativeSaveResult = { ok: true; detail: InitiativeDetail } | { ok: false; message: string; detail?: InitiativeDetail };
+
+/** Notes wait until you send them; Ready drafts form the queue. */
+export type DraftStatus = 'note' | 'ready';
+
+/** Something written in Write mode, saved as `<dataDir>/drafts/<id>.json`. */
+export interface Draft {
+  id: string;
+  body: string;
+  status: DraftStatus;
+  /** The name the list shows, from `agent-brief note`. Absent, the list shows the body's first line. */
+  title?: string;
+  /** A board whose sketch goes out with this draft. */
+  board?: string;
+  /** The Claude Code session this note is filed under. Absent for a note in the Notes tab. */
+  sessionId?: string;
+  /** Pictures pasted into the draft, by id. Each is a data URL, long edge 1600 px or less. The body references one as `![alt](att:<id>)`. */
+  attachments?: Record<string, string>;
+  /** The output file this draft was opened from, relative to the session's project. Send asks Claude to apply the draft to it. */
+  source?: DraftSource;
+  /** Set when the draft reviews a session's HTML file. The body is the overall note. */
+  review?: DraftReview;
+  /** Comments on passages of the note, made in Write. */
+  annotations?: NoteAnnotations;
+  /** Set when the draft is an outline. Write shows the outline editor, and the file holds the content, not `body`. */
+  outline?: DraftOutline;
+  /** Position in the Ready queue, lowest first. */
+  rank: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** The outline file a draft edits, relative to the session's project. */
+export interface DraftOutline {
+  path: string;
+}
+
+/** What Write → New → Outline asks for. Without `path`, main derives it from `target`, or from the title at the project root. */
+export interface OutlineCreate {
+  title: string;
+  target?: string;
+  kind?: OutlineKind;
+  path?: string;
+}
+
+/** Where a draft came from, when it is a copy of a session's output file. */
+export interface DraftSource {
+  path: string;
+  /** The original file's session. Refiling a note does not change its source project. */
+  sessionId?: string;
+  /** The file's text when the note last matched it. A note whose body still equals it has no edits, so it follows the file. */
+  text?: string;
+}
+
+export type Theme = 'light' | 'dark';
+
+/** `system` follows macOS; the others pin the panel to one theme. */
+export type Appearance = 'system' | Theme;
+
+export interface Settings {
+  /** Global shortcut that shows and hides the panel. */
+  hotkey: string;
+  /** `fill` puts the draft in the prompt box; `submit` sends it at once. */
+  deliveryMode: 'fill' | 'submit';
+  openAtLogin: boolean;
+  /** Global shortcut that opens a new note in Write mode. */
+  captureHotkey: string;
+  appearance: Appearance;
+}
+
+export type SettingsResult = { ok: true; settings: Settings } | { ok: false; error: string; settings: Settings };
+
+export interface MicrophoneAccess {
+  granted: boolean;
+  status: 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
+}
+
+export interface UpdateStatus {
+  /** The running version. */
+  version: string;
+  /** `off` in development and test runs, where the app never updates itself. */
+  state: 'off' | 'idle' | 'checking' | 'current' | 'downloading' | 'ready' | 'error';
+  /** The newer version being downloaded or ready to install. */
+  available?: string;
+  percent?: number;
+  error?: string;
+  checkedAt?: number;
+  /** The user asked to update, so the app asks to restart once the download finishes. */
+  restart?: boolean;
+}
+
+/** Where Send can start a new Claude Code session. `copy` puts a start command on the clipboard. */
+export type Launcher = 'ghostty' | 'terminal' | 'herdr' | 'copy';
+
+export interface LaunchOptions {
+  /** Launchers this Mac has, in menu order. `copy` is always last. */
+  launchers: Launcher[];
+  /** Project folders sessions ran in, most recent first. */
+  recentProjects: string[];
+}
+
+export interface SendResult {
+  ok: boolean;
+  message: string;
+}
+
+/** One past Send, newest first in the history list. */
+export interface HistoryEntry {
+  /** The bundle id, also the folder name under `.feedback/sketches`. */
+  id: string;
+  sentAt: number;
+  /** The board whose sketch went out. Absent for a written draft alone. */
+  board?: string;
+  /** The written draft that led the prompt. */
+  text?: string;
+  /** The session it went to, in words. */
+  target: string;
+  /** The session it went to. Absent for a new session or the clipboard. */
+  sessionId?: string;
+  /** The bundle folder in the session's project. */
+  dir: string;
+  /** The prompt text Claude Code received. */
+  draft: string;
+  /** The board's notes when it was sent. */
+  notes?: string;
+}
+
+export interface InitInfo {
+  currentBoard: string;
+  /** The user's home folder, for short paths. */
+  home: string;
+  prompt?: string;
+  sessions: SessionsResponse;
+  testMode: boolean;
+  theme: Theme;
+  settings: Settings;
+  panelVisible: boolean;
+  mode: Mode;
+  /** Set when this panel is a surface in a Herdr pane. */
+  surface?: SurfaceState;
+}
+
+export type SurfaceType = 'board' | 'note' | 'page';
+export type SurfaceAction = 'terminal' | 'link';
+
+/** What the surface's Done area shows. */
+export interface SurfaceState {
+  type: SurfaceType;
+  title: string;
+  /** The stand-in session that receives this surface's Done. */
+  sessionId: string;
+  /** No terminal waits for this surface, so it offers Open terminal and Copy link. */
+  standalone: boolean;
+  busy?: boolean;
+  delivered?: boolean;
+  artifact?: string;
+  notice?: { text: string; error?: boolean };
+}
+
+export type BoardEntry = BoardsResponse['boards'][number];
+
+/**
+ * What the board UI needs from its host. The Electron preload implements it,
+ * and a browser client can implement it over the network.
+ */
+export interface BoardHost {
+  listBoards(): Promise<BoardEntry[]>;
+  loadBoard(name: string): Promise<{ scene: string | null; notes: string }>;
+  saveBoard(name: string, json: string): Promise<void>;
+  saveNotes(name: string, text: string): Promise<void>;
+  /** Creates a board and returns its cleaned-up name. */
+  createBoard(name: string): Promise<string>;
+  renameBoard(from: string, to: string): Promise<string>;
+  /** Moves a board other than the current one to the Trash. */
+  deleteBoard(name: string): Promise<void>;
+  setCurrent(name: string): Promise<void>;
+  /** Takes a board out of a session's brief. The board itself stays. */
+  detachBoard(sessionId: string, name: string): Promise<void>;
+  /** What the ended sessions left behind, and what keeps each thing. Live sessions list nothing. */
+  cleanupPlan(sessionIds: string[]): Promise<CleanupItem[]>;
+  /** Moves the `discard` items to the Trash and remembers the `keep` items as kept. */
+  cleanUp(discard: string[], keep: string[]): Promise<CleanupResult>;
+  /** Files boards under a session, out of Unfiled or any other session. */
+  moveBoards(names: string[], sessionId: string): Promise<void>;
+  /** Pins or unpins boards, and marks them done or active again. */
+  markBoards(names: string[], change: { pinned?: boolean; done?: boolean }): Promise<void>;
+  send(payload: SendPayload): Promise<{ ok: boolean; message: string }>;
+  onTheme(fn: (theme: Theme) => void): Subscription;
+}
+
+/** A starting point for drafts: `<dataDir>/templates/<id>.md`. `{{name}}` marks a slot to fill. */
+export interface Template {
+  id: string;
+  title: string;
+  body: string;
+}
+
+/** A subscription may provide cleanup; older host adapters can keep returning void. */
+export type Subscription = void | (() => void);
+
+/** Live dictation started, or there is no dictation helper, so voice records clips instead. */
+export type DictationStart = { id: string } | { unavailable: true };
+
+/** Words heard, or the end of that dictation. `atMs` is epoch ms when the phrase or word began. */
+export type DictationEvent =
+  /** The microphone runs. Words said before this are not heard. */
+  | { id: string; ready: true }
+  /** Words still settling. Each replaces the last, and a phrase clears them. */
+  | { id: string; live: { text: string; atMs: number; words?: { text: string; atMs: number }[] } }
+  | { id: string; phrase: { text: string; atMs: number; words?: { text: string; atMs: number }[] } }
+  | { id: string; ended: true; error?: string };
+
+/** What the preload script exposes as `window.companion`. */
+/** A new note main asks for: its starting text and, from /write, the id main records for the session. */
+export interface NewNote {
+  text?: string;
+  id?: string;
+  /** The session the note is filed under, when /write or the Write button opened it for one. */
+  sessionId?: string;
+  /** Set when the note is a copy of an output file the user opened from the Outputs list. */
+  source?: DraftSource;
+  /** Set when the note reviews an HTML output the user opened from the Outputs list. */
+  review?: DraftReview;
+  /** The review's side tab to show, as /open asked. */
+  tab?: ReviewTab;
+}
+
+/** A watched output that changed on disk. */
+/** Why Clean up leaves an item: tracked in git, an initiative lists it, you kept it, another session holds it, or it is open. */
+export type KeepReason = 'git' | 'initiative' | 'kept' | 'shared' | 'open' | 'pinned';
+
+/** Something an ended session left behind. */
+export interface CleanupItem {
+  /** `note:<draft id>`, `board:<name>`, `items:<session id>` or `feedback:<absolute output path>`. */
+  id: string;
+  sessionId: string;
+  kind: 'note' | 'board' | 'items' | 'feedback';
+  label: string;
+  detail?: string;
+  bytes: number;
+  /** Set when Clean up leaves it. */
+  keep?: KeepReason;
+}
+
+export interface CleanupResult {
+  trashed: number;
+  bytes: number;
+}
+
+export interface OutputChange {
+  sessionId: string;
+  path: string;
+}
+
+/** A store write in a session's project. No `sessionId` when no known session runs there. */
+export interface ProjectChange {
+  sessionId?: string;
+  path: string;
+}
+
+/** True when a change could concern the view of `sessionId`. */
+export const concerns = (change: ProjectChange, sessionId: string | undefined) => !change.sessionId || change.sessionId === sessionId;
+
+/** A side tab /open can ask a review to show. */
+export type ReviewTab = 'feedback';
+
+/** An output with no page that /open asked to show on its Feedback tab, in Review's full-width Feedback view. */
+export interface OpenFeedbackView {
+  sessionId: string;
+  /** Project-relative. */
+  path: string;
+}
+
+/** A note /write reopens, with the session to file it under when it has none. */
+export interface OpenDraft {
+  id: string;
+  sessionId?: string;
+  /** The review's side tab to show, as /open asked. */
+  tab?: ReviewTab;
+}
+
+/** What a tab switch opened: the session's note, or its board. */
+export type SwitchResult = { draftId: string } | { board: string };
+
+/** One Claude Code session's latest brief, for switching between them. */
+export interface SessionBriefEntry {
+  sessionId: string;
+  /** The session's name from its transcript, else its folder. */
+  title: string;
+  /** Claude is replying in this live session. */
+  isWorking?: boolean;
+  /** When the live session last finished a reply, in ms since the epoch. */
+  activeAt?: number;
+  /** Where the session ran. */
+  cwd?: string;
+  board?: string;
+  draftId?: string;
+  /** Which one the session opened last. */
+  last?: 'board' | 'draft';
+  /** When the session last used it, in ms since the epoch. */
+  at: number;
+  /** The session is still registered with the app. */
+  isLive: boolean;
+  /** The session is the Send target. */
+  isTarget: boolean;
+  /** Its board or note holds something not sent yet. */
+  hasContent: boolean;
+  /** The user asked Claude to keep an items file for this session. */
+  trackItems?: boolean;
+  /** The live session's mode, mirrored from the mod. Absent in default mode. */
+  mode?: SessionMode;
+  /** The prototype fidelity, present only with `mode: 'prototype'`. */
+  fidelity?: PrototypeFidelity;
+  /** Where the session ran, kept for ended sessions too. */
+  host?: SessionHost;
+  /** For an ended session with a known folder: `cd <cwd> && claude --resume <sessionId>`. */
+  resume?: string;
+}
+
+/** A session's items file as the panel shows it. */
+export interface ItemsDocInfo {
+  sessionId: string;
+  /** `<cwd>/.feedback/items/<sessionId>.md`. */
+  path: string;
+  /** False until Claude writes the file. */
+  exists: boolean;
+  doc: ItemsDoc;
+}
+
+/** A session's outputs file as the panel shows it. */
+export interface OutputsInfo {
+  sessionId: string;
+  /** `<cwd>/.feedback/outputs/<sessionId>.json`. */
+  path: string;
+  /** False until the mod writes the file. */
+  exists: boolean;
+  /** Well-formed records, dismissed ones left out, declared first and newest on top. */
+  outputs: OutputRecord[];
+  /** Hidden records, so feedback discovery cannot add them back to the list. */
+  hiddenRefs?: string[];
+}
+
+/** What File › Pair iPad… shows. */
+export interface IpadSheetStatus {
+  devices: IpadDevice[];
+  /** The pairing link the QR code holds. Absent after a pairing used it, or with no network. */
+  url?: string;
+  qrSvg?: string;
+  /** The Mac's network, such as `192.168.1.x`, for the iPad to join. */
+  network?: string;
+  error?: string;
+  /** A device the listener turned away for being on another network. */
+  refused?: string;
+}
+
+export interface CompanionApi extends BoardHost {
+  init(): Promise<InitInfo>;
+  /** Says what a standalone press wants done with the artifact the next Send makes. */
+  surfaceWant(action: SurfaceAction): Promise<void>;
+  onSurface(fn: (state: SurfaceState) => void): Subscription;
+  onSurfaceDoneKey(fn: () => void): Subscription;
+  listBoardComments(): Promise<Record<string, BoardComments>>;
+  saveBoardComments(board: string, comments: BoardComments): Promise<void>;
+  setTarget(sessionId: string | undefined): Promise<void>;
+  /**
+   * The handler answers with a whole reply. Errors thrown across the context
+   * bridge lose their `code`, so the renderer catches them itself.
+   */
+  onRequest(handler: (req: BoardRequest) => Promise<BoardReply>): Subscription;
+  /** Tells main the board handler is listening. */
+  ready(): void;
+  onPrompt(fn: (prompt: string | undefined) => void): Subscription;
+  onSessions(fn: (s: SessionsResponse) => void): Subscription;
+  hidePanel(): void;
+  getSettings(): Promise<Settings>;
+  setSettings(patch: Partial<Settings>): Promise<SettingsResult>;
+  requestMicrophone(): Promise<MicrophoneAccess>;
+  onOpenSettings(fn: () => void): Subscription;
+  /** Starts the iPad listener if needed and makes a fresh pairing code. */
+  ipadSheetOpen(): Promise<IpadSheetStatus>;
+  /** Makes a fresh pairing code. The previous code stops working. */
+  ipadNewCode(): Promise<IpadSheetStatus>;
+  ipadSheetClose(): Promise<void>;
+  ipadForget(id: string): Promise<IpadSheetStatus>;
+  /** Hands a board, or a project HTML file to review as a page, to the paired iPad. Its answer returns to `sessionId`. */
+  ipadHandoff(sessionId: string, target: { board: string } | { page: string }): Promise<Handoff>;
+  /** Fires when File › Pair iPad… is chosen. */
+  onOpenIpadSheet(fn: () => void): Subscription;
+  onIpadStatus(fn: (status: IpadSheetStatus) => void): Subscription;
+  /** Fires when an iPad's answer made a new board for a session. */
+  onIpadBoard(fn: (board: { name: string; sessionId: string }) => void): Subscription;
+  /** Fires when Edit › Find is chosen. */
+  onFind(fn: () => void): Subscription;
+  onNewBoard(fn: () => void): Subscription;
+  /** Fires when the panel window shows or hides. */
+  onVisibility(fn: (visible: boolean) => void): Subscription;
+  /** The last sends, newest first, each with its PNG. */
+  listHistory(): Promise<(HistoryEntry & { png?: Uint8Array })[]>;
+  /** Copies a past send onto a new board, a new note, or both. */
+  restoreHistory(id: string): Promise<{ board?: string; draftId?: string }>;
+  launchOptions(): Promise<LaunchOptions>;
+  /** Asks for a project folder. Undefined when cancelled. */
+  chooseFolder(): Promise<string | undefined>;
+  send(payload: Outgoing, sessionId?: string): Promise<SendResult>;
+  /** Writes the bundle into `cwd` and starts Claude Code there on it. */
+  sendNew(payload: Outgoing, target: { cwd: string; via: Launcher }): Promise<SendResult>;
+  /** Writes the bundle into `cwd` and copies a prompt with absolute paths, for pasting into a session by hand. */
+  copyPrompt(payload: Outgoing, cwd: string): Promise<SendResult>;
+  /** Where live sessions sit in their terminal, such as `herdr #16`, by session id. */
+  sessionPlaces(): Promise<Record<string, string>>;
+  /** Brings a session's terminal forward. */
+  focusSession(sessionId: string): Promise<void>;
+  getUpdate(): Promise<UpdateStatus>;
+  /** Checks, downloads and restarts into a newer build in one step. */
+  updateNow(): Promise<UpdateStatus>;
+  /** Quits and installs a downloaded update. */
+  installUpdate(): Promise<void>;
+  onUpdate(fn: (status: UpdateStatus) => void): Subscription;
+  /** Remembers the mode for the next launch and the File menu. */
+  setMode(mode: Mode): void;
+  /** Fires when the capture shortcut, a menu or /write asks for a new note, with any starting text and the id main chose. */
+  onNewNote(fn: (note: NewNote) => void): Subscription;
+  /** Fires when /write reopens a session's note. */
+  onOpenDraft(fn: (open: OpenDraft) => void): Subscription;
+  onOpenFeedbackView(fn: (open: OpenFeedbackView) => void): Subscription;
+  /** Fires when /open asks for an initiative. The panel shows it in the Initiative view. */
+  onOpenInitiative(fn: (open: { id: string }) => void): Subscription;
+  /** Fires when main saved a draft the panel did not make, such as a note from `agent-brief note`. */
+  onDraftsChanged(fn: () => void): Subscription;
+  /** Puts rich text and its plain form on the clipboard in one write. */
+  copyRich(clip: { html: string; text: string }): Promise<void>;
+  /** Puts a line on the clipboard that names the item and the `agent-brief` commands that pick it up. */
+  copyReference(ref: ItemReference): Promise<void>;
+  /** Each tracked session's latest brief, newest first. */
+  listBriefs(): Promise<SessionBriefEntry[]>;
+  /** Fires when a brief, a session or the Send target changes. */
+  onBriefs(fn: (briefs: SessionBriefEntry[]) => void): Subscription;
+  /** Makes the session the Send target, when it is still running, and opens its brief. The renderer picks the mode. */
+  switchBrief(sessionId: string): Promise<SwitchResult>;
+  /** Clears the Send target and makes Unfiled's board current. The renderer switches to it. */
+  openUnfiled(): Promise<{ board: string }>;
+  /** Stops tracking a session's brief. Its board and note stay. */
+  forgetBrief(sessionId: string): Promise<void>;
+  /** Ready drafts first by rank, then notes, newest first. */
+  listDrafts(): Promise<Draft[]>;
+  /** Creates or replaces a draft. */
+  saveDraft(draft: Draft): Promise<void>;
+  deleteDraft(id: string): Promise<void>;
+  listTemplates(): Promise<Template[]>;
+  /** Creates a template when `id` is absent, and returns it with its id. */
+  saveTemplate(template: { id?: string; title: string; body: string }): Promise<Template>;
+  deleteTemplate(id: string): Promise<void>;
+  /** Turns item tracking on or off for a session. The brief list and GET /sessions/:id follow. */
+  setTracking(sessionId: string, on: boolean): Promise<void>;
+  /** The session's items file, parsed. Undefined for a session the app does not know. */
+  readItems(sessionId: string): Promise<ItemsDocInfo | undefined>;
+  /** Fires when a tracked session's items file changes on disk. */
+  onItems(fn: (info: ItemsDocInfo) => void): Subscription;
+  /** Appends the decisions as `You:` lines in the file and returns the prompt text that reports them. */
+  saveDecisions(sessionId: string, decisions: Decision[]): Promise<{ draft: string }>;
+  /** Starts a terminal in the ended session's folder running its resume command. `copy` puts the command on the clipboard. */
+  resumeSession(sessionId: string, via: Launcher): Promise<SendResult>;
+  /** Opens a file an item names on an `Out:` line. Rejects a path outside the session's folder or one that does not exist. */
+  openItemOutput(sessionId: string, path: string): Promise<void>;
+  /** The session's outputs file, parsed. Undefined for a session the app does not know. */
+  readOutputs(sessionId: string): Promise<OutputsInfo | undefined>;
+  /** Fires when a live session's outputs file changes on disk, or a dismissal changes the list. */
+  onOutputs(fn: (info: OutputsInfo) => void): Subscription;
+  /**
+   * Opens an output. A markdown file opens as a note filed under the session, with `source` set,
+   * reusing the note already opened from it. Other files open in their app, after the same checks
+   * as `openItemOutput`. An http(s) URL opens in the browser.
+   */
+  openOutput(sessionId: string, ref: string): Promise<void>;
+  /** Hides the row until the mod writes that output again. */
+  dismissOutput(sessionId: string, ref: string): Promise<void>;
+  /** Opens an output file in its default app, even one the panel can open itself. */
+  openOutputElsewhere(sessionId: string, ref: string): Promise<void>;
+  /** A Markdown output's text now, for a note opened from it. Undefined when the file is gone. */
+  readSource(sessionId: string, ref: string): Promise<string | undefined>;
+  /** The address the review pane loads a session's HTML file from. */
+  readBehavior(sessionId: string, path: string): Promise<BehaviorDocument>;
+  decideBehavior(sessionId: string, path: string, decision: BehaviorDecision): Promise<BehaviorDocument>;
+  /** A behavior specification changed. `path` is the specification. */
+  onBehaviorChanged(fn: (change: ProjectChange) => void): () => void;
+  /** An output's feedback file, parsed. The output may be any file in the session's project. */
+  readFeedback(sessionId: string, path: string): Promise<FeedbackDocument>;
+  /** Applies ops as the user. Without `version`, to the file as it stands. */
+  updateFeedback(sessionId: string, path: string, update: FeedbackUpdate): Promise<FeedbackUpdateResult>;
+  /** Every feedback file in the session's project, with counts. */
+  listFeedback(sessionId: string): Promise<FeedbackProject>;
+  /** An outline file, parsed. Version `missing` when the file is not there. */
+  readOutline(sessionId: string, path: string): Promise<OutlineDocument>;
+  /** Applies ops in one write. Without `version`, to the outline as it stands. */
+  updateOutline(sessionId: string, path: string, update: OutlineUpdate): Promise<OutlineUpdateResult>;
+  /** Every outline in the session's project, with counts. */
+  listOutlines(sessionId: string): Promise<OutlineProject>;
+  /** What Claude changed in the outline since you last marked it reviewed. Undefined when nothing is left. */
+  outlineChanges(sessionId: string, path: string): Promise<OutlineChanges | undefined>;
+  /** Clears the outline's change marks. */
+  markOutlineReviewed(sessionId: string, path: string): Promise<void>;
+  /** Creates the outline file and a Write draft on it, filed under the session, and selects the draft. */
+  createOutline(sessionId: string, create: OutlineCreate): Promise<{ draftId: string; path: string }>;
+  /** Any outline changed through the store, from the panel or from Claude. */
+  onOutlineChanged(fn: (change: ProjectChange) => void): () => void;
+  /** A `Before:` or `After:` picture, relative to the output's folder, as a data URL. Undefined when the file is gone. */
+  readFeedbackPicture(sessionId: string, output: string, picture: string): Promise<string | undefined>;
+  /** A feedback file changed. `path` is its output. */
+  onFeedbackChanged(fn: (change: ProjectChange) => void): () => void;
+  /** Watches an output and its feedback file until the matching unwatch. Outside changes fire `onOutputChanged` or `onFeedbackChanged`. */
+  watchOutput(sessionId: string, path: string): Promise<void>;
+  unwatchOutput(sessionId: string, path: string): Promise<void>;
+  /** A watched output changed on disk, not through the panel. */
+  onOutputChanged(fn: (change: OutputChange) => void): () => void;
+  /** Makes an item's workspace board when missing and adds a frame for its newest round, seeded with `snapshot` when given. */
+  openFeedbackWorkspace(sessionId: string, path: string, n: number, snapshot?: WorkspaceSnapshot): Promise<FeedbackWorkspace>;
+  /** Exports the item's board beside the output and appends a Workspace line, after a note line per pin and the overall note. Sends nothing. */
+  saveFeedbackWorkspace(sessionId: string, path: string, n: number, comments?: BoardComments): Promise<FeedbackUpdateResult>;
+  /** Opens the Write note linked to the item, making it, and a note line naming it, when missing. */
+  noteFeedbackItem(sessionId: string, path: string, n: number): Promise<{ draftId: string; created: boolean }>;
+  reviewUrl(sessionId: string, path: string): Promise<string>;
+  /** Applies a review pane edit to the HTML file. `version` is the file's as the page loaded it. */
+  reviewEdit(sessionId: string, path: string, version: string, edit: ReviewEdit): Promise<EditResult>;
+  reviewUndo(sessionId: string, path: string): Promise<HistoryResult>;
+  reviewRedo(sessionId: string, path: string): Promise<HistoryResult>;
+  /** A JPEG data URL of part of the panel, in window pixels. Undefined when nothing was captured. */
+  capturePanel(rect: ReviewRect): Promise<string | undefined>;
+  /** Transcribes one voice clip with ffmpeg and yap. */
+  transcribeClip(clip: { data: Uint8Array; mimeType: string }): Promise<{ text: string } | { error: string }>;
+  /** Starts dictating from the microphone. Its words arrive through `onDictation`. One runs at a time. */
+  startDictation(): Promise<DictationStart>;
+  /** Stops a dictation. Its last phrase and its end still arrive through `onDictation`. */
+  stopDictation(id: string): Promise<void>;
+  onDictation(fn: (e: DictationEvent) => void): Subscription;
+  /** Opens an http or https link in the browser. */
+  openLink(url: string): Promise<void>;
+  /** Every initiative, latest lastActiveAt first. */
+  listInitiatives(): Promise<InitiativeSummary[]>;
+  getInitiative(id: string): Promise<InitiativeDetail>;
+  /** Writes an empty brief, `<title> brief.md`, in `folder`. */
+  createInitiative(req: { title: string; folder: string }): Promise<InitiativeDetail>;
+  /** Saves the PM's change against `patch.revision`. A stale revision answers `ok: false`. */
+  updateInitiative(id: string, patch: InitiativePatch): Promise<InitiativeSaveResult>;
+  /** Shows a file or folder in Finder. `~/` is allowed. */
+  revealPath(path: string): Promise<void>;
+  /**
+   * Opens a link from a brief line: a file path or an http(s) URL. A Markdown or HTML file in a session's
+   * folder opens as that session's output, the `sessions` first. Any other file opens in its default app.
+   */
+  openBriefLink(target: string, sessions: string[]): Promise<void>;
+  /** Fires when an initiative, its brief file or a session binding changes. */
+  onInitiativesChanged(fn: (list: InitiativeSummary[]) => void): Subscription;
+}
+
+export const CH = {
+  surface: 'surface:state',
+  surfaceDoneKey: 'surface:done-key',
+  surfaceWant: 'surface:want',
+  init: 'app:init',
+  listBoards: 'boards:list',
+  loadBoard: 'boards:load',
+  saveBoard: 'boards:save',
+  saveNotes: 'notes:save',
+  listBoardComments: 'board-comments:list',
+  saveBoardComments: 'board-comments:save',
+  createBoard: 'boards:create',
+  renameBoard: 'boards:rename',
+  deleteBoard: 'boards:delete',
+  setCurrent: 'boards:current',
+  detachBoard: 'boards:detach',
+  cleanupPlan: 'cleanup:plan',
+  cleanUp: 'cleanup:run',
+  moveBoards: 'boards:move',
+  markBoards: 'boards:mark',
+  send: 'panel:send',
+  setTarget: 'sessions:target',
+  request: 'board:request',
+  reply: 'board:reply',
+  ready: 'board:ready',
+  prompt: 'panel:prompt',
+  sessions: 'panel:sessions',
+  theme: 'panel:theme',
+  hide: 'panel:hide',
+  getSettings: 'settings:get',
+  setSettings: 'settings:set',
+  mic: 'mic:request',
+  openSettings: 'panel:open-settings',
+  ipadSheetOpen: 'ipad:sheet-open',
+  ipadNewCode: 'ipad:new-code',
+  ipadSheetClose: 'ipad:sheet-close',
+  ipadForget: 'ipad:forget',
+  ipadHandoff: 'ipad:handoff',
+  openIpadSheet: 'ipad:open-sheet',
+  ipadStatus: 'ipad:status',
+  ipadBoard: 'ipad:board',
+  newBoard: 'panel:new-board',
+  visibility: 'panel:visibility',
+  historyList: 'history:list',
+  historyRestore: 'history:restore',
+  launchOptions: 'sessions:launch-options',
+  chooseFolder: 'sessions:choose-folder',
+  sendNew: 'panel:send-new',
+  copyPrompt: 'panel:copy-prompt',
+  sessionPlaces: 'sessions:places',
+  focusSession: 'sessions:focus',
+  update: 'update:status',
+  updateGet: 'update:get',
+  updateCheck: 'update:check',
+  updateInstall: 'update:install',
+  setMode: 'panel:mode',
+  newNote: 'panel:new-note',
+  find: 'panel:find',
+  openDraft: 'panel:open-draft',
+  openFeedbackView: 'panel:open-feedback-view',
+  openInitiative: 'panel:open-initiative',
+  listBriefs: 'briefs:list',
+  briefs: 'briefs:changed',
+  switchBrief: 'briefs:switch',
+  openUnfiled: 'briefs:openUnfiled',
+  forgetBrief: 'briefs:forget',
+  listDrafts: 'drafts:list',
+  saveDraft: 'drafts:save',
+  deleteDraft: 'drafts:delete',
+  draftsChanged: 'drafts:changed',
+  copyRich: 'clipboard:copy-rich',
+  copyReference: 'clipboard:copy-reference',
+  listTemplates: 'templates:list',
+  saveTemplate: 'templates:save',
+  deleteTemplate: 'templates:delete',
+  setTracking: 'tracking:set',
+  readItems: 'items:read',
+  items: 'items:changed',
+  saveDecisions: 'items:decide',
+  openItemOutput: 'items:open-output',
+  resumeSession: 'sessions:resume',
+  readOutputs: 'outputs:read',
+  outputs: 'outputs:changed',
+  openOutput: 'outputs:open',
+  dismissOutput: 'outputs:dismiss',
+  openOutputElsewhere: 'outputs:open-elsewhere',
+  readSource: 'outputs:read-source',
+  readBehavior: 'behavior:read',
+  decideBehavior: 'behavior:decide',
+  behaviorChanged: 'behavior:changed',
+  readFeedback: 'feedback:read',
+  readOutline: 'outline:read',
+  updateOutline: 'outline:update',
+  listOutlines: 'outline:list',
+  outlineChanges: 'outline:changes',
+  markOutlineReviewed: 'outline:reviewed',
+  createOutline: 'outline:create',
+  outlineChanged: 'outline:changed',
+  updateFeedback: 'feedback:update',
+  listFeedback: 'feedback:list',
+  readFeedbackPicture: 'feedback:picture',
+  feedbackChanged: 'feedback:changed',
+  watchOutput: 'outputs:watch',
+  unwatchOutput: 'outputs:unwatch',
+  outputChanged: 'outputs:file-changed',
+  openFeedbackWorkspace: 'feedback:workspace-open',
+  saveFeedbackWorkspace: 'feedback:workspace-save',
+  noteFeedbackItem: 'feedback:item-note',
+  reviewUrl: 'review:url',
+  reviewEdit: 'review:edit',
+  reviewUndo: 'review:undo',
+  reviewRedo: 'review:redo',
+  capturePanel: 'review:capture',
+  transcribeClip: 'review:transcribe',
+  startDictation: 'voice:dictate-start',
+  stopDictation: 'voice:dictate-stop',
+  dictation: 'voice:dictation',
+  openLink: 'review:open-link',
+  listInitiatives: 'initiatives:list',
+  getInitiative: 'initiatives:get',
+  createInitiative: 'initiatives:create',
+  updateInitiative: 'initiatives:update',
+  revealPath: 'initiatives:reveal',
+  openBriefLink: 'initiatives:open-link',
+  initiativesChanged: 'initiatives:changed',
+} as const;
+
+/** The explicit allowlist shared by main and preload. No arbitrary channel is exposed. */
+type ApiMethod = keyof CompanionApi;
+export type InvokeMethod = { [K in ApiMethod]: ReturnType<CompanionApi[K]> extends Promise<unknown> ? K : never }[ApiMethod];
+export type EventMethod = { [K in ApiMethod]: K extends `on${string}` ? K : never }[ApiMethod];
+export type SendMethod = Exclude<ApiMethod, InvokeMethod | EventMethod>;
+
+export const IPC_INVOKE = {
+  init: CH.init,
+  surfaceWant: CH.surfaceWant,
+  ipadSheetOpen: CH.ipadSheetOpen,
+  ipadNewCode: CH.ipadNewCode,
+  ipadSheetClose: CH.ipadSheetClose,
+  ipadForget: CH.ipadForget,
+  ipadHandoff: CH.ipadHandoff,
+  listBoards: CH.listBoards,
+  loadBoard: CH.loadBoard,
+  saveBoard: CH.saveBoard,
+  saveNotes: CH.saveNotes,
+  listBoardComments: CH.listBoardComments,
+  saveBoardComments: CH.saveBoardComments,
+  createBoard: CH.createBoard,
+  renameBoard: CH.renameBoard,
+  deleteBoard: CH.deleteBoard,
+  setCurrent: CH.setCurrent,
+  detachBoard: CH.detachBoard,
+  cleanupPlan: CH.cleanupPlan,
+  cleanUp: CH.cleanUp,
+  moveBoards: CH.moveBoards,
+  markBoards: CH.markBoards,
+  send: CH.send,
+  setTarget: CH.setTarget,
+  getSettings: CH.getSettings,
+  setSettings: CH.setSettings,
+  requestMicrophone: CH.mic,
+  listHistory: CH.historyList,
+  restoreHistory: CH.historyRestore,
+  launchOptions: CH.launchOptions,
+  chooseFolder: CH.chooseFolder,
+  sendNew: CH.sendNew,
+  copyPrompt: CH.copyPrompt,
+  sessionPlaces: CH.sessionPlaces,
+  focusSession: CH.focusSession,
+  getUpdate: CH.updateGet,
+  updateNow: CH.updateCheck,
+  installUpdate: CH.updateInstall,
+  listBriefs: CH.listBriefs,
+  switchBrief: CH.switchBrief,
+  openUnfiled: CH.openUnfiled,
+  forgetBrief: CH.forgetBrief,
+  listDrafts: CH.listDrafts,
+  copyRich: CH.copyRich,
+  copyReference: CH.copyReference,
+  saveDraft: CH.saveDraft,
+  deleteDraft: CH.deleteDraft,
+  listTemplates: CH.listTemplates,
+  saveTemplate: CH.saveTemplate,
+  deleteTemplate: CH.deleteTemplate,
+  setTracking: CH.setTracking,
+  readItems: CH.readItems,
+  saveDecisions: CH.saveDecisions,
+  openItemOutput: CH.openItemOutput,
+  resumeSession: CH.resumeSession,
+  readOutputs: CH.readOutputs,
+  openOutput: CH.openOutput,
+  dismissOutput: CH.dismissOutput,
+  openOutputElsewhere: CH.openOutputElsewhere,
+  readSource: CH.readSource,
+  readBehavior: CH.readBehavior,
+  decideBehavior: CH.decideBehavior,
+  readFeedback: CH.readFeedback,
+  updateFeedback: CH.updateFeedback,
+  listFeedback: CH.listFeedback,
+  readOutline: CH.readOutline,
+  updateOutline: CH.updateOutline,
+  listOutlines: CH.listOutlines,
+  outlineChanges: CH.outlineChanges,
+  markOutlineReviewed: CH.markOutlineReviewed,
+  createOutline: CH.createOutline,
+  openFeedbackWorkspace: CH.openFeedbackWorkspace,
+  saveFeedbackWorkspace: CH.saveFeedbackWorkspace,
+  noteFeedbackItem: CH.noteFeedbackItem,
+  readFeedbackPicture: CH.readFeedbackPicture,
+  watchOutput: CH.watchOutput,
+  unwatchOutput: CH.unwatchOutput,
+  reviewUrl: CH.reviewUrl,
+  reviewEdit: CH.reviewEdit,
+  reviewUndo: CH.reviewUndo,
+  reviewRedo: CH.reviewRedo,
+  capturePanel: CH.capturePanel,
+  transcribeClip: CH.transcribeClip,
+  startDictation: CH.startDictation,
+  stopDictation: CH.stopDictation,
+  openLink: CH.openLink,
+  listInitiatives: CH.listInitiatives,
+  getInitiative: CH.getInitiative,
+  createInitiative: CH.createInitiative,
+  updateInitiative: CH.updateInitiative,
+  revealPath: CH.revealPath,
+  openBriefLink: CH.openBriefLink,
+} as const satisfies Record<InvokeMethod, string>;
+
+export const IPC_SEND = {
+  ready: CH.ready,
+  hidePanel: CH.hide,
+  setMode: CH.setMode,
+} as const satisfies Record<SendMethod, string>;
+
+export const IPC_EVENT = {
+  onSurface: CH.surface,
+  onSurfaceDoneKey: CH.surfaceDoneKey,
+  onPrompt: CH.prompt,
+  onSessions: CH.sessions,
+  onTheme: CH.theme,
+  onOpenSettings: CH.openSettings,
+  onOpenIpadSheet: CH.openIpadSheet,
+  onIpadStatus: CH.ipadStatus,
+  onIpadBoard: CH.ipadBoard,
+  onFind: CH.find,
+  onNewBoard: CH.newBoard,
+  onUpdate: CH.update,
+  onVisibility: CH.visibility,
+  onNewNote: CH.newNote,
+  onOpenDraft: CH.openDraft,
+  onOpenFeedbackView: CH.openFeedbackView,
+  onOpenInitiative: CH.openInitiative,
+  onBriefs: CH.briefs,
+  onDraftsChanged: CH.draftsChanged,
+  onItems: CH.items,
+  onOutputs: CH.outputs,
+  onInitiativesChanged: CH.initiativesChanged,
+  onBehaviorChanged: CH.behaviorChanged,
+  onFeedbackChanged: CH.feedbackChanged,
+  onOutlineChanged: CH.outlineChanged,
+  onOutputChanged: CH.outputChanged,
+  onDictation: CH.dictation,
+} as const satisfies Record<Exclude<EventMethod, 'onRequest'>, string>;

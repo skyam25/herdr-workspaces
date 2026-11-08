@@ -1,0 +1,44 @@
+#!/bin/bash
+# Stands in for the hws CLI. Logs each call and answers per the contract.
+# FAKE_HWS_DIR      where the log and moved bundles go
+# FAKE_HWS_MODE     glued (default), standalone, or failing
+# FAKE_HWS_CLOSE    when 1, a glued Done hangs up the host first, as closing its pane would
+log="$FAKE_HWS_DIR/hws.log"
+mkdir -p "$FAKE_HWS_DIR"
+echo "$*" >> "$log"
+case "$1 $2" in
+  "surface done")
+    bundle=""
+    while [[ $# -gt 0 ]]; do
+      [[ "$1" == "--bundle" ]] && bundle="$2"
+      shift
+    done
+    n=$(ls "$FAKE_HWS_DIR/artifacts" 2>/dev/null | wc -l | tr -d ' ')
+    art="a$n"
+    mkdir -p "$FAKE_HWS_DIR/artifacts"
+    if [[ "$FAKE_HWS_MODE" == "failing" ]]; then
+      echo '{"error":"the artifact store is full"}'
+      exit 1
+    fi
+    mv "$bundle" "$FAKE_HWS_DIR/artifacts/$art"
+    if [[ "$FAKE_HWS_MODE" == "standalone" ]]; then
+      echo "{\"standalone\":true,\"artifact\":\"$art\",\"link\":\"@$FAKE_HWS_DIR/artifacts/$art/prompt.md\"}"
+    else
+      if [[ "$FAKE_HWS_CLOSE" == "1" ]]; then
+        kill -HUP "$PPID" 2>/dev/null
+        sleep 1
+        echo "survived host hangup" >> "$log"
+      fi
+      echo "{\"artifact\":\"$art\"}"
+    fi
+    ;;
+  "link "*)
+    echo "{\"link\":\"@$FAKE_HWS_DIR/artifacts/$2/prompt.md\"}"
+    ;;
+  "artifact terminal")
+    echo '{"ok":true}'
+    ;;
+  *)
+    echo '{}'
+    ;;
+esac

@@ -1,0 +1,690 @@
+/**
+ * Runs inside the HTML page the review pane shows. In comment mode it outlines the
+ * element under the pointer and turns a click or a text selection into a pin.
+ * It draws numbered markers for the pane's pins and forwards a few keys and links.
+ * Edit mode, in edit-mode.ts, changes the page's elements and saves each change to the file.
+ * It speaks to the pane only through postMessage.
+ */
+
+import { AT_ATTR, GROUND_ATTR, PASS_ATTR } from '../shared/review-edit';
+import type { ReviewAnchor, ReviewRect } from '../shared/review';
+import { SNAPSHOT_MARK, snapshotBlock } from '../shared/snapshot-block';
+import { createEditMode, type EditMode } from './edit-mode';
+import { createFind } from './find';
+import { isTagged, REVIEW_SOURCE, type FromPage, type PagePin, type ToPage } from './messages';
+import { cut, oneLine } from '../shared/text';
+
+/** The file's version, which the server puts on this script's tag. Read now, while this script runs. */
+const VERSION = (document.currentScript as HTMLScriptElement | null)?.dataset.abVersion;
+
+const MARKER = 22;
+/** How far a press on a marker moves before it drags the marker instead of opening its comment. */
+const DRAG_START = 6;
+/** How long the snapshot outline stays after a measure, for the pane's crop to catch it. */
+const MARK_MS = 1500;
+const ACCENT = '#6965db';
+const HEADINGS = 'h1, h2, h3, h4, h5, h6';
+
+/** A link to the site the frame shows: the same project folder, or the same dev server. */
+const sameSite = (url: URL) => url.protocol === location.protocol && url.host === location.host;
+
+/** Only the page the pane frames talks to it, not frames nested inside that page. Main may add it to a page twice. */
+if (window.parent !== window && window.parent === window.top && !document.querySelector('agent-brief-overlay')) start();
+
+function start(): void {
+  const post = (m: FromPage) => window.parent.postMessage({ source: REVIEW_SOURCE, ...m }, '*');
+
+  let commenting = false;
+  let pins: PagePin[] = [];
+  /** A selection just became a pin, so the click that ends it does nothing else. */
+  let swallowClick = false;
+  /** A selection became a pin, so the next pin list clears it. */
+  let selectionPinned = false;
+  let host: HTMLElement | undefined;
+  let layer: HTMLDivElement | undefined;
+  let hover: HTMLDivElement | undefined;
+  let flash: HTMLDivElement | undefined;
+  /** Outlines the element of the comment the pane has selected. */
+  let selected: HTMLDivElement | undefined;
+  /** Outlines the element Show on page found, until the next show or a press elsewhere. */
+  let shownBox: HTMLDivElement | undefined;
+  let shown: Element | undefined;
+  /** Outlines the element inside a workspace snapshot while the pane crops it. */
+  let mark: HTMLDivElement | undefined;
+  let markTimer: ReturnType<typeof setTimeout> | undefined;
+  let edit: EditMode | undefined;
+  /** Where the pointer last was over the page. A scroll or pan moves the page under it. */
+  let pointer: { x: number; y: number } | undefined;
+  const markers = new Map<string, HTMLButtonElement>();
+  /** A marker under a finger or the mouse. `dx` and `dy` keep its pointed corner where it was under the press. */
+  let drag: { id: string; pointerId: number; x: number; y: number; dx: number; dy: number; moved: boolean } | undefined;
+  /** A drag just ended on this marker, so the click that follows does not open its comment. */
+  let dropped: string | undefined;
+  /** Feedback items' selectors, from the pane. */
+  let wheres: string[] = [];
+  const finder = createFind();
+
+  /** The selectors in `wheres` that `el` matches or sits inside. */
+  const matching = (el: Element) =>
+    wheres.filter((s) => {
+      try { return !!el.closest(s); } catch { return false; }
+    });
+
+  /** The link a ⌘-click or Ctrl-click lands on, which comment mode follows instead of pinning. */
+  const followed = (e: MouseEvent) => ((e.metaKey || e.ctrlKey) && e.target instanceof Element ? e.target.closest('a[href]') : null);
+
+  /** The overlay's own elements sit in a closed shadow root, out of the page's CSS. */
+  function mount(): void {
+    host = document.createElement('agent-brief-overlay');
+    host.style.cssText = 'all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483647;';
+    const root = host.attachShadow({ mode: 'closed' });
+    const style = document.createElement('style');
+    style.textContent = `
+      .box { position: fixed; pointer-events: none; border: 2px solid ${ACCENT}; border-radius: 4px;
+        background: rgb(105 101 219 / 0.08); display: none; box-sizing: border-box; }
+      .selected { border-style: solid; background: none; }
+      .flash { border-color: ${ACCENT}; background: rgb(105 101 219 / 0.18); transition: opacity 0.6s ease 0.6s; }
+      .pin { position: fixed; width: ${MARKER}px; height: ${MARKER}px; border-radius: 50% 50% 50% 2px;
+        border: 2px solid #fff; background: ${ACCENT}; color: #fff; font: 600 11px/1 -apple-system, system-ui, sans-serif;
+        display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; pointer-events: auto;
+        box-shadow: 0 1px 4px rgb(0 0 0 / 0.35); box-sizing: border-box; }
+      .pin { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      .pin::before { content: ''; position: absolute; inset: -10px -10px 0 0; }
+      .pin.active { outline: 3px solid rgb(105 101 219 / 0.35); transform: scale(1.15); }
+      .pin.dragging { transform: scale(1.3); cursor: grabbing; box-shadow: 0 4px 12px rgb(0 0 0 / 0.35); }
+      .mark { border: ${SNAPSHOT_MARK.width}px solid ${SNAPSHOT_MARK.color}; background: none; border-radius: 2px; }
+    `;
+    layer = document.createElement('div');
+    hover = document.createElement('div');
+    hover.className = 'box';
+    flash = document.createElement('div');
+    flash.className = 'box flash';
+    selected = document.createElement('div');
+    selected.className = 'box selected';
+    shownBox = document.createElement('div');
+    shownBox.className = 'box mark';
+    mark = document.createElement('div');
+    mark.className = 'box mark';
+    root.append(style, selected, hover, flash, shownBox, mark, layer);
+    document.documentElement.append(host);
+    edit = createEditMode({ post, root, host: () => host, version: VERSION });
+  }
+
+  const place = (el: HTMLElement, r: DOMRect | ReviewRect, pad = 0) => {
+    const left = 'left' in r ? r.left : r.x;
+    const top = 'top' in r ? r.top : r.y;
+    Object.assign(el.style, {
+      display: 'block',
+      left: `${left - pad}px`,
+      top: `${top - pad}px`,
+      width: `${r.width + pad * 2}px`,
+      height: `${r.height + pad * 2}px`,
+    });
+  };
+
+  const ours = (target: EventTarget | null) => target === host;
+
+  /** Finds a pin's element, trying the selector without classes when the page changed them. */
+  function find(selector: string): Element | null {
+    for (const s of [selector, selector.replace(/\.[A-Za-z][\w-]*/g, '')]) {
+      try {
+        const el = document.querySelector(s);
+        if (el) return el;
+      } catch {
+        // A selector the page's markup no longer parses as one.
+      }
+    }
+    return null;
+  }
+
+  // ── Anchors ────────────────────────────────────────────────────────────
+
+  const unique = (s: string) => {
+    try {
+      return document.querySelectorAll(s).length === 1;
+    } catch {
+      return false;
+    }
+  };
+
+  /** A selector that names `el` alone: ids where the page has them, tags and nth-of-type elsewhere. */
+  function selectorFor(el: Element): string {
+    const stable = el.getAttribute('data-ui');
+    if (stable) {
+      const selector = `[data-ui="${CSS.escape(stable)}"]`;
+      if (unique(selector)) return selector;
+    }
+    const parts: string[] = [];
+    let cur: Element | null = el;
+    while (cur && cur !== document.documentElement) {
+      if (cur === document.body) {
+        parts.unshift('body');
+        break;
+      }
+      const id = cur.id && `#${CSS.escape(cur.id)}`;
+      if (id && unique(id)) {
+        parts.unshift(id);
+        break;
+      }
+      const tag = cur.tagName.toLowerCase();
+      const classes = [...cur.classList].filter((c) => /^[A-Za-z][\w-]*$/.test(c)).slice(0, 2);
+      let part = tag + classes.map((c) => `.${c}`).join('');
+      const parent: Element | null = cur.parentElement;
+      if (parent) {
+        const same = [...parent.children].filter((c) => c.tagName === cur!.tagName);
+        if (same.length > 1) part += `:nth-of-type(${same.indexOf(cur) + 1})`;
+      }
+      parts.unshift(part);
+      cur = parent;
+    }
+    return parts.join(' > ') || el.tagName.toLowerCase();
+  }
+
+  /**
+   * The heading `el` sits under. A section that holds a heading sits under its own.
+   * A heading sits under the last one before it of a higher rank, and anything else under the last one before it.
+   */
+  function headingOf(el: Element): string | undefined {
+    const rank = (h: Element) => Number(h.tagName[1]);
+    const own = el.matches(HEADINGS) ? undefined : el.querySelector(HEADINGS);
+    let found = own ?? undefined;
+    if (!found) {
+      for (const h of document.querySelectorAll(HEADINGS)) {
+        if (h === el || h.contains(el)) continue;
+        if (!(h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) break;
+        if (!el.matches(HEADINGS) || rank(h) < rank(el)) found = h;
+      }
+    }
+    const text = found && oneLine((found as HTMLElement).innerText ?? found.textContent ?? '');
+    return text ? cut(text, 200) : undefined;
+  }
+
+  /** A table cell's row and column as the table labels them: the row's first cell and the column's header. Each is left out when it is the cell itself. */
+  function cellOf(el: Element): ReviewAnchor['cell'] {
+    const cell = el.closest('td, th');
+    const row = cell?.parentElement;
+    const table = cell?.closest('table');
+    if (!(cell instanceof HTMLTableCellElement) || !(row instanceof HTMLTableRowElement) || !table) return undefined;
+    // The source's words, not as styled, so an uppercase header reads as the file has it.
+    const words = (c: Element | undefined | null) => (c && c !== cell ? cut(oneLine(c.textContent ?? ''), 200) : '');
+
+    // Column positions count spans, so a header that spans two columns heads both.
+    const at = (r: HTMLTableRowElement, c: HTMLTableCellElement) => [...r.cells].slice(0, c.cellIndex).reduce((n, x) => n + x.colSpan, 0);
+    const column = at(row, cell);
+    const headRow = table.tHead?.rows[0] ?? (table.rows[0] !== row && [...(table.rows[0]?.cells ?? [])].every((c) => c.tagName === 'TH') ? table.rows[0] : undefined);
+    const header = headRow && [...headRow.cells].find((c) => at(headRow, c) <= column && column < at(headRow, c) + c.colSpan);
+    const rowLabel = words(row.cells[0]);
+    const columnLabel = headRow === row ? '' : words(header);
+    return rowLabel || columnLabel ? { ...(rowLabel ? { row: rowLabel } : {}), ...(columnLabel ? { column: columnLabel } : {}) } : undefined;
+  }
+
+  function anchorFor(el: Element, spot: { x: number; y: number }, quote?: string): ReviewAnchor {
+    const r = el.getBoundingClientRect();
+    const text = oneLine((el as HTMLElement).innerText ?? el.textContent ?? '');
+    const heading = headingOf(el);
+    const cell = cellOf(el);
+    const fraction = (v: number, start: number, size: number) => (size > 0 ? Math.min(1, Math.max(0, (v - start) / size)) : 0.5);
+    return {
+      selector: selectorFor(el),
+      tag: el.tagName.toLowerCase(),
+      ...(quote ? { quote: cut(oneLine(quote), 2000) } : {}),
+      ...(text ? { text: cut(text, 200) } : {}),
+      ...(heading ? { heading } : {}),
+      ...(cell ? { cell } : {}),
+      fx: fraction(spot.x, r.left, r.width),
+      fy: fraction(spot.y, r.top, r.height),
+      rect: { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height },
+      scrollY,
+      viewport: { width: innerWidth, height: innerHeight },
+    };
+  }
+
+  /** The part of `r` inside the viewport. */
+  const visible = (r: DOMRect): ReviewRect => {
+    const x = Math.max(0, r.left);
+    const y = Math.max(0, r.top);
+    return { x, y, width: Math.max(0, Math.min(innerWidth, r.right) - x), height: Math.max(0, Math.min(innerHeight, r.bottom) - y) };
+  };
+
+  /** Hides the hover box and lets the page paint without it before the pane crops. */
+  const afterPaint = (fn: () => void) => {
+    if (hover) hover.style.display = 'none';
+    requestAnimationFrame(() => requestAnimationFrame(fn));
+  };
+
+  /** Where a pin on `el` at `spot` sits, and the box the pane crops for its picture. */
+  const placement = (el: Element, spot: { x: number; y: number }) => ({ anchor: anchorFor(el, spot), view: visible(el.getBoundingClientRect()) });
+
+  function pinElement(el: Element, x: number, y: number): void {
+    const at = Date.now();
+    afterPaint(() => post({ type: 'pin', ...placement(el, { x, y }), matches: matching(el), at }));
+  }
+
+  function pinSelection(sel: Selection): boolean {
+    const quote = sel.toString();
+    if (!oneLine(quote) || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    const node = range.commonAncestorContainer;
+    const el = node instanceof Element ? node : node.parentElement;
+    if (!el || ours(el)) return false;
+    const r = range.getBoundingClientRect();
+    const at = Date.now();
+    afterPaint(() => post({ type: 'pin', anchor: anchorFor(el, { x: r.right, y: r.top }, quote), view: visible(r), matches: matching(el), at }));
+    return true;
+  }
+
+  // ── Pins ───────────────────────────────────────────────────────────────
+
+  /**
+   * The element a comment on `target` pins to, or undefined for the page's background:
+   * the root, the body, a ground the page marks as empty space, or the page's own controls.
+   */
+  function commentable(target: EventTarget | null): Element | undefined {
+    if (!(target instanceof Element) || ours(target)) return undefined;
+    if (target === document.documentElement || target === document.body) return undefined;
+    if (target.hasAttribute(GROUND_ATTR) || target.closest(`[${PASS_ATTR}]`)) return undefined;
+    return target;
+  }
+
+  /** Outlines the element under the pointer, or hides the box when there is none. */
+  function placeHover(): void {
+    const el = commenting && pointer && !following ? commentable(document.elementFromPoint(pointer.x, pointer.y)) : undefined;
+    outline(el);
+  }
+
+  function outline(el: Element | undefined): void {
+    if (!hover) return;
+    if (el) place(hover, el.getBoundingClientRect());
+    else hover.style.display = 'none';
+  }
+
+  /** ⌘ or Ctrl is down in comment mode, so a click on a link follows it. */
+  let following = false;
+  function setFollowing(on: boolean): void {
+    if (on === following) return;
+    following = on;
+    if (on) document.documentElement.setAttribute('data-agent-brief-following', '');
+    else document.documentElement.removeAttribute('data-agent-brief-following');
+    placeHover();
+  }
+
+  let queued = false;
+  /** Moves markers to their elements, and the hover box to what is now under the pointer, on the next frame. */
+  function layout(): void {
+    edit?.layout();
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      if (!drag?.moved) placeHover();
+      if (shown && shownBox) place(shownBox, shown.getBoundingClientRect(), SNAPSHOT_MARK.width);
+      for (const pin of pins) {
+        const marker = markers.get(pin.id);
+        const el = find(pin.selector);
+        const r = el?.getBoundingClientRect();
+        if (!marker || (drag?.moved && drag.id === pin.id)) continue;
+        if (!r || (r.width === 0 && r.height === 0)) {
+          marker.style.display = 'none';
+          continue;
+        }
+        marker.style.display = 'flex';
+        // The marker's pointed corner sits on the spot the user clicked.
+        marker.style.left = `${r.left + pin.fx * r.width}px`;
+        marker.style.top = `${r.top + pin.fy * r.height - MARKER}px`;
+        if (pin.active && selected) place(selected, r, 3);
+      }
+      if (selected && !pins.some((p) => p.active && find(p.selector))) selected.style.display = 'none';
+    });
+  }
+
+  function drawPins(next: PagePin[]): void {
+    pins = next;
+    if (!layer) return;
+    for (const [id, marker] of markers) {
+      if (pins.some((p) => p.id === id)) continue;
+      marker.remove();
+      markers.delete(id);
+    }
+    for (const pin of pins) {
+      let marker = markers.get(pin.id);
+      if (!marker) {
+        marker = document.createElement('button');
+        marker.className = 'pin';
+        const id = pin.id;
+        const el = marker;
+        marker.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (dropped === id) {
+            dropped = undefined;
+            return;
+          }
+          post({ type: 'open-pin', id });
+        });
+        marker.addEventListener('pointerdown', (e) => startDrag(e, id, el));
+        marker.addEventListener('pointermove', (e) => moveDrag(e, el));
+        marker.addEventListener('pointerup', (e) => endDrag(e, el, true));
+        marker.addEventListener('pointercancel', (e) => endDrag(e, el, false));
+        markers.set(pin.id, marker);
+        layer.append(marker);
+      }
+      marker.textContent = String(pin.n);
+      marker.title = `Comment ${pin.n}`;
+      marker.classList.toggle('active', !!pin.active);
+    }
+    post({ type: 'missing', ids: pins.filter((p) => !find(p.selector)).map((p) => p.id) });
+    layout();
+  }
+
+  // ── Dragging a marker ──────────────────────────────────────────────────
+
+  /** The element a marker dropped at `spot` pins to. The overlay's own host is skipped. */
+  const dropTarget = (spot: { x: number; y: number }) => commentable(document.elementsFromPoint(spot.x, spot.y).find((el) => !ours(el)) ?? null);
+
+  /** Where the marker's pointed corner sits for the pointer at `e`. */
+  const cornerAt = (e: PointerEvent) => ({ x: e.clientX - (drag?.dx ?? 0), y: e.clientY - (drag?.dy ?? 0) });
+
+  function startDrag(e: PointerEvent, id: string, marker: HTMLButtonElement): void {
+    dropped = undefined;
+    if (e.button !== 0 || drag) return;
+    const r = marker.getBoundingClientRect();
+    drag = { id, pointerId: e.pointerId, x: e.clientX, y: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.bottom, moved: false };
+    marker.setPointerCapture?.(e.pointerId);
+  }
+
+  /** Pointer moves arrive faster than frames, so the marker and the hit test run once per frame. */
+  let dragFrame = 0;
+
+  function moveDrag(e: PointerEvent, marker: HTMLButtonElement): void {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < DRAG_START) return;
+    drag.moved = true;
+    marker.classList.add('dragging');
+    const spot = cornerAt(e);
+    const finger = { x: e.clientX, y: e.clientY };
+    cancelAnimationFrame(dragFrame);
+    dragFrame = requestAnimationFrame(() => {
+      if (!drag) return;
+
+      // The hit test reads layout before the marker moves, so the frame lays out once.
+      const el = dropTarget(spot) ?? dropTarget(finger);
+      marker.style.left = `${spot.x}px`;
+      marker.style.top = `${spot.y - MARKER}px`;
+      outline(el);
+    });
+  }
+
+  /**
+   * A drag that moved re-pins the comment to the element under the marker's corner, else the one under the finger.
+   * A drop on empty page puts it back.
+   */
+  function endDrag(e: PointerEvent, marker: HTMLButtonElement, drop: boolean): void {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const { id, moved } = drag;
+    const spot = cornerAt(e);
+    drag = undefined;
+    cancelAnimationFrame(dragFrame);
+    marker.classList.remove('dragging');
+    if (!moved) return;
+    dropped = id;
+    const el = drop ? (dropTarget(spot) ?? dropTarget({ x: e.clientX, y: e.clientY })) : undefined;
+    if (el) afterPaint(() => post({ type: 'move-pin', id, ...placement(el, spot) }));
+    else outline(undefined);
+    layout();
+  }
+
+  function show(id: string): void {
+    const pin = pins.find((p) => p.id === id);
+    const el = pin && find(pin.selector);
+    if (!el || !flash) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const box = flash;
+    setTimeout(() => {
+      place(box, el.getBoundingClientRect(), 4);
+      box.style.opacity = '1';
+      requestAnimationFrame(() => (box.style.opacity = '0'));
+      setTimeout(() => (box.style.display = 'none'), 1300);
+    }, 350);
+  }
+
+  /** Scrolls to the element and outlines it with a short pulse. The outline stays. */
+  function showElement(el: Element): void {
+    if (!shownBox) return;
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    shown = el;
+    place(shownBox, el.getBoundingClientRect(), SNAPSHOT_MARK.width);
+    shownBox.animate(
+      [{ boxShadow: '0 0 0 0 rgb(139 92 246 / 0.55)', background: 'rgb(139 92 246 / 0.16)' }, { boxShadow: '0 0 0 12px rgb(139 92 246 / 0)', background: 'rgb(139 92 246 / 0)' }],
+      { duration: 500, iterations: 3, easing: 'ease-out' },
+    );
+  }
+
+  function hideShown(): void {
+    shown = undefined;
+    if (shownBox) shownBox.style.display = 'none';
+  }
+
+  function setCommenting(on: boolean): void {
+    commenting = on;
+    if (on) document.documentElement.setAttribute('data-agent-brief-commenting', '');
+    else document.documentElement.removeAttribute('data-agent-brief-commenting');
+    if (!on && hover) hover.style.display = 'none';
+  }
+
+  // ── Events ─────────────────────────────────────────────────────────────
+
+  window.addEventListener('message', (e) => {
+    if (e.source !== window.parent || !isTagged(e.data)) return;
+    const m = e.data as unknown as ToPage;
+    if (m.type === 'commenting') setCommenting(m.on);
+    if (m.type === 'pins') {
+      drawPins(m.pins);
+      // A selection that became a pin has done its job.
+      if (selectionPinned) getSelection()?.removeAllRanges();
+      selectionPinned = false;
+    }
+    if (m.type === 'show') show(m.id);
+    if (m.type === 'where') wheres = m.selectors.filter((s) => typeof s === 'string').slice(0, 500);
+    if (m.type === 'scroll-to' && Number.isFinite(m.x) && Number.isFinite(m.y)) scrollTo({ left: m.x, top: m.y, behavior: 'instant' });
+    if (m.type === 'go' && typeof m.href === 'string') {
+      const url = new URL(m.href, location.href);
+      if (sameSite(url)) location.assign(url.href);
+    }
+    if (m.type === 'show-behavior') {
+      let element: Element | null = null;
+      try { if (document.querySelectorAll(m.selector).length === 1) element = document.querySelector(m.selector); } catch { /* stale or invalid target */ }
+      if (element && element.getBoundingClientRect().width && element.getBoundingClientRect().height) showElement(element);
+      else {
+        hideShown();
+        if (!m.quiet) window.parent.postMessage({ source: REVIEW_SOURCE, type: 'behavior-missing' }, '*');
+      }
+    }
+    if (m.type === 'measure') {
+      let element: Element | null = null;
+      try { if (document.querySelectorAll(m.selector).length === 1) element = document.querySelector(m.selector); } catch { /* stale or invalid target */ }
+      // The crop is the element's block, with the element outlined in it.
+      const block = element && snapshotBlock(element);
+      block?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      element?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      if (element && mark) {
+        clearTimeout(markTimer);
+        place(mark, element.getBoundingClientRect(), SNAPSHOT_MARK.width);
+      }
+      afterPaint(() => {
+        const view = block ? visible(block.getBoundingClientRect()) : undefined;
+        post({ type: 'measured', id: m.id, ...(view?.width && view.height ? { view } : {}) });
+        markTimer = setTimeout(() => mark && (mark.style.display = 'none'), MARK_MS);
+      });
+    }
+    if (m.type === 'editing') {
+      if (m.on) setCommenting(false);
+      edit?.setEditing(m.on);
+    }
+    if (m.type === 'edited') edit?.onEdited(m.result);
+    if (m.type === 'style') edit?.style(m.set);
+    if (m.type === 'text') edit?.text(m.text);
+    if (m.type === 'act') edit?.act(m.act);
+    if (m.type === 'insert') edit?.insert(m.what);
+    if (m.type === 'insert-drag') edit?.dragInsert(m.what, m.x, m.y, m.phase);
+    if (m.type === 'find' && typeof m.query === 'string') post({ type: 'found', ...finder.find(m.query) });
+    if (m.type === 'find-step' && (m.dir === 1 || m.dir === -1)) post({ type: 'found', ...finder.step(m.dir) });
+  });
+
+  const editable = (t: EventTarget | null) =>
+    t instanceof HTMLElement && (t.isContentEditable || t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement);
+
+  function listen(): void {
+    const cursor = document.createElement('style');
+    cursor.textContent = `html[data-agent-brief-commenting], html[data-agent-brief-commenting] * { cursor: crosshair !important; }
+      html[data-agent-brief-commenting][data-agent-brief-following] a[href], html[data-agent-brief-commenting][data-agent-brief-following] a[href] * { cursor: pointer !important; }`;
+    document.head.append(cursor);
+
+    document.addEventListener(
+      'pointermove',
+      (e) => {
+        pointer = { x: e.clientX, y: e.clientY };
+        if (commenting) {
+          setFollowing(e.metaKey || e.ctrlKey);
+          placeHover();
+        }
+      },
+      true,
+    );
+    document.documentElement.addEventListener('pointerleave', () => {
+      pointer = undefined;
+      placeHover();
+    });
+    // The page does not see presses in comment mode, but a drag still selects text.
+    for (const type of ['pointerdown', 'mousedown', 'pointerup']) {
+      document.addEventListener(
+        type,
+        (e) => {
+          if (type === 'pointerdown') swallowClick = false;
+          if (type === 'pointerdown' && shown && !(e.target instanceof Node && shown.contains(e.target))) hideShown();
+          if (commenting && !ours(e.target) && !followed(e as MouseEvent)) e.stopPropagation();
+        },
+        true,
+      );
+    }
+    document.addEventListener(
+      'mouseup',
+      (e) => {
+        if (!commenting || ours(e.target) || followed(e)) return;
+        e.stopPropagation();
+        const sel = getSelection();
+        if (sel && !sel.isCollapsed && pinSelection(sel)) swallowClick = selectionPinned = true;
+      },
+      true,
+    );
+    document.addEventListener(
+      'click',
+      (e) => {
+        if (ours(e.target)) return;
+        if (wheres.length && e.target instanceof Element) post({ type: 'pointed', matches: matching(e.target) });
+        if (commenting && !followed(e)) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          if (swallowClick) {
+            swallowClick = false;
+            return;
+          }
+          const el = commentable(e.target);
+          if (el) pinElement(el, e.clientX, e.clientY);
+          return;
+        }
+        const link = e.target instanceof Element ? e.target.closest('a[href]') : null;
+        if (!(link instanceof HTMLAnchorElement)) return;
+
+        // A link in words being retyped is text to edit, not a place to go.
+        if (link.isContentEditable) {
+          e.preventDefault();
+          return;
+        }
+        const url = new URL(link.href, location.href);
+
+        // The site's own pages open here, even from ⌘-click or a link that asks for a new window.
+        if (sameSite(url)) {
+          if (e.metaKey || e.ctrlKey || link.target === '_blank') {
+            e.preventDefault();
+
+            // The press finishes before the page goes, so the click is not cut off mid-event.
+            setTimeout(() => location.assign(url.href));
+          }
+          return;
+        }
+        e.preventDefault();
+        if (url.protocol === 'http:' || url.protocol === 'https:') post({ type: 'link', href: url.href });
+      },
+      true,
+    );
+    document.addEventListener(
+      'keydown',
+      (e) => {
+        if (commenting && (e.key === 'Meta' || e.key === 'Control')) setFollowing(true);
+
+        // ⌘F and ⌘G find in the pane's bar, since the page has focus.
+        const key = e.key.toLowerCase();
+        if (e.metaKey && !e.ctrlKey && !e.altKey && (key === 'f' || key === 'g')) {
+          e.preventDefault();
+          post({ type: 'key', key: key === 'f' ? 'find' : e.shiftKey ? 'find-prev' : 'find-next' });
+          return;
+        }
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        if (e.key === 'Escape') {
+          post({ type: 'key', key: 'Escape' });
+          if (commenting) e.preventDefault();
+        } else if ((e.key === 'c' || e.key === 'C') && !editable(e.target)) {
+          e.preventDefault();
+          post({ type: 'key', key: 'c' });
+        } else if ((e.key === 'e' || e.key === 'E') && !editable(e.target)) {
+          e.preventDefault();
+          post({ type: 'key', key: 'e' });
+        }
+      },
+      true,
+    );
+    document.addEventListener('keyup', (e) => {
+      if (e.key === 'Meta' || e.key === 'Control') setFollowing(false);
+    }, true);
+    addEventListener('blur', () => setFollowing(false));
+    addEventListener('scroll', layout, { capture: true, passive: true });
+    // The pane keeps where the page rests, so a reload can put it back.
+    let resting: ReturnType<typeof setTimeout> | undefined;
+    addEventListener('scroll', () => {
+      clearTimeout(resting);
+      resting = setTimeout(() => post({ type: 'scrolled', x: Math.round(scrollX), y: Math.round(scrollY) }), 150);
+    }, { passive: true });
+    addEventListener('resize', layout);
+    // Pages that animate or load late move elements without a scroll.
+    setInterval(layout, 1000);
+
+    // An app that changes its route without a load is on a new page, so the pane hears ready again.
+    const routed = () => {
+      if (location.pathname + location.search === at) return;
+      at = location.pathname + location.search;
+      hello();
+    };
+    let at = location.pathname + location.search;
+    addEventListener('popstate', routed);
+    (window as { navigation?: EventTarget }).navigation?.addEventListener('currententrychange', routed);
+    setInterval(routed, 1000);
+  }
+
+  const hello = () =>
+    post({
+      type: 'ready',
+      path: decodeURIComponent(location.pathname).replace(/^\/+/, ''),
+      href: location.href,
+      title: document.title,
+      ...(VERSION ? { version: VERSION, editable: !!document.body?.querySelector(`[${AT_ATTR}]`) } : {}),
+    });
+  const ready = () => {
+    mount();
+    listen();
+    drawPins(pins);
+    hello();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready, { once: true });
+  else ready();
+}

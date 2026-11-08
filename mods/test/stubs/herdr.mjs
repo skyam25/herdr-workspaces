@@ -1,0 +1,17 @@
+const H = () => globalThis.__herdr;
+
+export const theme = () => new Proxy({}, { get: (_t, key) => `color:${String(key)}` });
+export const home = () => "/Users/me";
+export const props = () => H().props;
+export const focused = () => H().focused;
+export const agents = () => H().agents;
+export const panes = () => H().panes;
+export const spaces = () => H().spaces;
+export const run = (name, args) => { H().runs.push({ name, args }); return null; };
+export const openOverlay = (spec) => { H().overlays.push(spec); return `ov${H().overlays.length}`; };
+export const closeOverlay = (id) => { H().closed.push(id); return null; };
+export const pickFolder = (options) => { H().picks.push(options); return Promise.resolve(H().pickResult); };
+export const exec = (command, args, options) => H().exec(command, args, options);
+export const readTextFile = (path) => Promise.resolve(H().files[path] ?? null);
+export const watchFolder = (dir) => { H().watches.push(dir); return H().watchResult ? H().watchResult(dir) : new Promise(() => {}); };
+export const nextCommand = () => new Promise(() => {});
