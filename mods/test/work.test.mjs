@@ -734,6 +734,34 @@ test("a page output opens beside its agent with hws", async () => {
   assert.deepEqual(hwsCalls(H).at(-1).args, ["surface", "open", "--type", "page", "--file", "/w/s1/docs/plan.md", "--terminal", "t1", "--json"]);
 });
 
+test("a page opened for an agent in another tab selects that tab and focuses the surface", async () => {
+  const H = world({ agents: [agent("t1", "tb2")], files: { "/w/s1/o.json": outputsFile([decl("hidden.md", 1)]) } });
+  H.hws["surface open"] = { pane: "page1" };
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("output-t1-hidden.md");
+  assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb2" } }, { name: "pane.focus", args: { pane: "page1" } }]);
+});
+
+test("a second click returns to the open surface instead of opening another", async () => {
+  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("again.md", 1)]) } });
+  H.hws["surface open"] = { pane: "page2" };
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("output-t1-again.md");
+  H.panes.push({ pane: "page2", tab: "tb2" });
+  await m.click("output-t1-again.md");
+  assert.equal(hwsCalls(H).filter((c) => c.args[0] === "surface").length, 1);
+  assert.deepEqual(H.runs.slice(-2), [{ name: "tab.select", args: { id: "tb2" } }, { name: "pane.focus", args: { pane: "page2" } }]);
+});
+
+test("a closed surface opens again", async () => {
+  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("closed.md", 1)]) } });
+  H.hws["surface open"] = { pane: "page3" };
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("output-t1-closed.md");
+  await m.click("output-t1-closed.md");
+  assert.equal(hwsCalls(H).filter((c) => c.args[0] === "surface").length, 2);
+});
+
 test("a flipped agent's page opens beside its chat pane", async () => {
   const H = world({
     agents: [],

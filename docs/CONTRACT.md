@@ -333,6 +333,6 @@ Only `hws` writes `<state root>/todos/<space id>.json`. To-dos belong to a space
 
 A surface runs on this computer. The `+` menu is hidden for a remote agent, and `hws surface open` refuses a terminal whose address has a machine prefix.
 
-Outputs lists each agent's outputs, newest first. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. Anything else goes to macOS `open`.
+Outputs lists each agent's outputs, newest first. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. The click shows the agent's tab and focuses the surface. A second click on the same output returns to that surface while its pane lives. Anything else goes to macOS `open`.
 
 `mod.open:hws-brief` shows or hides Outputs in the right panel.
