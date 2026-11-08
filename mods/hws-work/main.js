@@ -1,23 +1,24 @@
-// The right panel's Tasks and Outputs, one copy per view, chosen by props().view.
-// A dialog copy with view "todo" shows the to-do form.
-// An agent binds to a session only by exact terminal, so this panel never guesses.
+// The Board tab and the right panel's Outputs, one copy per view, chosen by props().view.
+// A dialog copy with view "todo" or "add-several" shows a form.
+// An agent binds to a session only by exact terminal, so this mod never guesses.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { agents, exec, layout, openOverlay, panes, props, readTextFile, run, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
-import { COLUMNS, DONE_SHOWN, POLL_MS, ago, agentName, board, cleanPath, feedbackDir, fileName, findNode, isTracked, lastTouched, mergeBoard, notesLine, outputGroups, parseItems, parseOutputs, roster, sendTargets, sessionFor, todoItems } from "./data.js";
+import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { agents, exec, home, layout, openOverlay, panes, props, readTextFile, run, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
+import { COLUMNS, DONE_SHOWN, POLL_MS, ago, agentName, board, cleanPath, feedbackDir, fileName, findNode, isTracked, lastTouched, locateTerminal, mergeBoard, notesLine, orchestratorFolder, outputGroups, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoDialogHeight, todoItems } from "./data.js";
 import { hws, openOutput } from "./open.js";
-import { TODOS_CHANGED, TodoForm } from "./todo.js";
+import { AddSeveralForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
 const WAITING_KEY = "hws.tasks.waiting";
-const WIDE_PX = 720;
-const NARROW_PANEL_PX = 368;
-const WIDE_PANEL_PX = 860;
+const DIALOG_PX = 440;
 const LANE_PX = 200;
 const LANES_FIT_PX = 840;
 const LOADING = "Loading…";
 const TRACKING_OFF = "Item tracking is off for these sessions. Turn it on in the Agent Brief app.";
 const NO_AGENT_ITEMS = { waiting: [], progress: [], done: [] };
+const BOARD_HINT = "Add what needs doing. Send a card to an agent, or start the orchestrator to work through them.";
+
+const message = (e) => String(e?.message ?? e);
 
 // True when Outputs is the visible child of a shown panel.
 function outputsShowing() {
@@ -29,17 +30,16 @@ function outputsShowing() {
 
 export default class Work extends View {
   init(_props, cx) {
-    if (props()?.view === "todo") {
-      this.form = new TodoForm(cx);
+    const view = props()?.view;
+    if (view === "todo" || view === "add-several") {
+      this.form = view === "todo" ? new TodoForm(cx) : new AddSeveralForm(cx);
       return;
     }
-    this.kind = props()?.view === "outputs" ? "outputs" : "tasks";
+    this.kind = view === "outputs" ? "outputs" : "tasks";
     this.sessions = null;
     this.problem = null;
     this.note = null;
     this.width = 0;
-    this.showing = false;
-    this.widened = false;
     this.doneOpen = false;
     this.touchedOpen = new Set();
     this.docs = new Map();
@@ -54,10 +54,13 @@ export default class Work extends View {
     this.todoProblem = null;
     this.drag = null;
     this.over = null;
+    this.orchestrator = undefined;
+    this.starting = false;
+    if (this.kind === "tasks") this.makeQuickAdd();
     this.syncTodos(cx);
     this.poll(cx);
 
-    // Tasks keeps polling while hidden because the tab bar shows its waiting count.
+    // The board keeps polling while hidden because the tab bar shows its waiting count.
     cx.timer.every(POLL_MS, (cx) => {
       if (this.kind === "tasks" || outputsShowing()) this.poll(cx);
       if (this.kind === "tasks") this.loadTodos(cx);
@@ -93,6 +96,7 @@ export default class Work extends View {
     if (space !== this.todoSpace) {
       this.todos = null;
       this.todoProblem = null;
+      this.orchestrator = undefined;
       this.note = null;
       this.drag = null;
       this.over = null;
@@ -112,13 +116,14 @@ export default class Work extends View {
     const space = this.todoSpace;
     cx.spawn(async (cx) => {
       try {
-        const listed = todoItems(await hws(["todo", "list", "--space", space]));
+        const listed = await hws(["todo", "list", "--space", space]);
         if (space === this.todoSpace) {
-          this.todos = listed;
+          this.todos = todoItems(listed);
+          this.orchestrator = listed?.orchestrator ?? null;
           this.todoProblem = null;
         }
       } catch (e) {
-        if (space === this.todoSpace) this.todoProblem = String(e?.message ?? e);
+        if (space === this.todoSpace) this.todoProblem = message(e);
       }
       this.loadingTodos = false;
       if (this.loadAgain) {
@@ -129,10 +134,51 @@ export default class Work extends View {
     });
   }
 
+  openDialog(height, dialogProps) {
+    openOverlay({ mod: "hws-work", kind: "dialog", modal: true, width: DIALOG_PX, height, props: { space: this.todoSpace, ...dialogProps } });
+  }
+
   openTodo(id) {
     if (!this.todoSpace) return;
-    const todoProps = { view: "todo", space: this.todoSpace, ...(id ? { id } : {}) };
-    openOverlay({ mod: "hws-work", kind: "dialog", modal: true, width: 440, height: id ? 540 : 400, props: todoProps });
+    const waiting = this.todos?.find((x) => x.id === id)?.column === "waiting";
+    const height = todoDialogHeight({ editing: Boolean(id), waiting, targets: this.targets.length });
+    this.openDialog(height, { view: "todo", ...(id ? { id } : {}) });
+  }
+
+  openSeveral() {
+    if (this.todoSpace) this.openDialog(severalDialogHeight(), { view: "add-several" });
+  }
+
+  makeQuickAdd() {
+    this.quickFocused = false;
+    this.quick = InputState.new({ placeholder: "Add a card, press Enter" });
+    this.quick.on("submit", (_e, cx) => this.quickAdd(cx));
+    for (const [event, focused] of [["focus", true], ["blur", false]]) {
+      this.quick.on(event, (_e, cx) => {
+        this.quickFocused = focused;
+        cx.notify();
+      });
+    }
+  }
+
+  // Empties the input at once so the next card can be typed. A failed add puts its text back.
+  quickAdd(cx) {
+    const title = this.quick.value().trim();
+    this.quick.focus();
+    if (!title || !this.todoSpace) return;
+    this.quick.set_value("");
+    this.note = null;
+    const space = this.todoSpace;
+    cx.spawn(async (cx) => {
+      try {
+        await hws(["todo", "add", textFlag("title", title), "--space", space]);
+        this.loadTodos(cx);
+      } catch (e) {
+        this.note = message(e);
+        if (!this.quick.value()) this.quick.set_value(title);
+      }
+      cx.notify();
+    });
   }
 
   moveTodo(id, column, cx) {
@@ -142,10 +188,36 @@ export default class Work extends View {
         await hws(["todo", "move", "--id", id, "--column", column, "--space", this.todoSpace]);
         this.loadTodos(cx);
       } catch (e) {
-        this.note = String(e?.message ?? e);
+        this.note = message(e);
       }
       cx.notify();
     });
+  }
+
+  // Starts an orchestrator, or asks the live one to read the board again.
+  runOrchestrator(cx) {
+    if (this.starting || !this.todoSpace) return;
+    const lists = { agents: agents(), panes: panes(), terminals: terminals(), spaces: spaces() };
+    const folder = orchestratorFolder(lists, this.todoSpace) ?? home();
+    const space = this.todoSpace;
+    this.starting = true;
+    this.note = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        await hws(["orchestrator", "start", "--space", space, "--folder", folder]);
+        this.loadTodos(cx);
+      } catch (e) {
+        this.note = message(e);
+      }
+      this.starting = false;
+      cx.notify();
+    });
+  }
+
+  goToOrchestrator() {
+    const address = this.orchestrator?.terminal;
+    if (address) this.focusAgent({ address, ...locateTerminal({ panes: panes(), terminals: terminals() }, address) });
   }
 
   // A press on a to-do card starts a drag. The pointer is already inside its column.
@@ -269,22 +341,6 @@ export default class Work extends View {
     return null;
   }
 
-  // The board needs room for its columns, so the panel widens while Tasks shows.
-  syncWidth() {
-    const root = layout();
-    const panel = findNode(root, "panel");
-    const showing = Boolean(panel) && !panel.hidden && findNode(root, "panel-body")?.active === "tasks";
-    if (showing === this.showing) return;
-    this.showing = showing;
-    if (showing && (panel.size?.px ?? 0) < WIDE_PANEL_PX) {
-      this.widened = true;
-      run("layout.resize", { id: "panel", px: WIDE_PANEL_PX });
-    } else if (!showing && this.widened) {
-      this.widened = false;
-      if (panel) run("layout.resize", { id: "panel", px: NARROW_PANEL_PX });
-    }
-  }
-
   // Keeps the tab bar's badge equal to the Waiting on you count.
   publishWaiting(count) {
     if (shared(WAITING_KEY) !== count) setShared(WAITING_KEY, count);
@@ -295,7 +351,6 @@ export default class Work extends View {
     const t = theme();
     this.rebind(cx);
     this.syncTodos(cx);
-    if (this.kind === "tasks") this.syncWidth();
     const blocker = this.blocker();
     const body = this.kind === "outputs" ? this.outputsBody(t, blocker) : this.tasksBody(t, blocker);
     return v_flex()
@@ -345,15 +400,30 @@ export default class Work extends View {
 
   tasksBody(t, blocker) {
     const agentColumns = blocker === null ? board(this.bound, this.docs) : NO_AGENT_ITEMS;
-    if (blocker !== LOADING) this.publishWaiting(agentColumns.waiting.length);
     const columns = mergeBoard(this.todos ?? [], agentColumns);
+    if (blocker !== LOADING && (this.todos !== null || this.todoProblem !== null)) this.publishWaiting(columns.waiting.length);
     const open = columns.todo.length + columns.doing.length + columns.waiting.length;
-    const controls = h_flex().flex_none().gap(4).items_center().child(this.addButton(t, "add", "+ Add")).child(this.expandButton(t));
-    const header = this.header(t, "Tasks", blocker === LOADING ? null : open, controls);
+    const controls = h_flex()
+      .flex_none()
+      .gap(4)
+      .items_center()
+      .children(this.orchestratorControls(t))
+      .child(this.headerButton(t, "add", "+ Add", () => this.openTodo(null)))
+      .child(this.headerButton(t, "add-several", "Add several", () => this.openSeveral()));
+    const header = this.header(t, "Board", blocker === LOADING ? null : open, controls);
     const fits = this.width >= LANES_FIT_PX;
-    const lanes = COLUMNS.map((c) => this.lane(t, c, columns[c.key], fits));
+    const empty = this.todos !== null && blocker !== LOADING && Object.values(columns).every((cards) => cards.length === 0);
+    const lanes = COLUMNS.map((c) => this.lane(t, c, columns[c.key], fits, empty));
     const content = h_flex().id("board").flex_1().min_h(0).w_full().items_stretch().p(8).gap(8).overflow_x_scrollbar().children(lanes);
     return { header, quiet: this.quietLine(blocker, agentColumns), content };
+  }
+
+  // Waits for the first to-do list, because only that says whether one is running.
+  orchestratorControls(t) {
+    if (this.orchestrator === undefined) return [];
+    const running = Boolean(this.orchestrator?.live);
+    const action = this.headerButton(t, "orchestrator", running ? "Send new cards" : "Start orchestrator", (_e, cx) => this.runOrchestrator(cx), !this.starting);
+    return running ? [action, this.headerButton(t, "orchestrator-go", "Go to", () => this.goToOrchestrator())] : [action];
   }
 
   // The one line under the header. A failed action outranks the state of agent items.
@@ -367,7 +437,7 @@ export default class Work extends View {
     return agentItems === 0 && !tracked ? TRACKING_OFF : null;
   }
 
-  addButton(t, id, text) {
+  headerButton(t, id, text, action, enabled = true) {
     return div()
       .id(id)
       .flex_none()
@@ -378,32 +448,20 @@ export default class Work extends View {
       .rounded(5)
       .text_size(11)
       .text_color(t.muted)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover).text_color(t.foreground))
-      .on_click(() => this.openTodo(null))
+      .opacity(enabled ? 1 : 0.5)
+      .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(action))
       .child(text);
   }
 
-  expandButton(t) {
-    const wide = this.width >= WIDE_PX;
+  quickAddField(t) {
     return div()
-      .id("expand")
+      .id("quick-add")
       .flex_none()
-      .px(6)
-      .h(20)
-      .flex()
-      .items_center()
-      .rounded(5)
-      .text_size(11)
-      .text_color(t.muted)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover).text_color(t.foreground))
-      .on_click(() => run("layout.resize", { id: "panel", px: wide ? NARROW_PANEL_PX : WIDE_PANEL_PX }))
-      .child(wide ? "Collapse" : "Expand");
+      .child(Input.new(this.quick).h(30).px(8).rounded(7).border_1().border_color(this.quickFocused ? t.accent : t.input).bg(t.background).text_size(12).text_color(t.foreground));
   }
 
   // One status column: a head and its cards, scrolling on its own.
-  lane(t, column, cards, fits) {
+  lane(t, column, cards, fits, empty) {
     const lit = column.drop && Boolean(this.drag?.moved) && this.over === column.key;
     const head = h_flex()
       .id(`head-${column.key}`)
@@ -414,9 +472,9 @@ export default class Work extends View {
       .items_center()
       .child(div().flex_none().size(8).rounded_full().bg(t[column.color]))
       .child(div().text_size(12).font_medium().text_color(t.muted).child(column.name))
-      .child(div().text_size(12).text_color(t.dim).child(String(cards.length)))
-      .when(column.key === "todo", (el) => el.child(div().flex_1()).child(this.addButton(t, "add-todo", "+")));
+      .child(div().text_size(12).text_color(t.dim).child(String(cards.length)));
     const rows = this.laneRows(t, column, cards);
+    if (empty && column.key === "todo") rows.push(div().id("board-hint").flex_none().px(4).py(4).text_size(11.5).text_color(t.dim).whitespace_normal().child(BOARD_HINT));
     const lane = v_flex()
       .id(`lane-${column.key}`)
       .h_full()
@@ -429,6 +487,7 @@ export default class Work extends View {
       .on_mouse_up("left", (_e, cx) => this.releaseOnLane(column, cx));
     return (fits ? lane.flex_1().min_w(0) : lane.flex_none().w(LANE_PX))
       .child(head)
+      .when(column.key === "todo", (el) => el.child(this.quickAddField(t)))
       .child(v_flex().id(`scroll-${column.key}`).flex_1().min_h(0).overflow_y_scrollbar().gap(6).children(rows));
   }
 
@@ -437,12 +496,16 @@ export default class Work extends View {
     const shown = isDone && !this.doneOpen ? cards.slice(0, DONE_SHOWN) : cards;
     const rows = shown.map((c) => (c.kind === "todo" ? this.todoCard(t, c, column.key) : this.card(t, c)));
     if (isDone && cards.length > DONE_SHOWN) rows.push(this.moreRow(t, cards.length - DONE_SHOWN));
-    if (column.key === "todo") rows.push(this.addRow(t));
     return rows;
   }
 
+  tag(t, text) {
+    return div().flex_none().px(5).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.dim).child(text);
+  }
+
   todoCard(t, item, columnKey) {
-    const notes = notesLine(item.notes);
+    const subtitle = notesLine(item.note) || notesLine(item.notes);
+    const tags = [...(item.hold ? ["Hold"] : []), ...(item.worktree ? ["Worktree"] : [])];
     const sentTo = item.terminal ? (this.targets.find((x) => x.address === item.terminal)?.name ?? item.terminal) : null;
     return v_flex()
       .id(`todo-${item.id}`)
@@ -460,8 +523,9 @@ export default class Work extends View {
       .on_mouse_up("left", (_e, cx) => this.releaseOnCard(item, cx))
       .on_hover((hovered, cx) => this.hoverCard(item.id, hovered, cx))
       .child(div().line_height("18px").max_h(36).overflow_hidden().whitespace_normal().child(item.title))
-      .when(Boolean(notes), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(notes)))
-      .when(sentTo !== null, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(`Sent to ${sentTo}`)));
+      .when(Boolean(subtitle), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(subtitle)))
+      .when(sentTo !== null, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(`Sent to ${sentTo}`)))
+      .when(tags.length > 0, (el) => el.child(h_flex().id(`tags-${item.id}`).gap(4).children(tags.map((x) => this.tag(t, x)))));
   }
 
   card(t, card) {
@@ -486,23 +550,6 @@ export default class Work extends View {
           .child(div().flex_1().min_w(0).line_height("18px").max_h(36).overflow_hidden().whitespace_normal().child(card.title)),
       )
       .child(div().truncate().text_size(11).text_color(t.dim).child(meta));
-  }
-
-  addRow(t) {
-    return div()
-      .id("add-todo-row")
-      .h(28)
-      .flex_none()
-      .px(6)
-      .flex()
-      .items_center()
-      .rounded(7)
-      .text_size(12)
-      .text_color(t.dim)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover).text_color(t.foreground))
-      .on_click(() => this.openTodo(null))
-      .child("+ Add to-do");
   }
 
   moreRow(t, hidden) {

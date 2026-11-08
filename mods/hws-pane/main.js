@@ -11,6 +11,7 @@ import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "
 import { LABEL, sweep } from "./parked.js";
 
 const CHAT = "hws-chat";
+const BOARD = "hws-work";
 const SWEEP_MS = 4000;
 const NEW_COPY_MS = 2000;
 const SWAP_GAP_MS = 3000;
@@ -204,7 +205,8 @@ export default class Pane extends View {
     const agent = chatMode ? agentOf(self.pane) : null;
     const p = (agent && parked(agent)) ?? self;
     const prog = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "Shell";
-    const name = chatMode && !agent ? "Chat" : prog;
+    const board = self.mod === BOARD;
+    const name = board ? "Board" : chatMode && !agent ? "Chat" : prog;
     const pic = icon(p.program, 14, t.dim);
     const pane = self.pane;
     const canSwitch = chatMode ? Boolean(agent) : chatty(self);
@@ -227,7 +229,7 @@ export default class Pane extends View {
       .on_click(() => run("pane.focus", { pane }))
       .when(Boolean(pic), (el) => el.child(pic))
       .child(div().flex_none().max_w(260).min_w(0).truncate().font_medium().text_color(t.foreground).child(name))
-      .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(p.cwd)))
+      .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(board ? null : p.cwd)))
       .child(div().flex_1())
       .when(p.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
       .when(p.status === "blocked", (el) => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(RADIUS.control).bg(`${t.blocked}26`).text_size(TEXT.id).font_semibold().text_color(t.blocked).child("Needs you")))

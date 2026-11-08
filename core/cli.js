@@ -4,8 +4,20 @@ import { artifactList, artifactTerminal, link } from './commands/artifact.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
+import { orchestratorStart, orchestratorStatus } from './commands/orchestrator.js';
 import { surfaceDone, surfaceFocus, surfaceOpen, surfaceSocket } from './commands/surface.js';
-import { todoAdd, todoArchive, todoEdit, todoList, todoMove, todoSend } from './commands/todo.js';
+import {
+  todoAdd,
+  todoArchive,
+  todoClaim,
+  todoEdit,
+  todoList,
+  todoMove,
+  todoNext,
+  todoNote,
+  todoReply,
+  todoSend,
+} from './commands/todo.js';
 import { UsageError } from './errors.js';
 
 const text = { type: 'string' };
@@ -44,11 +56,25 @@ const ROUTES = [
   { path: ['artifact', 'terminal'], run: artifactTerminal, options: {}, positionals: 1 },
   { path: ['link'], run: link, options: {}, positionals: 1 },
   { path: ['todo', 'list'], run: todoList, options: { space: text } },
-  { path: ['todo', 'add'], run: todoAdd, options: { title: text, notes: text, space: text } },
-  { path: ['todo', 'edit'], run: todoEdit, options: { id: text, title: text, notes: text, space: text } },
-  { path: ['todo', 'move'], run: todoMove, options: { id: text, column: text, space: text } },
+  {
+    path: ['todo', 'add'],
+    run: todoAdd,
+    options: { title: text, titles: text, notes: text, hold: flag, worktree: flag, space: text },
+  },
+  {
+    path: ['todo', 'edit'],
+    run: todoEdit,
+    options: { id: text, title: text, notes: text, hold: text, worktree: text, space: text },
+  },
+  { path: ['todo', 'move'], run: todoMove, options: { id: text, column: text, note: text, space: text } },
+  { path: ['todo', 'note'], run: todoNote, options: { id: text, text, space: text } },
+  { path: ['todo', 'next'], run: todoNext, options: { terminal: text, space: text } },
+  { path: ['todo', 'claim'], run: todoClaim, options: { id: text, terminal: text, space: text } },
   { path: ['todo', 'send'], run: todoSend, options: { id: text, terminal: text, space: text } },
+  { path: ['todo', 'reply'], run: todoReply, options: { id: text, text, space: text } },
   { path: ['todo', 'archive'], run: todoArchive, options: { id: text, space: text } },
+  { path: ['orchestrator', 'start'], run: orchestratorStart, options: { space: text, folder: text } },
+  { path: ['orchestrator', 'status'], run: orchestratorStatus, options: { space: text } },
   {
     path: ['promote'],
     run: promote,

@@ -1,11 +1,12 @@
 // The + menu on agent panes and in the chat composer. It starts boards, notes and page
-// reviews glued to an agent, and reaches the chat's file picker and the right panel.
+// reviews glued to an agent, and reaches the chat's file picker, the Board tab and the right panel.
 // Props: { terminal, chat?, pane?, space?, lastReply? }. docs/CONTRACT.md lists the rows.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, theme, closeOverlay, exec, appHome, writeTextFile, setShared, run } from "herdr";
 import { hws, submitDialog, problemLine } from "./hws.js";
+import { openBoard } from "./board.js";
 
 // One shell runs the chooser and the open, because the popup can close while the chooser has
 // focus and an exec already started keeps running. Error -128 means the person cancelled.
@@ -66,7 +67,7 @@ export default class Actions extends View {
       ...(p.lastReply ? [{ id: "write-reply", name: "Write from last reply", icon: "reply", work: () => this.writeFromReply(p.lastReply) }] : []),
       { id: "review", name: "Review a page…", icon: "review", work: () => this.reviewPage() },
       ...(p.chat ? [{ id: "attach", name: "Attach file…", icon: "attach", work: () => setShared("hws-chat.attach", { pane: p.pane, at: Date.now() }) }] : []),
-      { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: () => showPanel("tasks") },
+      { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: openBoard },
       { id: "outputs", name: "Outputs", icon: "outputs", work: () => showPanel("outputs") },
     ];
   }

@@ -96,7 +96,7 @@ The audit found these from reading code.
 
 ### 7. Later
 
-- [ ] Add an orchestrator mode across a workspace, using Orchestrate mode and `hc run` children.
+- [x] Add an orchestrator that runs a space's board, using `hc run` children.
 - [ ] Decide whether this replaces the Agent Brief panel or runs beside it, including on the work Mac.
 
 ### 8. Finish the chat flip
@@ -129,6 +129,8 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 
 - [ ] Open the `+` menu from a Terminal pane and a Chat pane, and check its height.
 - [ ] Confirm Review a page opens after the macOS chooser takes focus.
+- [ ] Start an orchestrator from a real Board with cards that overlap and cards that don't.
+- [ ] Open the Board from the Tasks button and return with it.
 - [ ] Drag a to-do between columns. Nothing has confirmed hover and release order during a real press.
 - [ ] Add, edit, send and archive a to-do in the dialog.
 - [ ] Press Done on a surface opened from a flipped agent.

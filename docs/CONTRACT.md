@@ -241,11 +241,12 @@ Each region of the `hws` layout has one job.
 | Region | Job | Holds |
 |---|---|---|
 | Left sidebar | Navigate | Workspaces, Spaces, Agents (`hws-agents`, includes flipped agents) |
-| Tab bar | Switch tabs, toggle the right panel | `hws-tabs`, with Files, Changes, Tasks, Outputs |
+| Tab bar | Switch tabs, open the Board, toggle the right panel | `hws-tabs`, with Tasks, Files, Changes, Outputs |
 | Pane header | Act on this agent | `hws-pane` `+`, always visible on agent and chat panes |
 | Chat composer | Act on this agent while typing | The same menu, plus Attach file |
 | Own window, or a pane beside the agent | Do the work | Boards in their own window, notes and pages in a pane |
-| Right panel | See what the work produced | Files, Changes, Tasks, Outputs |
+| Board tab | Plan and dispatch work | Full-width kanban, one per space, `hws-work` with `{"view":"tasks"}` |
+| Right panel | See what the work produced | Files, Changes, Outputs |
 
 ### New menu: `hws-actions`
 
@@ -266,7 +267,7 @@ A popup that the pane header and the chat composer open at the pointer.
 | Write from last reply | `lastReply` is set | Writes the reply to a file, then opens it with `--type note --file F` |
 | Review a page… | Always | macOS file chooser, then `--type page --file F` |
 | Attach file… | `chat` is true | `setShared("hws-chat.attach", { pane, at })` |
-| Tasks | Always | Selects `tasks` in `panel-body` and shows `panel` |
+| Tasks | Always | Opens the Board tab |
 | Outputs | Always | Selects `outputs` in `panel-body` and shows `panel` |
 
 Every `hws surface open` passes `--terminal T`. A flipped agent also passes `--beside-pane P --space S`.
@@ -281,34 +282,60 @@ A flipped agent has no pane, and `herdr-app ls` does not list chat panes. Mods f
 
 `hws surface open --terminal T --beside-pane P --space S` opens a board in its own window and splits a note or page beside P. It fails unless T's `herdr.chat` label equals P. On Done, `hws` reads T's `herdr.chat` label again. It focuses that pane when the label is set and the terminal otherwise.
 
-### Right panel: `hws-work`
+### Board tab
 
-`panel-body` has four children: `files`, `changes`, `tasks` and `outputs`. The last two run `hws-work` with `{"view":"tasks"}` and `{"view":"outputs"}`.
+Each space has at most one Board tab, a tab whose pane runs `hws-work` with `{"view":"tasks"}`.
 
-Both views read the active space's Claude agents, flipped ones included, and bind each to its session by `host.hcTerminal` from `agent-brief sessions --json`.
+| Tasks button in the tab bar | Result |
+|---|---|
+| No Board tab in the active space | `tab.new` with `name` Board, `mod` `hws-work`, `props` `{"view":"tasks"}` |
+| Board tab exists and is not active | `tab.select` |
+| Board tab is active | `tab.select` on the tab shown before it. Closing the tab removes the Board |
 
-Tasks shows your to-dos beside the agents' items on one board.
+The pane header names it Board. The board shows your to-dos beside the agents' items.
 
 | Column | Your to-dos | Agent items |
 |---|---|---|
 | To do | `column` is `todo` | None |
 | In progress | `column` is `doing` | Open, and not waiting |
-| Waiting on you | None | Open, and the last line is Claude's |
+| Waiting on you | `column` is `waiting` | Open, and the last line is Claude's |
 | Done | `column` is `done` | Checked |
 
-- The board always shows four columns side by side. They share the width at 840px or wider and scroll sideways at 200px each below that.
-- The panel widens to 860 while Tasks shows and returns to 368 after. The header's expand button also switches between those widths.
+- The board always shows four columns side by side, sharing the width. They scroll sideways at 200px each when they do not fit.
 - The board always renders. A problem reaching Agent Brief is one quiet line under the header, and to-dos still work.
 - `hws-work` keeps `shared("hws.tasks.waiting")` equal to the Waiting on you count, and `hws-tabs` shows it on the Tasks button.
 
 | Card | Shows | Click | Drag |
 |---|---|---|---|
-| To-do | Title, first line of notes, the agent it was sent to | Opens the to-do dialog | Release over To do, In progress or Done |
+| To-do | Title, `note` or the first line of notes, the agent working on it, Hold and Worktree tags | Opens the to-do dialog | Release over To do, In progress or Done |
 | Agent item | `#n`, title, agent name, Claude's last line | Focuses the agent | None, because the agent owns the items file |
 
 Drag uses press and release across elements, as Herdr's tab bar does. The column under the pointer highlights during a drag, and Waiting on you never accepts a drop.
 
-`+ Add` in the To do column head and in the header opens the dialog. The dialog has title, notes, a column choice, Send to, Archive and Save. Send to lists every agent in the space, flipped ones included, and never picks one for you.
+Adding has three routes:
+
+- An input at the top of To do. Enter adds a card, empties the input and keeps focus.
+- `+ Add` in the header opens the to-do dialog.
+- Add several in the header opens a dialog with a text area. Each non-blank line becomes a card.
+
+The to-do dialog has title, notes, a column choice, Keep for me (`hold`), Use a worktree (`worktree`), Send to, Archive and Save. A card in Waiting on you also shows its `note` and a Reply box that runs `hws todo reply`.
+
+The header's orchestrator control reads `orchestrator` from `hws todo list`.
+
+| State | Control | Action |
+|---|---|---|
+| None running | Start orchestrator | `hws orchestrator start --space S --folder F` |
+| Running | Send new cards | The same command, and a Go to link focuses its terminal |
+
+F is the working folder of the active space's first agent, else the space's folder.
+
+### Right panel: `hws-work`
+
+`panel-body` has three children: `files`, `changes` and `outputs`. Outputs runs `hws-work` with `{"view":"outputs"}`. It reads the active space's Claude agents, flipped ones included, and binds each to its session by `host.hcTerminal` from `agent-brief sessions --json`.
+
+Outputs lists each agent's outputs, newest first. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. Anything else goes to macOS `open`.
+
+`mod.open:hws-brief` shows or hides Outputs in the right panel.
 
 ### To-dos: `hws todo`
 
@@ -316,23 +343,41 @@ Only `hws` writes `<state root>/todos/<space id>.json`. To-dos belong to a space
 
 ```json
 { "version": 1, "space": "sp1", "items": [
-  { "id": "t1a2b3", "title": "Fix login", "notes": "", "column": "todo", "terminal": null, "archived": false, "createdAt": 1, "updatedAt": 1 }
-] }
+  { "id": "t1a2b3", "title": "Fix login", "notes": "", "column": "todo", "terminal": null, "hold": false, "worktree": false, "note": "", "archived": false, "createdAt": 1, "updatedAt": 1 }
+], "orchestrator": { "terminal": "t9", "startedAt": 1 } }
 ```
 
 | Command | Does |
 |---|---|
-| `hws todo list [--space S]` | Prints unarchived items, newest `updatedAt` first |
-| `hws todo add --title X [--notes N] [--space S]` | Adds to `todo` |
-| `hws todo edit --id I [--title X] [--notes N] [--space S]` | Changes the text |
-| `hws todo move --id I --column todo\|doing\|done [--space S]` | Changes the column |
+| `hws todo list [--space S]` | Prints unarchived items, newest `updatedAt` first, and `orchestrator` as `{ terminal, live }` or null |
+| `hws todo add --title X [--notes N] [--hold] [--worktree] [--space S]` | Adds to `todo` |
+| `hws todo add --titles T [--space S]` | Adds one card for each non-blank line of T, and prints `{ items }` |
+| `hws todo edit --id I [--title X] [--notes N] [--hold true\|false] [--worktree true\|false] [--space S]` | Changes the text or flags |
+| `hws todo move --id I --column todo\|doing\|waiting\|done [--note X] [--space S]` | Changes the column, and sets `note` when given |
+| `hws todo note --id I --text X [--space S]` | Sets `note`, the latest word from the worker |
+| `hws todo next --terminal T [--space S]` | Claims the oldest To do card that is not held, and prints it or null |
+| `hws todo claim --id I --terminal T [--space S]` | Moves a To do card to `doing` and sets `terminal`. Fails when the card is held or not in To do |
 | `hws todo send --id I --terminal T [--space S]` | Pastes the title and notes into T with `hc send`, sets `terminal`, moves to `doing` |
+| `hws todo reply --id I --text X [--space S]` | Pastes X into the card's `terminal`, clears `note`, moves to `doing` |
 | `hws todo archive --id I [--space S]` | Sets `archived`. Nothing is deleted |
 
 `--space` defaults to the window's selected space. Mods always pass it. The to-do dialog sets `shared("hws.todos.changed")` after a change, and the board reloads on it.
 
+Items written before these fields existed read `hold` and `worktree` as false and `note` as empty.
+
+### Orchestrator
+
+An orchestrator is an ordinary Claude session in a visible tab. It reads the board, decides what can run in parallel and starts workers. Nothing runs in the background.
+
+| Command | Does |
+|---|---|
+| `hws orchestrator start --space S --folder F` | With none live, opens an Orchestrator tab running `claude` with a first prompt that loads the `orchestrate` skill, and records its terminal. With one live, pastes a note into it to read the board again |
+| `hws orchestrator status [--space S]` | Prints `{ terminal, live }` or null |
+
+- The skill is `plugin/skills/orchestrate/SKILL.md`.
+- The orchestrator chooses parallel or sequential from what each card touches.
+- It uses a worktree only when a card has `worktree` set or the person asks. Otherwise every worker runs in the same folder and owns a separate set of files.
+- Workers are `hc run --bg` children labelled `hws.todo=<id>`, so they show under the orchestrator in Agents and report to it when they end.
+- A held card is never taken.
+
 A surface runs on this computer. The `+` menu is hidden for a remote agent, and `hws surface open` refuses a terminal whose address has a machine prefix.
-
-Outputs lists each agent's outputs, newest first. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. Anything else goes to macOS `open`.
-
-`mod.open:hws-brief` shows or hides Outputs in the right panel.

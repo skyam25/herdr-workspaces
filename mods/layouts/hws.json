@@ -180,16 +180,6 @@
                       }
                     },
                     {
-                      "id": "tasks",
-                      "type": "block",
-                      "content": {
-                        "mod": "hws-work",
-                        "props": {
-                          "view": "tasks"
-                        }
-                      }
-                    },
-                    {
                       "id": "outputs",
                       "type": "block",
                       "content": {

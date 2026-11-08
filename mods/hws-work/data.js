@@ -139,10 +139,48 @@ export function mergeBoard(todos, agentColumns) {
   return {
     todo: mine("todo"),
     doing: [...mine("doing"), ...agentColumns.progress],
-    waiting: agentColumns.waiting,
+    waiting: [...mine("waiting"), ...agentColumns.waiting],
     done: [...mine("done"), ...agentColumns.done],
   };
 }
+
+// Where an orchestrator starts: the space's first agent's folder, else the space's folder.
+export function orchestratorFolder(lists, spaceId) {
+  const space = lists.spaces.find((s) => s.id === spaceId);
+  if (!space) return null;
+  const first = agentsIn(space, lists)[0]?.info;
+  const pane = first ? lists.panes.find((p) => p.pane === first.pane) : undefined;
+  return pane?.cwd || first?.foreground?.cwd || first?.cwd || space.folder || null;
+}
+
+// Finds a terminal's tab, and its chat pane when it is flipped and has no pane of its own.
+export function locateTerminal({ panes, terminals }, address) {
+  const own = panes.find((p) => p.terminal === address);
+  if (own) return { tab: own.tab, chatPane: null };
+  const label = terminals.find((x) => x.address === address && x.state === "live")?.labels?.[CHAT_LABEL];
+  const chat = panes.find((p) => p.mod === CHAT_MOD && p.pane === label);
+  return chat ? { tab: chat.tab, chatPane: chat.pane } : null;
+}
+
+// Dialog heights in px. The forms draw with these and the board adds them up.
+export const FORM = { pad: 18, gap: 12, heading: 20, label: 15, labelGap: 5, input: 34, notes: 96, lines: 170, chip: 26, sendRow: 28, sendGap: 4, note: 48, problem: 16, footerTop: 4, button: 30, frame: 4 };
+
+const MAX_SEND_ROWS = 4;
+const labeled = (height) => FORM.gap + FORM.label + FORM.labelGap + height;
+
+// Padding, heading, the error line, the footer and Herdr's frame.
+const shellHeight = () => FORM.pad * 2 + FORM.heading + FORM.gap + FORM.problem + FORM.footerTop + FORM.button + FORM.pad + FORM.frame;
+
+// Fits every control and one error line without scrolling. Send to scrolls past four agents.
+export function todoDialogHeight({ editing, waiting, targets }) {
+  const fields = labeled(FORM.input) + labeled(FORM.notes) + labeled(FORM.chip) + FORM.gap + FORM.chip;
+  const rows = Math.min(Math.max(targets, 1), MAX_SEND_ROWS);
+  const sendTo = editing ? labeled(rows * FORM.sendRow + (rows - 1) * FORM.sendGap) : 0;
+  const reply = waiting ? labeled(FORM.note) + labeled(FORM.input) : 0;
+  return shellHeight() + fields + sendTo + reply;
+}
+
+export const severalDialogHeight = () => shellHeight() + labeled(FORM.lines);
 
 // True when a session reports tracking on or already has an items file.
 export const isTracked = (session, doc) => Boolean(session.trackItems || session.itemsPath || (doc && doc.items !== null));

@@ -34,6 +34,19 @@ test("an agent pane shows the switch and a shell pane does not", async () => {
   assert.equal((await mount("hws-pane", { pane: "p1" })).has("ph-mode-p1-chat"), false);
 });
 
+test("a Board pane is titled Board with no folder and keeps its close button", async () => {
+  const H = world({ panes: [{ pane: "p3", terminal: null, tab: "tb1", focused: true, mod: "hws-work", title: "Work", cwd: "/w" }] });
+  const m = await mount("hws-pane", { pane: "p3" });
+  m.view.hovered = true;
+
+  assert.match(m.text(), /^Board\b/);
+  assert.doesNotMatch(m.text(), /Work|\/w/);
+  assert.equal(m.has("ph-mode-p3-chat"), false);
+  assert.equal(m.has("ph-new-p3"), false);
+  await m.click("ph-x-p3");
+  assert.deepEqual(H.runs, [{ name: "pane.close", args: { pane: "p3" } }]);
+});
+
 test("Chat splits the chat, labels the agent, and parks the terminal last", async () => {
   const H = world({ panes: [AGENT] });
   const m = await mount("hws-pane", { pane: "p1" });

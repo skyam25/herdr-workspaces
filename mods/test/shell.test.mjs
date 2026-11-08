@@ -1,7 +1,7 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { setup, mount } from "./harness.mjs";
+import { setup, mount, textOf } from "./harness.mjs";
 
 const store = new Map();
 globalThis.localStorage = {
@@ -267,10 +267,11 @@ test("the Tasks badge shows only above zero", async () => {
   }
 });
 
-test("four panel buttons by default, Tasks and Outputs even when panels are restricted", async () => {
+test("the buttons read Tasks, Files, Changes, Outputs, with Tasks and Outputs even when panels are restricted", async () => {
   tabWorld();
   const view = await mount("hws-tabs");
-  for (const id of ["files", "changes", "tasks", "outputs"]) assert.equal(view.has(`panel-${id}`), true, id);
+  const order = nodes(view.render()).map((n) => n.id).filter((id) => /^panel-[a-z]+$/.test(id ?? ""));
+  assert.deepEqual(order, ["panel-tasks", "panel-files", "panel-changes", "panel-outputs"]);
 
   tabWorld({ sharedValues: { "workspace.panels": ["files"] } });
   const limited = await mount("hws-tabs");
@@ -283,12 +284,123 @@ test("four panel buttons by default, Tasks and Outputs even when panels are rest
 test("a panel button selects its stack child and shows the panel, then hides it", async () => {
   const H = tabWorld();
   const view = await mount("hws-tabs");
-  await view.click("panel-tasks");
-  assert.deepEqual(H.runs.slice(-2), [{ name: "layout.select", args: { stack: "panel-body", child: "tasks" } }, { name: "layout.show", args: { id: "panel" } }]);
+  await view.click("panel-outputs");
+  assert.deepEqual(H.runs.slice(-2), [{ name: "layout.select", args: { stack: "panel-body", child: "outputs" } }, { name: "layout.show", args: { id: "panel" } }]);
 
-  H.layout = { id: "root", children: [{ id: "panel", hidden: false }, { id: "panel-body", active: "tasks" }] };
-  await view.click("panel-tasks");
+  H.layout = { id: "root", children: [{ id: "panel", hidden: false }, { id: "panel-body", active: "outputs" }] };
+  await view.click("panel-outputs");
   assert.deepEqual(H.runs.at(-1), { name: "layout.hide", args: { id: "panel" } });
+});
+
+const BOARD_TAB = { id: "tb9", name: "Board", index: 3, status: null };
+const boardPane = (tab = "tb9") => ({ pane: `pb-${tab}`, terminal: null, tab, mod: "hws-work", title: "Work", focused: false });
+const spacesOn = (active, tabs = [...SPACES[0].tabs, BOARD_TAB]) => [{ ...SPACES[0], tabs: tabs.map((c) => ({ ...c, active: c.id === active })) }, SPACES[1]];
+const boardWorld = (active, overrides = {}) => tabWorld({ spaces: spacesOn(active), panes: [boardPane()], terminals: [], ...overrides });
+const selected = (view) => byId(view, "panel-tasks").bg === "color:selected";
+
+test("Tasks opens a Board tab when the active space has none", async () => {
+  const H = tabWorld();
+  const view = await mount("hws-tabs");
+  assert.equal(selected(view), false);
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, [{ name: "tab.new", args: { name: "Board", mod: "hws-work", props: { view: "tasks" } } }]);
+});
+
+test("a Board in another space does not count", async () => {
+  const H = tabWorld({ panes: [boardPane("tb3")] });
+  const view = await mount("hws-tabs");
+  await view.click("panel-tasks");
+  assert.equal(H.runs[0].name, "tab.new");
+});
+
+test("Tasks selects an inactive Board tab", async () => {
+  const H = boardWorld("tb1");
+  const view = await mount("hws-tabs");
+  assert.equal(selected(view), false);
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb9" } }]);
+});
+
+test("Tasks on the active Board returns to the tab shown before it", async () => {
+  const H = boardWorld("tb2");
+  const view = await mount("hws-tabs");
+  view.render();
+
+  H.spaces = spacesOn("tb9");
+  assert.equal(selected(view), true);
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb2" } }]);
+});
+
+test("each space remembers its own tab before the Board", async () => {
+  const H = boardWorld("tb2");
+  const view = await mount("hws-tabs");
+  view.render();
+
+  const [first, second] = spacesOn("tb2");
+  H.spaces = [{ ...first, active: false }, { ...second, active: true }];
+  view.render();
+
+  H.spaces = spacesOn("tb9");
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs.at(-1), { name: "tab.select", args: { id: "tb2" } });
+});
+
+test("when the earlier tab is gone, Tasks selects the first other tab", async () => {
+  const H = boardWorld("tb2");
+  const view = await mount("hws-tabs");
+  view.render();
+
+  H.spaces = spacesOn("tb9", [SPACES[0].tabs[0], BOARD_TAB]);
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb1" } }]);
+});
+
+test("a Board that is the space's only tab stays put", async () => {
+  const H = boardWorld("tb9", { spaces: spacesOn("tb9", [BOARD_TAB]) });
+  const view = await mount("hws-tabs");
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, []);
+});
+
+test("a Board tab reads its name, not an agent's", async () => {
+  const agent = paneOf(listed("t1", "tb9", "spc1"));
+  boardWorld("tb1", { panes: [boardPane(), agent] });
+  const view = await mount("hws-tabs");
+  const tab = inTab(view, "tb9");
+  assert.equal(tab.some((n) => n.kind === "svg" && n.src === CLAUDE.icon), false);
+  assert.equal(textOf(byId(view, "tab-tb9")).includes("Claude Code"), false);
+  assert.match(textOf(byId(view, "tab-tb9")), /Board/);
+
+  const unnamed = { ...BOARD_TAB, name: "tb9" };
+  boardWorld("tb1", { spaces: spacesOn("tb1", [...SPACES[0].tabs, unnamed]), panes: [boardPane(), agent] });
+  const cleared = await mount("hws-tabs");
+  assert.match(textOf(byId(cleared, "tab-tb9")), /Board/);
+});
+
+test("an old saved tasks choice reads as none", async () => {
+  store.set("panels", JSON.stringify({ spc1: "tasks" }));
+  const H = tabWorld();
+  const view = await mount("hws-tabs");
+  view.render();
+  assert.deepEqual(H.runs, []);
+  assert.equal(JSON.parse(store.get("panels")).spc1, null);
+});
+
+test("switching to a space saved on tasks closes the panel and selects nothing", async () => {
+  store.set("panels", JSON.stringify({ spc1: "files", spc2: "tasks" }));
+  const H = tabWorld({ layout: { id: "root", children: [{ id: "panel", hidden: false }, { id: "panel-body", active: "files" }] }, sharedValues: { "workspace.panels": ["files", "tasks"] } });
+  const view = await mount("hws-tabs");
+  view.render();
+  assert.deepEqual(H.runs, []);
+
+  H.spaces = [{ ...SPACES[0], active: false }, { ...SPACES[1], active: true }];
+  view.render();
+  assert.deepEqual(H.runs, [{ name: "layout.hide", args: { id: "panel" } }]);
+});
+
+test("the two board.js copies are identical", () => {
+  assert.equal(read("hws-tabs/board.js"), read("hws-actions/board.js"));
 });
 
 test("the two flipped.js copies are identical", () => {
@@ -329,8 +441,8 @@ test("the layout is valid and installs what it references", () => {
   };
   assert.equal(block("tabs").content.mod, "hws-tabs");
   assert.equal(block("agents").content.mod, "hws-agents");
-  assert.deepEqual(block("panel-body").children.map((c) => c.id), ["files", "changes", "tasks", "outputs"]);
-  assert.deepEqual(block("tasks").content, { mod: "hws-work", props: { view: "tasks" } });
+  assert.deepEqual(block("panel-body").children.map((c) => c.id), ["files", "changes", "outputs"]);
+  assert.equal(block("tasks"), null);
   assert.deepEqual(block("outputs").content, { mod: "hws-work", props: { view: "outputs" } });
   assert.deepEqual(block("sidebar-lists").children.map((c) => c.id), ["workspaces", "spaces", "agents"]);
 });

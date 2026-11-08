@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setup, mount, settle, hwsCalls, usedMethods } from "./harness.mjs";
-import { ago, awaitsUser, board, mergeBoard, notesLine, parseItems, parseOutputs, roster, sendTargets, sessionFor } from "../hws-work/data.js";
+import { ago, awaitsUser, board, locateTerminal, mergeBoard, notesLine, orchestratorFolder, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoDialogHeight } from "../hws-work/data.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -149,7 +149,7 @@ test("board sorts open items by state and Done by newest number", () => {
 
 const ITEMS = "- [ ] #1 Pick a name\n  Claude: Which one?\n- [ ] #2 Build it\n- [x] #3 Shipped\n";
 
-test("Tasks is a four-column board at every width", async () => {
+test("the Board is four columns at every width", async () => {
   world({ files: { "/w/s1/i.md": ITEMS } });
   const m = await mount("hws-work", { view: "tasks" });
   for (const width of [368, 860]) {
@@ -157,38 +157,35 @@ test("Tasks is a four-column board at every width", async () => {
     assert.equal(m.has("board"), true);
     for (const lane of ["scroll-todo", "scroll-doing", "scroll-waiting", "scroll-done"]) assert.equal(m.has(lane), true);
   }
-  assert.match(m.text(), /Tasks \| 2/);
+  assert.match(m.text(), /Board \| 2/);
   assert.match(m.text(), /To do \| 0.*In progress \| 1.*Waiting on you \| 1.*Done \| 1/);
   assert.match(m.text(), /#1 \| Pick a name \| Agent s1 · Which one\?/);
 });
 
-test("the panel widens while Tasks shows and returns afterwards", async () => {
-  const panel = (hidden, active) => ({ id: "root", children: [{ id: "panel", hidden, size: { px: 368 }, children: [{ id: "panel-body", active }] }] });
-  const H = world({ files: { "/w/s1/i.md": ITEMS } });
-  H.layout = panel(true, "files");
+test("the lanes share the width when they fit and take 200px each when they do not", async () => {
+  world({ files: { "/w/s1/i.md": ITEMS } });
   const m = await mount("hws-work", { view: "tasks" });
-  m.render();
-  const resizes = () => H.runs.filter((r) => r.name === "layout.resize").map((r) => r.args.px);
-  assert.deepEqual(resizes(), []);
-  H.layout = panel(false, "tasks");
-  m.render();
-  m.render();
-  assert.deepEqual(resizes(), [860]);
-  H.layout = panel(false, "files");
-  m.render();
-  assert.deepEqual(resizes(), [860, 368]);
+  widen(m, 839);
+  for (const key of ["todo", "doing", "waiting", "done"]) assert.equal(findNode(m, `lane-${key}`).w, 200);
+  widen(m, 840);
+  for (const key of ["todo", "doing", "waiting", "done"]) assert.equal(findNode(m, `lane-${key}`).w, undefined);
 });
 
-test("expand resizes the panel to 860, and to 368 when wide", async () => {
-  const H = world({ files: { "/w/s1/i.md": ITEMS } });
+test("the header has no Expand or Collapse control", async () => {
+  world({ files: { "/w/s1/i.md": ITEMS } });
   const m = await mount("hws-work", { view: "tasks" });
   widen(m, 368);
-  await m.click("expand");
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "panel", px: 860 } });
-  widen(m, 860);
-  assert.match(m.text(), /Collapse/);
-  await m.click("expand");
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "panel", px: 368 } });
+  assert.equal(m.has("expand"), false);
+  assert.equal(/Expand|Collapse/.test(m.text()), false);
+});
+
+test("the Waiting on you count includes to-dos waiting on you", async () => {
+  const H = world({ files: { "/w/s1/i.md": ITEMS } });
+  H.hws["todo list"] = todoList(todo("a1", "Pick a host", { column: "waiting", note: "Which host?", terminal: "t1" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  m.render();
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: 2 });
+  assert.match(m.text(), /Waiting on you \| 2 \| Pick a host \| Which host\?/);
 });
 
 test("Tasks sets the waiting count once, and only when it changes", async () => {
@@ -326,12 +323,12 @@ test("the Waiting on you count stays equal when a space has no agents", async ()
 
 // To-dos on the board
 
-test("mergeBoard puts to-dos first and leaves Waiting to agents", () => {
+test("mergeBoard puts to-dos first in every column", () => {
   const agentCards = { waiting: [{ n: 1 }], progress: [{ n: 2 }], done: [{ n: 3 }] };
-  const merged = mergeBoard([todo("a", "A"), todo("b", "B", { column: "doing" }), todo("c", "C", { column: "done" })], agentCards);
+  const merged = mergeBoard([todo("a", "A"), todo("b", "B", { column: "doing" }), todo("c", "C", { column: "done" }), todo("d", "D", { column: "waiting" })], agentCards);
   assert.deepEqual(merged.todo.map((c) => c.id), ["a"]);
   assert.deepEqual(merged.doing.map((c) => c.id ?? c.n), ["b", 2]);
-  assert.deepEqual(merged.waiting.map((c) => c.n), [1]);
+  assert.deepEqual(merged.waiting.map((c) => c.id ?? c.n), ["d", 1]);
   assert.deepEqual(merged.done.map((c) => c.id ?? c.n), ["c", 3]);
 });
 
@@ -367,8 +364,8 @@ test("the board shows to-dos and agent items together", async () => {
   H.hws["todo list"] = todoList(todo("a1", "Fix login", { notes: "\nCheck the token\nmore" }), todo("a2", "Ship", { column: "doing", terminal: "t1" }), todo("a3", "Old", { column: "done", terminal: "t8" }));
   const m = await mount("hws-work", { view: "tasks" });
   widen(m, 860);
-  assert.match(m.text(), /Tasks \| 4/);
-  assert.match(m.text(), /To do \| 1 \| \+ \| Fix login \| Check the token \| \+ Add to-do/);
+  assert.match(m.text(), /Board \| 4/);
+  assert.match(m.text(), /To do \| 1 \| Fix login \| Check the token/);
   assert.match(m.text(), /In progress \| 2 \| Ship \| Sent to Claude Code/);
   assert.match(m.text(), /Waiting on you \| 1/);
   assert.match(m.text(), /Done \| 2 \| Old \| Sent to t8/);
@@ -417,14 +414,261 @@ test("a failed to-do load shows on the quiet line and keeps the board", async ()
   assert.equal(m.has("quiet"), false);
 });
 
-test("the add buttons open a new to-do for the active space", async () => {
+test("+ Add opens a new to-do for the active space", async () => {
   const H = world();
   H.hws["todo list"] = todoList();
   const m = await mount("hws-work", { view: "tasks" });
-  for (const id of ["add", "add-todo"]) await m.click(id);
-  assert.deepEqual(H.overlays.map((o) => o.props), [{ view: "todo", space: "spc1" }, { view: "todo", space: "spc1" }]);
+  await m.click("add");
+  assert.deepEqual(H.overlays.map((o) => o.props), [{ space: "spc1", view: "todo" }]);
   assert.equal(H.overlays[0].mod, "hws-work");
   assert.equal(H.overlays[0].kind, "dialog");
+});
+
+test("Add several opens its own dialog for the active space", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList();
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("add-several");
+  assert.deepEqual(H.overlays[0].props, { space: "spc1", view: "add-several" });
+  assert.equal(H.overlays[0].height, 342);
+});
+
+test("each dialog is as tall as its controls and one error line", async () => {
+  assert.equal(todoDialogHeight({ editing: false, waiting: false, targets: 0 }), 430);
+  assert.equal(todoDialogHeight({ editing: true, waiting: false, targets: 0 }), 490);
+  assert.equal(todoDialogHeight({ editing: true, waiting: false, targets: 2 }), 522);
+  assert.equal(todoDialogHeight({ editing: true, waiting: false, targets: 9 }), 586);
+  assert.equal(todoDialogHeight({ editing: true, waiting: true, targets: 2 }), 668);
+  assert.equal(severalDialogHeight(), 342);
+
+  const H = world({ agents: [agent("t1"), agent("t2")] });
+  H.hws["todo list"] = todoList(todo("a1", "One"), todo("a2", "Two", { column: "waiting", terminal: "t1" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  m.render();
+  await m.click("add");
+  press(m, "todo-a1");
+  await release(m, "todo-a1", "lane-todo", "root");
+  press(m, "todo-a2");
+  await release(m, "todo-a2", "lane-waiting", "root");
+  assert.deepEqual(H.overlays.map((o) => o.height), [430, 522, 668]);
+});
+
+// Adding from the board
+
+const QUICK_PLACEHOLDER = "Add a card, press Enter";
+const adds = (H) => hwsCalls(H).filter((c) => c.args[0] === "todo" && c.args[1] === "add");
+
+test("Enter in the To do input adds a card, empties it and keeps focus", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList();
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(m.has("quick-add"), true);
+  m.view.quick.type("  -dash first ", m.cx);
+  H.focusCalls.length = 0;
+  m.view.quick.submit(m.cx);
+  await settle();
+  assert.deepEqual(adds(H)[0].args, ["todo", "add", "--title=-dash first", "--space", "spc1", "--json"]);
+  assert.equal(m.view.quick.value(), "");
+  assert.deepEqual(H.focusCalls, [QUICK_PLACEHOLDER]);
+  assert.equal(todoLists(H), 2);
+});
+
+test("a blank To do input adds nothing", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList();
+  const m = await mount("hws-work", { view: "tasks" });
+  m.view.quick.type("   ", m.cx);
+  m.view.quick.submit(m.cx);
+  await settle();
+  assert.equal(adds(H).length, 0);
+});
+
+test("a failed add shows on the quiet line and gives the text back", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList();
+  H.hws["todo add"] = { fail: "the to-do file is damaged" };
+  const m = await mount("hws-work", { view: "tasks" });
+  m.view.quick.type("Buy milk", m.cx);
+  m.view.quick.submit(m.cx);
+  await settle();
+  assert.match(quietText(m), /the to-do file is damaged/);
+  assert.equal(m.view.quick.value(), "Buy milk");
+});
+
+test("a failed add leaves later typing alone", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList();
+  H.hws["todo add"] = { fail: "no" };
+  const m = await mount("hws-work", { view: "tasks" });
+  m.view.quick.type("First", m.cx);
+  m.view.quick.submit(m.cx);
+  m.view.quick.type("Second", m.cx);
+  await settle();
+  assert.equal(m.view.quick.value(), "Second");
+});
+
+// Empty board and cards
+
+test("an empty board says what it is for", async () => {
+  const H = world({ files: { "/w/s1/i.md": "" } });
+  H.hws["todo list"] = todoList();
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "board-hint")), /Send a card to an agent, or start the orchestrator/);
+  H.hws["todo list"] = todoList(todo("a1", "Fix login"));
+  await m.fireTimer(10000);
+  assert.equal(m.has("board-hint"), false);
+});
+
+test("a board that has not listed its to-dos shows no hint", async () => {
+  const H = world({ files: { "/w/s1/i.md": "" } });
+  H.hws["todo list"] = { fail: "the to-do file is damaged" };
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(m.has("board-hint"), false);
+});
+
+test("a card shows note in place of notes, with Hold and Worktree tags", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "With note", { notes: "Plain notes", note: "Blocked on review\nmore" }), todo("a2", "Without", { notes: "Plain notes", hold: true, worktree: true }));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "todo-a1")), /With note \| Blocked on review$/);
+  assert.equal(m.has("tags-a1"), false);
+  assert.equal(textOf(findNode(m, "tags-a2")), "Hold | Worktree");
+  assert.match(textOf(findNode(m, "todo-a2")), /Without \| Plain notes/);
+});
+
+test("Done keeps its N more row with to-dos in it", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(...Array.from({ length: 10 }, (_, i) => todo(`d${i}`, `Done ${i}`, { column: "done" })));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(m.text(), /2 more/);
+  assert.equal(m.has("todo-d9"), false);
+  await m.click("done-more");
+  assert.equal(m.has("todo-d9"), true);
+});
+
+// Orchestrator
+
+const ORCH_ARGS = ["orchestrator", "start", "--space", "spc1", "--folder", "/w/proj", "--json"];
+const orchCalls = (H) => hwsCalls(H).filter((c) => c.args[0] === "orchestrator");
+const orchWorld = (orchestrator, extra = {}) => {
+  const H = world({ panes: [{ pane: "p-t1", terminal: "t1", tab: "tb1", cwd: "/w/proj" }], ...extra });
+  H.hws["todo list"] = { items: [], orchestrator };
+  return H;
+};
+
+test("orchestratorFolder prefers the first agent's folder, then the space's", () => {
+  const spaces = [{ ...SPACES[0], folder: "/space/dir" }];
+  assert.equal(orchestratorFolder({ agents: [agent("t1")], panes: [{ pane: "p-t1", cwd: "/w/proj" }], terminals: [], spaces }, "spc1"), "/w/proj");
+  assert.equal(orchestratorFolder({ agents: [], panes: [], terminals: [], spaces }, "spc1"), "/space/dir");
+  assert.equal(orchestratorFolder({ agents: [], panes: [], terminals: [], spaces: [{ ...SPACES[0], folder: "" }] }, "spc1"), null);
+  assert.equal(orchestratorFolder({ agents: [], panes: [], terminals: [], spaces }, "gone"), null);
+});
+
+test("orchestratorFolder reads a flipped agent's folder from its terminal", () => {
+  const lists = {
+    agents: [],
+    panes: [{ pane: "chat1", mod: "hws-chat", tab: "tb1" }],
+    terminals: [{ address: "t5", state: "live", labels: { "herdr.chat": "chat1" }, foreground: { cwd: "/w/flip" } }],
+    spaces: SPACES,
+  };
+  assert.equal(orchestratorFolder(lists, "spc1"), "/w/flip");
+});
+
+test("locateTerminal finds a pane, then a flipped agent's chat pane, then nothing", () => {
+  const panes = [{ pane: "p9", terminal: "t9", tab: "tb2" }, { pane: "chat1", terminal: null, mod: "hws-chat", tab: "tb1" }];
+  const terminals = [{ address: "t5", state: "live", labels: { "herdr.chat": "chat1" } }, { address: "t6", state: "exited", labels: { "herdr.chat": "chat1" } }];
+  assert.deepEqual(locateTerminal({ panes, terminals }, "t9"), { tab: "tb2", chatPane: null });
+  assert.deepEqual(locateTerminal({ panes, terminals }, "t5"), { tab: "tb1", chatPane: "chat1" });
+  assert.equal(locateTerminal({ panes, terminals }, "t6"), null);
+  assert.equal(locateTerminal({ panes, terminals }, "t7"), null);
+});
+
+test("with none running the header starts one and hides Go to", async () => {
+  const H = orchWorld(null);
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "orchestrator")), /Start orchestrator/);
+  assert.equal(m.has("orchestrator-go"), false);
+  const lists = todoLists(H);
+  await m.click("orchestrator");
+  assert.deepEqual(orchCalls(H).at(-1).args, ORCH_ARGS);
+  assert.equal(todoLists(H), lists + 1);
+});
+
+test("a recorded orchestrator that is no longer live counts as none running", async () => {
+  orchWorld({ terminal: "t9", live: false });
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "orchestrator")), /Start orchestrator/);
+  assert.equal(m.has("orchestrator-go"), false);
+});
+
+test("while one runs the header sends new cards and offers Go to", async () => {
+  const H = orchWorld({ terminal: "t1", live: true });
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "orchestrator")), /Send new cards/);
+  await m.click("orchestrator");
+  assert.deepEqual(orchCalls(H).at(-1).args, ORCH_ARGS);
+  await m.click("orchestrator-go");
+  assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { terminal: "t1" } });
+});
+
+test("the header waits for the first list before offering the orchestrator", async () => {
+  const H = world();
+  H.hws["todo list"] = { fail: "the to-do file is damaged" };
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(m.has("orchestrator"), false);
+});
+
+test("the orchestrator's folder falls back to the space's folder", async () => {
+  const H = orchWorld(null, { agents: [], spaces: [{ ...SPACES[0], folder: "/space/dir" }] });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator");
+  assert.deepEqual(orchCalls(H).at(-1).args, ["orchestrator", "start", "--space", "spc1", "--folder", "/space/dir", "--json"]);
+});
+
+test("the control cannot run twice at once", async () => {
+  let finish;
+  const H = orchWorld(null);
+  const realExec = H.exec;
+  H.exec = (command, args) => (args?.[0] === "orchestrator" ? new Promise((resolve) => { finish = () => resolve({ code: 0, stdout: "{}", stderr: "" }); }) : realExec(command, args));
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator");
+  assert.equal(m.clickable("orchestrator"), false);
+  finish();
+  await settle();
+  assert.equal(m.clickable("orchestrator"), true);
+});
+
+test("an orchestrator failure goes on the quiet line", async () => {
+  const H = orchWorld(null);
+  H.hws["orchestrator start"] = { fail: "claude is not installed" };
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator");
+  assert.match(quietText(m), /claude is not installed/);
+  assert.equal(m.clickable("orchestrator"), true);
+});
+
+test("Go to reaches a terminal in another tab", async () => {
+  const H = orchWorld({ terminal: "t9", live: true }, { panes: [{ pane: "p9", terminal: "t9", tab: "tb2" }] });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-go");
+  assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb2" } }, { name: "pane.focus", args: { terminal: "t9" } }]);
+});
+
+test("Go to reaches a flipped orchestrator through its chat pane", async () => {
+  const H = orchWorld({ terminal: "t9", live: true }, {
+    panes: [{ pane: "chat9", terminal: null, mod: "hws-chat", tab: "tb2" }],
+    terminals: [{ address: "t9", state: "live", labels: { "herdr.chat": "chat9" } }],
+  });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-go");
+  assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb2" } }, { name: "pane.focus", args: { pane: "chat9" } }]);
+});
+
+test("Go to falls back to the terminal when it has no pane", async () => {
+  const H = orchWorld({ terminal: "t9", live: true }, { panes: [] });
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("orchestrator-go");
+  assert.deepEqual(H.runs, [{ name: "pane.focus", args: { terminal: "t9" } }]);
 });
 
 // Dragging
@@ -698,6 +942,171 @@ test("Esc closes the dialog and Tab moves between fields", async () => {
   assert.deepEqual(H.closed, ["ov9"]);
 });
 
+test("the toggles send --hold and --worktree on a new to-do", async () => {
+  const H = dialogWorld();
+  const m = await form(H);
+  m.view.form.title.type("Buy milk", m.cx);
+  await m.click("toggle-hold");
+  await m.click("toggle-worktree");
+  assert.match(m.text(), /✓ Keep for me \| ✓ Use a worktree/);
+  await m.click("save-todo");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "add", "--title=Buy milk", "--hold", "--worktree", "--space", "spc1", "--json"]);
+});
+
+test("a new to-do with the toggles off sends neither flag", async () => {
+  const H = dialogWorld();
+  const m = await form(H);
+  m.view.form.title.type("Buy milk", m.cx);
+  await m.click("toggle-hold");
+  await m.click("toggle-hold");
+  await m.click("save-todo");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "add", "--title=Buy milk", "--space", "spc1", "--json"]);
+});
+
+test("editing sends only the toggles that changed, as true or false", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { hold: true, worktree: false }));
+  const m = await form(H, "a1");
+  assert.match(m.text(), /✓ Keep for me \| Use a worktree/);
+  await m.click("toggle-hold");
+  await m.click("toggle-worktree");
+  await m.click("save-todo");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "edit", "--id", "a1", "--hold=false", "--worktree=true", "--space", "spc1", "--json"]);
+
+  const H2 = dialogWorld(todo("a1", "Fix login", { hold: true }));
+  const m2 = await form(H2, "a1");
+  await m2.click("toggle-worktree");
+  await m2.click("save-todo");
+  assert.deepEqual(hwsCalls(H2).at(-1).args, ["todo", "edit", "--id", "a1", "--worktree=true", "--space", "spc1", "--json"]);
+});
+
+test("toggled flags are saved before Send to", async () => {
+  const H = dialogWorld(todo("a1", "Fix login"));
+  const m = await form(H, "a1");
+  await m.click("toggle-hold");
+  await m.click("send-t1");
+  assert.deepEqual(hwsCalls(H).slice(1).map((c) => c.args[1]), ["edit", "send"]);
+});
+
+const WAITING_CARD = { column: "waiting", note: "Which host?", terminal: "t1" };
+const REPLY_PLACEHOLDER = "Answer the worker";
+
+test("a waiting card shows its note and Reply above the fields and focuses the reply", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
+  const m = await form(H, "a1");
+  assert.match(m.text(), /Latest from the worker \| Which host\? \| Reply .*Title .*Notes .*Column .*Keep for me .*Send to/);
+  assert.equal(H.focusCalls.at(-1), REPLY_PLACEHOLDER);
+});
+
+test("Tab moves from the reply through the title and notes and back", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
+  const m = await form(H, "a1");
+  H.focusCalls.length = 0;
+  for (const field of ["reply", "title", "notes"]) {
+    m.view.form.focusedField = field;
+    await m.key("tab");
+  }
+  assert.deepEqual(H.focusCalls, ["What needs doing?", "Add details for the agent (optional)", REPLY_PLACEHOLDER]);
+});
+
+test("a waiting card with no note still offers Reply", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", { column: "waiting", terminal: "t1" }));
+  const m = await form(H, "a1");
+  assert.equal(m.has("reply-todo"), true);
+  assert.equal(m.has("todo-note"), false);
+});
+
+test("a card in another column has no Reply", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { note: "Working" }));
+  const m = await form(H, "a1");
+  assert.equal(m.has("reply-todo"), false);
+  assert.equal(/Latest from the worker/.test(m.text()), false);
+});
+
+test("Reply runs hws todo reply, keeps a leading dash and closes", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
+  const m = await form(H, "a1");
+  m.view.form.replyBox.type(" -the second one ", m.cx);
+  await m.click("reply-todo");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "reply", "--id", "a1", "--text=-the second one", "--space", "spc1", "--json"]);
+  assert.deepEqual(H.closed, ["ov9"]);
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.todos.changed", value: 1 });
+});
+
+test("Enter in the Reply box sends it", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
+  const m = await form(H, "a1");
+  m.view.form.replyBox.type("The second one", m.cx);
+  m.view.form.replyBox.submit(m.cx);
+  await settle();
+  assert.equal(hwsCalls(H).at(-1).args[1], "reply");
+});
+
+test("Reply saves edits first because the dialog closes", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
+  const m = await form(H, "a1");
+  m.view.form.title.type("Pick a good host", m.cx);
+  m.view.form.replyBox.type("Yes", m.cx);
+  await m.click("reply-todo");
+  assert.deepEqual(hwsCalls(H).slice(1).map((c) => c.args[1]), ["edit", "reply"]);
+});
+
+test("an empty Reply asks for text and runs nothing", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
+  const m = await form(H, "a1");
+  await m.click("reply-todo");
+  assert.match(m.text(), /Write a reply first/);
+  assert.deepEqual(hwsCalls(H).map((c) => c.args[1]), ["list"]);
+});
+
+test("a failed reply shows in the dialog and keeps it open", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
+  H.hws["todo reply"] = { fail: "terminal t1 has ended" };
+  const m = await form(H, "a1");
+  m.view.form.replyBox.type("Yes", m.cx);
+  await m.click("reply-todo");
+  assert.match(m.text(), /terminal t1 has ended/);
+  assert.deepEqual(H.closed, []);
+});
+
+// Add several dialog
+
+const several = (H) => mount("hws-work", { view: "add-several", space: "spc1", overlay: "ov7" }, H);
+
+test("Add several sends the lines as --titles and closes", async () => {
+  const H = dialogWorld();
+  H.hws["todo add"] = { items: [] };
+  const m = await several(H);
+  assert.match(m.text(), /Add several \| Each line becomes a card/);
+  m.view.form.lines.type("\n-first\n\nsecond\n", m.cx);
+  await m.click("add-several-save");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "add", "--titles=-first\n\nsecond", "--space", "spc1", "--json"]);
+  assert.deepEqual(H.closed, ["ov7"]);
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.todos.changed", value: 1 });
+  assert.equal(m.timers.filter((x) => x.repeating).length, 0);
+});
+
+test("Add several with nothing typed asks for a line and runs nothing", async () => {
+  const H = dialogWorld();
+  const m = await several(H);
+  m.view.form.lines.type("  \n ", m.cx);
+  await m.click("add-several-save");
+  assert.match(m.text(), /Write at least one line/);
+  assert.equal(H.calls.length, 0);
+  assert.deepEqual(H.closed, []);
+});
+
+test("Add several shows a failure and stays open, and Esc closes it", async () => {
+  const H = dialogWorld();
+  H.hws["todo add"] = { fail: "the to-do file is damaged" };
+  const m = await several(H);
+  m.view.form.lines.type("One", m.cx);
+  await m.click("add-several-save");
+  assert.match(m.text(), /the to-do file is damaged/);
+  assert.deepEqual(H.closed, []);
+  await m.key("escape");
+  assert.deepEqual(H.closed, ["ov7"]);
+});
+
 test("Outputs says none yet when no agent has any", async () => {
   world();
   const m = await mount("hws-work", { view: "outputs" });
@@ -803,6 +1212,10 @@ test("a .feedback change reloads the panel", async () => {
 });
 
 // Source checks
+
+test("nothing in hws-work resizes the layout", () => {
+  for (const file of ["main.js", "todo.js", "open.js", "data.js"]) assert.equal(read(`../hws-work/${file}`).includes("layout.resize"), false, file);
+});
 
 test("hws-work uses only methods and imports Herdr provides", () => {
   const kit = readFileSync(`${process.env.HOME}/.config/herdr-app/gpui-kit.d.ts`, "utf8");

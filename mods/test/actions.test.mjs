@@ -9,6 +9,7 @@ import { setup, mount, hwsCalls, settle, usedMethods } from "./harness.mjs";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const OK = { code: 0, stdout: "", stderr: "" };
+const AGENT_PANE = { pane: "p1", terminal: "t1", tab: "tb1", focused: true };
 const CANCELLED = { code: 1, stdout: "", stderr: "execution error: User canceled. (-128)" };
 const BROKEN = { code: 1, stdout: "", stderr: "execution error: no display (-1)" };
 
@@ -152,19 +153,38 @@ test("Attach file asks the chat pane to pick files and closes the menu", async (
   assert.deepEqual(H.closed, ["ov1"]);
 });
 
-for (const view of ["tasks", "outputs"]) {
-  test(`${view} selects its panel view and shows the panel`, async () => {
-    const H = world();
-    const m = await mount("hws-actions", TERMINAL);
-    await m.click(view);
+test("outputs selects its panel view and shows the panel", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("outputs");
 
-    assert.deepEqual(H.runs, [
-      { name: "layout.select", args: { stack: "panel-body", child: view } },
-      { name: "layout.show", args: { id: "panel" } },
-    ]);
-    assert.deepEqual(H.closed, ["ov1"]);
-  });
-}
+  assert.deepEqual(H.runs, [
+    { name: "layout.select", args: { stack: "panel-body", child: "outputs" } },
+    { name: "layout.show", args: { id: "panel" } },
+  ]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+const SPACE = (tabs) => [{ id: "spc1", active: true, machine: null, tabs }];
+
+test("Tasks opens a Board tab when the active space has none", async () => {
+  const H = world({ spaces: SPACE([{ id: "tb1", name: "1", active: true }]), panes: [AGENT_PANE] });
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("tasks");
+
+  assert.deepEqual(H.runs, [{ name: "tab.new", args: { name: "Board", mod: "hws-work", props: { view: "tasks" } } }]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("Tasks selects the space's Board tab when it has one", async () => {
+  const tabs = [{ id: "tb1", name: "1", active: true }, { id: "tb9", name: "Board", active: false }];
+  const H = world({ spaces: SPACE(tabs), panes: [AGENT_PANE, { pane: "pb", terminal: null, tab: "tb9", mod: "hws-work", title: "Work" }] });
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("tasks");
+
+  assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb9" } }]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
 
 test("Up, Down and Enter move through the rows and run the selected one", async () => {
   const H = world();

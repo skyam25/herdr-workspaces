@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -35,6 +35,9 @@ test('todo add writes the contract shape to the space file', (t) => {
     notes: 'Start with the form',
     column: 'todo',
     terminal: null,
+    hold: false,
+    worktree: false,
+    note: '',
     archived: false,
     createdAt: item.createdAt,
     updatedAt: item.createdAt,
@@ -51,7 +54,7 @@ test('todo add needs a title that is not blank', (t) => {
 
 test('todo list prints unarchived items, newest updatedAt first', (t) => {
   const box = sandbox(t);
-  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [] });
+  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null });
 
   const first = add(box, 'first');
   const second = add(box, 'second');
@@ -90,7 +93,7 @@ test('todo move changes the column and refuses a bad one', (t) => {
 
   assert.equal(box.json(['todo', 'move', '--id', item.id, '--column', 'done', '--space', 'sp1']).column, 'done');
 
-  const bad = box.hws(['todo', 'move', '--id', item.id, '--column', 'waiting', '--space', 'sp1']);
+  const bad = box.hws(['todo', 'move', '--id', item.id, '--column', 'later', '--space', 'sp1']);
   assert.equal(bad.code, 2);
   assert.match(bad.stderr, /--column must be/);
   assert.equal(readTodos(box).items[0].column, 'done');
@@ -285,5 +288,317 @@ test('surface open refuses a remote terminal before any Herdr call', (t) => {
 test('hws --help lists the to-do commands', (t) => {
   const box = sandbox(t);
   const { stdout } = box.hws(['--help']);
-  for (const command of ['list', 'add', 'edit', 'move', 'send', 'archive']) assert.match(stdout, new RegExp(`todo ${command}`));
+  for (const command of ['list', 'add', 'edit', 'move', 'note', 'next', 'claim', 'send', 'reply', 'archive']) {
+    assert.match(stdout, new RegExp(`todo ${command}`));
+  }
+});
+
+function todoJson(box, ...args) {
+  return box.json(['todo', ...args, '--space', 'sp1']);
+}
+
+function failure(box, ...args) {
+  return box.hws(['todo', ...args, '--space', 'sp1']);
+}
+
+function writeLegacyItem(box) {
+  const item = { id: 'told01', title: 'legacy', notes: '', column: 'todo', terminal: null, archived: false, createdAt: 1, updatedAt: 1 };
+  mkdirSync(join(box.root, 'todos'), { recursive: true });
+  writeFileSync(todoFile(box), JSON.stringify({ version: 1, space: 'sp1', items: [item] }));
+  return item;
+}
+
+function setCreatedAt(box, times) {
+  const file = readTodos(box);
+  for (const item of file.items) item.createdAt = times[item.id];
+  writeFileSync(todoFile(box), JSON.stringify(file));
+}
+
+test('todo add sets hold and worktree', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task', '--hold', '--worktree');
+  assert.equal(item.hold, true);
+  assert.equal(item.worktree, true);
+  assert.deepEqual(readTodos(box).items, [item]);
+});
+
+test('todo add --titles adds a card per line and skips blank lines', (t) => {
+  const box = sandbox(t);
+
+  const { items } = todoJson(box, 'add', '--titles', 'one\n\n   \n  two  \r\nthree\n');
+
+  assert.deepEqual(items.map((item) => item.title), ['one', 'two', 'three']);
+  assert.equal(new Set(items.map((item) => item.id)).size, 3);
+  assert.deepEqual(readTodos(box).items, items);
+});
+
+test('todo add --titles refuses all blank lines and other card fields', (t) => {
+  const box = sandbox(t);
+  for (const args of [
+    ['--titles', ' \n\n'],
+    ['--titles', ''],
+    ['--titles', 'a', '--title', 'b'],
+    ['--titles', 'a', '--title', ''],
+    ['--titles', 'a', '--notes', 'n'],
+    ['--titles', 'a', '--hold'],
+    ['--titles', 'a', '--worktree'],
+  ]) {
+    assert.equal(failure(box, 'add', ...args).code, 2, args.join(' '));
+  }
+  assert.equal(existsSync(todoFile(box)), false);
+});
+
+test('todo edit sets and clears hold and worktree and refuses other values', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+
+  const held = todoJson(box, 'edit', '--id', item.id, '--hold', 'true', '--worktree', 'true');
+  assert.equal(held.hold, true);
+  assert.equal(held.worktree, true);
+
+  const released = todoJson(box, 'edit', '--id', item.id, '--hold', 'false');
+  assert.equal(released.hold, false);
+  assert.equal(released.worktree, true);
+
+  assert.equal(failure(box, 'edit', '--id', item.id, '--hold', 'yes').code, 2);
+  assert.equal(failure(box, 'edit', '--id', item.id, '--worktree', '').code, 2);
+  assert.equal(readTodos(box).items[0].hold, false);
+});
+
+test('todo move reaches waiting and sets the note only when given', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+
+  const waiting = todoJson(box, 'move', '--id', item.id, '--column', 'waiting', '--note', 'Which branch?');
+  assert.equal(waiting.column, 'waiting');
+  assert.equal(waiting.note, 'Which branch?');
+
+  assert.equal(todoJson(box, 'move', '--id', item.id, '--column', 'waiting').note, 'Which branch?');
+  assert.equal(todoJson(box, 'move', '--id', item.id, '--column', 'waiting', '--note', '').note, '');
+});
+
+test('leaving waiting by any route but reply keeps the note', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+  const wait = () => todoJson(box, 'move', '--id', item.id, '--column', 'waiting', '--note', 'Need input');
+
+  wait();
+  assert.equal(todoJson(box, 'move', '--id', item.id, '--column', 'doing').note, 'Need input');
+
+  wait();
+  assert.equal(todoJson(box, 'send', '--id', item.id, '--terminal', 't5').note, 'Need input');
+
+  wait();
+  todoJson(box, 'move', '--id', item.id, '--column', 'todo');
+  assert.equal(todoJson(box, 'claim', '--id', item.id, '--terminal', 't5').note, 'Need input');
+});
+
+test('todo note sets the note and leaves the column alone', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+
+  const noted = todoJson(box, 'note', '--id', item.id, '--text', 'Half done');
+
+  assert.equal(noted.note, 'Half done');
+  assert.equal(noted.column, 'todo');
+  assert.equal(failure(box, 'note', '--id', item.id).code, 2);
+  assert.equal(failure(box, 'note', '--id', item.id, '--text', '  ').code, 2);
+  assert.equal(readTodos(box).items[0].note, 'Half done');
+});
+
+test('todo next claims the oldest ready card and skips held and other columns', (t) => {
+  const box = sandbox(t);
+  const held = add(box, 'held', '--hold');
+  const doing = add(box, 'doing');
+  const archived = add(box, 'archived');
+  const newer = add(box, 'newer');
+  const older = add(box, 'older');
+  todoJson(box, 'move', '--id', doing.id, '--column', 'doing');
+  todoJson(box, 'archive', '--id', archived.id);
+  setCreatedAt(box, { [held.id]: 1, [doing.id]: 2, [archived.id]: 3, [newer.id]: 20, [older.id]: 10 });
+
+  const first = todoJson(box, 'next', '--terminal', 't5');
+  assert.equal(first.id, older.id);
+  assert.equal(first.column, 'doing');
+  assert.equal(first.terminal, 't5');
+  assert.deepEqual(readTodos(box).items.find((item) => item.id === older.id), first);
+
+  assert.equal(todoJson(box, 'next', '--terminal', 't6').id, newer.id);
+  assert.equal(todoJson(box, 'next', '--terminal', 't7'), null);
+  assert.equal(readTodos(box).items.find((item) => item.id === held.id).column, 'todo');
+});
+
+test('cards added together are taken in line order', (t) => {
+  const box = sandbox(t);
+  todoJson(box, 'add', '--titles', 'one\ntwo\nthree');
+  const titles = [1, 2, 3].map(() => todoJson(box, 'next', '--terminal', 't5').title);
+  assert.deepEqual(titles, ['one', 'two', 'three']);
+});
+
+test('todo next with nothing to take writes nothing and needs a terminal', (t) => {
+  const box = sandbox(t);
+  assert.equal(todoJson(box, 'next', '--terminal', 't5'), null);
+  assert.equal(existsSync(todoFile(box)), false);
+  assert.equal(failure(box, 'next').code, 2);
+});
+
+test('todo claim takes a To do card and refuses held, moved and archived cards', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+  const held = add(box, 'held', '--hold');
+  const archived = add(box, 'archived');
+  todoJson(box, 'archive', '--id', archived.id);
+
+  const claimed = todoJson(box, 'claim', '--id', item.id, '--terminal', 't5');
+  assert.equal(claimed.column, 'doing');
+  assert.equal(claimed.terminal, 't5');
+
+  const before = readFileSync(todoFile(box), 'utf8');
+  const taken = failure(box, 'claim', '--id', item.id, '--terminal', 't6');
+  assert.equal(taken.code, 1);
+  assert.match(taken.stderr, /is not in To do/);
+  const refused = failure(box, 'claim', '--id', held.id, '--terminal', 't6');
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /is held/);
+  assert.match(failure(box, 'claim', '--id', archived.id, '--terminal', 't6').stderr, /is archived/);
+  assert.match(failure(box, 'claim', '--id', 'tnope', '--terminal', 't6').stderr, /no to-do tnope/);
+  assert.equal(readFileSync(todoFile(box), 'utf8'), before);
+});
+
+test('concurrent next calls never take one card twice', async (t) => {
+  const box = sandbox(t);
+  const cards = 6;
+  const workers = 10;
+  todoJson(box, 'add', '--titles', Array.from({ length: cards }, (_, index) => `task ${index}`).join('\n'));
+
+  const results = await Promise.all(
+    Array.from({ length: workers }, (_, index) => box.hwsAsync(['todo', 'next', '--terminal', `w${index}`, '--space', 'sp1', '--json'])),
+  );
+
+  assert.deepEqual(results.map((result) => result.code), Array(workers).fill(0));
+  const taken = results.map((result) => JSON.parse(result.stdout)).filter(Boolean);
+  assert.equal(taken.length, cards);
+  assert.equal(new Set(taken.map((item) => item.id)).size, cards);
+  for (const item of readTodos(box).items) {
+    assert.equal(item.terminal, taken.find((entry) => entry.id === item.id).terminal);
+  }
+  assert.deepEqual(readdirSync(join(box.root, 'locks')), []);
+});
+
+test('concurrent claims of one card have one winner', async (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+  const workers = 8;
+
+  const results = await Promise.all(
+    Array.from({ length: workers }, (_, index) => box.hwsAsync(['todo', 'claim', '--id', item.id, '--terminal', `w${index}`, '--space', 'sp1', '--json'])),
+  );
+
+  const winners = results.filter((result) => result.code === 0);
+  assert.equal(winners.length, 1);
+  assert.deepEqual(results.filter((result) => result.code !== 0).map((result) => result.code), Array(workers - 1).fill(1));
+  assert.equal(readTodos(box).items[0].terminal, JSON.parse(winners[0].stdout).terminal);
+});
+
+test('todo reply pastes into the card terminal, clears the note and moves to doing', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+  todoJson(box, 'send', '--id', item.id, '--terminal', 't5');
+  todoJson(box, 'move', '--id', item.id, '--column', 'waiting', '--note', 'Which branch?');
+  box.clearCalls();
+
+  const replied = todoJson(box, 'reply', '--id', item.id, '--text', 'Use main');
+
+  assert.deepEqual(box.actions(), [['hc', 'send', 't5', 'Use main']]);
+  assert.equal(replied.note, '');
+  assert.equal(replied.column, 'doing');
+  assert.deepEqual(readTodos(box).items, [replied]);
+});
+
+test('a reply that cannot reach a live terminal leaves the card unchanged', (t) => {
+  const box = sandbox(t);
+  const noTerminal = add(box, 'no terminal');
+  const item = add(box, 'task');
+  todoJson(box, 'send', '--id', item.id, '--terminal', 'dead');
+  todoJson(box, 'move', '--id', item.id, '--column', 'waiting', '--note', 'Stuck');
+  const before = readFileSync(todoFile(box), 'utf8');
+  box.setState({ hc: { dead: { exit_code: 1 } } });
+  box.clearCalls();
+
+  const none = failure(box, 'reply', '--id', noTerminal.id, '--text', 'hello');
+  assert.equal(none.code, 1);
+  assert.match(none.stderr, /has no terminal/);
+
+  const dead = failure(box, 'reply', '--id', item.id, '--text', 'hello');
+  assert.equal(dead.code, 1);
+  assert.match(dead.stderr, /terminal dead is not live/);
+  assert.deepEqual(box.actions(), []);
+
+  box.setState({ hc: {}, sendFails: true });
+  const blocked = failure(box, 'reply', '--id', item.id, '--text', 'hello');
+  assert.equal(blocked.code, 1);
+  assert.match(blocked.stderr, /terminal is blocked/);
+
+  assert.equal(failure(box, 'reply', '--id', item.id, '--text', '  ').code, 2);
+  assert.equal(readFileSync(todoFile(box), 'utf8'), before);
+});
+
+test('text flags take values that begin with a dash through the equals form', (t) => {
+  const box = sandbox(t);
+  const item = box.json(['todo', 'add', '--title=-v fails', '--notes=--see below', '--space', 'sp1']);
+  assert.equal(item.title, '-v fails');
+  assert.equal(item.notes, '--see below');
+
+  const bulk = box.json(['todo', 'add', '--titles=-a\n--b', '--space', 'sp1']);
+  assert.deepEqual(bulk.items.map((entry) => entry.title), ['-a', '--b']);
+
+  assert.equal(box.json(['todo', 'edit', '--id', item.id, '--title=--json', '--space', 'sp1']).title, '--json');
+  assert.equal(box.json(['todo', 'move', '--id', item.id, '--column', 'waiting', '--note=-why?', '--space', 'sp1']).note, '-why?');
+  assert.equal(box.json(['todo', 'note', '--id', item.id, '--text=-later', '--space', 'sp1']).note, '-later');
+
+  todoJson(box, 'send', '--id', item.id, '--terminal', 't5');
+  box.clearCalls();
+  box.json(['todo', 'reply', '--id', item.id, '--text=-y', '--space', 'sp1']);
+  assert.deepEqual(box.actions(), [['hc', 'send', 't5', '-y']]);
+});
+
+test('older items read the new fields as false and empty', (t) => {
+  const box = sandbox(t);
+  const legacy = writeLegacyItem(box);
+
+  assert.deepEqual(list(box), [{ ...legacy, hold: false, worktree: false, note: '' }]);
+
+  const moved = todoJson(box, 'move', '--id', legacy.id, '--column', 'doing');
+  assert.equal(moved.hold, false);
+  assert.equal(moved.worktree, false);
+  assert.equal(moved.note, '');
+  assert.deepEqual(readTodos(box).items, [moved]);
+});
+
+test('todo next claims an older item', (t) => {
+  const box = sandbox(t);
+  const legacy = writeLegacyItem(box);
+  assert.equal(todoJson(box, 'next', '--terminal', 't5').id, legacy.id);
+});
+
+test('todo list prints the recorded orchestrator with its liveness', (t) => {
+  const box = sandbox(t);
+  add(box, 'task');
+  writeFileSync(todoFile(box), JSON.stringify({ ...readTodos(box), orchestrator: { terminal: 't9', startedAt: 1 } }));
+
+  assert.deepEqual(todoJson(box, 'list').orchestrator, { terminal: 't9', live: true });
+
+  box.setState({ hc: { t9: 'missing' } });
+  assert.deepEqual(todoJson(box, 'list').orchestrator, { terminal: 't9', live: false });
+});
+
+test('changing a card keeps the recorded orchestrator', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task');
+  const orchestrator = { terminal: 't9', startedAt: 1 };
+  writeFileSync(todoFile(box), JSON.stringify({ ...readTodos(box), orchestrator }));
+
+  todoJson(box, 'move', '--id', item.id, '--column', 'done');
+
+  assert.deepEqual(readTodos(box).orchestrator, orchestrator);
 });
