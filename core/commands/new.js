@@ -20,12 +20,13 @@ export function keptFields(flags) {
   return { name, folder, kind: keptKind(flags.kind) };
 }
 
-function createWorkspace({ name, kind, folder, instructions, tabNames, argv }) {
-  const first = act('space.new', { name, folder, argv });
-  act('tab.rename', { id: first.tab, name: tabNames[0] });
-  const opened = [{ ...first, name: tabNames[0] }];
-  for (const tabName of tabNames.slice(1)) {
-    opened.push({ ...act('tab.new', { name: tabName, space: first.space, folder, argv }), name: tabName });
+export function createWorkspace({ name, kind, folder, instructions, tabs }) {
+  const [firstTab, ...otherTabs] = tabs;
+  const first = act('space.new', { name, folder, argv: firstTab.argv });
+  act('tab.rename', { id: first.tab, name: firstTab.name });
+  const opened = [{ ...first, name: firstTab.name }];
+  for (const tab of otherTabs) {
+    opened.push({ ...act('tab.new', { name: tab.name, space: first.space, folder, argv: tab.argv }), name: tab.name });
   }
   return createManifest({
     id: first.space,
@@ -56,7 +57,7 @@ export function newWorkspace(flags) {
     kind,
     folder,
     instructions: flags.instructions,
-    tabNames: parseTabNames(flags.tabs),
+    tabs: parseTabNames(flags.tabs).map((tabName) => ({ name: tabName })),
   });
   rememberParent(folder);
   return { data: manifest, text: `created ${kind} workspace ${name} (${manifest.id})` };
@@ -69,8 +70,7 @@ export function newThrowaway(flags) {
     name,
     kind: 'throwaway',
     folder: parentFolder(),
-    tabNames: ['Claude'],
-    argv: ['claude'],
+    tabs: [{ name: 'Claude', argv: ['claude'] }],
   });
   return { data: manifest, text: `created throwaway ${name} (${manifest.id})` };
 }

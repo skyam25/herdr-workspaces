@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,7 @@ export function sandbox(t) {
     HWS_HC: join(FAKES, 'fake-hc.cjs'),
     HWS_TRASH: join(FAKES, 'fake-trash.cjs'),
     HWS_OSASCRIPT: join(FAKES, 'fake-osascript.cjs'),
+    CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
     FAKE_STATE: statePath,
     FAKE_LOG: logPath,
     FAKE_TRASH_DIR: trashDir,
@@ -115,6 +116,36 @@ export function sandbox(t) {
       const manifest = box.json(['new', 'throwaway', '--name', name]);
       box.clearCalls();
       return manifest;
+    },
+
+    // Moves a manifest's creation time into the past.
+    age(id, hours) {
+      const path = join(root, 'workspaces', id, 'workspace.json');
+      const manifest = JSON.parse(readFileSync(path, 'utf8'));
+      writeFileSync(path, JSON.stringify({ ...manifest, createdAt: Date.now() - hours * 3600_000 }));
+    },
+
+    // Registers a session and writes its transcript, last changed `hours` ago.
+    transcript(manifest, sessionId, { title = 'Fix the login page', prompt = 'why does login fail', users = [], hours = 0, terminal = manifest.terminals[0].terminal } = {}) {
+      box.json(['register', '--terminal', terminal, '--session', sessionId]);
+      const project = join(homeDir, '.claude', 'projects', manifest.folder.replace(/[^a-zA-Z0-9]/g, '-'));
+      mkdirSync(project, { recursive: true });
+      const path = join(project, `${sessionId}.jsonl`);
+      const lines = [...users, { type: 'ai-title', aiTitle: title, sessionId }, { type: 'last-prompt', lastPrompt: prompt }];
+      writeFileSync(path, `not json\n${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
+      const when = new Date(Date.now() - hours * 3600_000);
+      utimesSync(path, when, when);
+      box.clearCalls();
+      return path;
+    },
+
+    // Changes every listed terminal of one space.
+    setTerminals(id, change) {
+      const spaces = box.state().spaces.map((item) => {
+        if (item.id !== id) return item;
+        return { ...item, tabs: item.tabs.map((one) => ({ ...one, terminals: one.terminals.map((record) => ({ ...record, ...change })) })) };
+      });
+      box.setState({ spaces });
     },
 
     // Opens a glued surface, finishes it with a bundle and returns the record.

@@ -25,14 +25,14 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
 | Topic | Decision |
 |---|---|
-| Starting work | The launcher offers New terminal, New workspace, Throwaway, New board and New note |
+| Starting work | The launcher offers New terminal, New workspace, Throwaway, Find throwaway, New board and New note |
 | Folders | Workspaces start in one parent folder. Nothing creates a folder per workspace |
 | Context rules | `CLAUDE.md` in the parent folder holds them. Claude Code already reads it |
 | Custom instructions | Each workspace has its own, and agents get them at session start |
 | Manifest | JSON that lives until the workspace closes. Artifacts outlive it |
 | Done | Delivers to the owning terminal with `hc send` and collapses the pane |
 | Standalone | Shows Open terminal and Copy link in place of Done |
-| Throwaway | Asks Keep or Trash on close only if something was made |
+| Throwaway | Asks Keep or Trash on close only if something was made. Closes itself after 24 idle hours and stays findable for 30 days |
 | Studio | Removed. New board and New note cover the need |
 | Rendering | Boards open in their own floating window. Notes and pages stay on Pixel in a pane. A native GPUI board was rejected as too costly |
 
@@ -51,6 +51,7 @@ Nothing below has been done with a real pointer or keyboard.
 - [ ] Press Open terminal and Copy link on a standalone surface.
 - [ ] Run Promote on a throwaway.
 - [ ] Reboot or kill a kept workspace's agents, then run `hws resume`.
+- [ ] Open Find throwaway, type a search, and reopen a row with the pointer and with Enter.
 
 Drawing lag decides whether Pixel stays. Herdr app reports itself as Ghostty, and nobody has measured whether it gets partial or full frames.
 

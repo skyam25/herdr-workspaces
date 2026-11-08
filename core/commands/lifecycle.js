@@ -1,14 +1,22 @@
 import { existsSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 
 import { relocateArtifact } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, findTerminal, isIdleShell, isTerminalAlive, killTerminal, listLive, requireLive, sendText, terminalInfo } from '../herdr.js';
+import { act, findTerminal, isIdleShell, isTerminalAlive, killTerminal, listLive, requireLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
-import { STANDALONE, keptArtifactDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
+import { STANDALONE, keptArtifactDir, keptThrowawayDir, manifestPath, stateRoot, workspaceDir } from '../paths.js';
 import { resolveWorkspace } from '../resolve.js';
+import { lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
 import { moveToTrash } from '../trash.js';
 import { KEPT_KINDS, keptFields, keptKind } from './new.js';
+
+const HOUR_MS = 60 * 60 * 1000;
+const THROWAWAY_IDLE_MS = 24 * HOUR_MS;
+const RETIRED_KEEP_MS = 30 * 24 * HOUR_MS;
+
+// `done` means an answer nobody has looked at yet, so it counts as in use.
+const QUIET_STATUSES = new Set([null, undefined, '', 'idle']);
 
 function containsFile(dir) {
   if (!existsSync(dir)) return false;
@@ -29,6 +37,8 @@ function removeIfEmpty(dir) {
 // Removes a closed workspace's state. Surface drafts go to the Trash, and
 // throwaway artifacts left by a space closed outside hws stay on disk.
 function retireWorkspace(id) {
+  const manifest = readManifest(id);
+  if (manifest) recordRetired(manifest);
   const surfaces = join(workspaceDir(id), 'surfaces');
   if (containsFile(surfaces)) moveToTrash([surfaces]);
   else rmSync(surfaces, { recursive: true, force: true });
@@ -48,13 +58,77 @@ function dropClosedWindows() {
   }
 }
 
+function isQuietTerminal(record) {
+  if (!QUIET_STATUSES.has(record.status)) return false;
+  return record.app ? true : isIdleShell(terminalInfo(record.terminal));
+}
+
+// A flipped agent has no pane, so `herdr-app ls` leaves it out.
+function isQuietUnlisted(terminal) {
+  const info = terminalInfo(terminal);
+  return !info?.labels?.['herdr.chat'] || QUIET_STATUSES.has(info.status?.state);
+}
+
+function isInUse(manifest, space, live) {
+  if (manifest.surfaces.some((surface) => surface.host)) return true;
+  const listed = (space.tabs ?? []).flatMap((tab) => tab.terminals ?? []);
+  if (!listed.every(isQuietTerminal)) return true;
+  const unlisted = manifest.terminals.map((item) => item.terminal).filter((terminal) => !findTerminal(live, terminal));
+  return !unlisted.every(isQuietUnlisted);
+}
+
+// Skips everything when the selected space is unknown, so the space on screen is safe.
+function expireIdleThrowaways(manifests, live) {
+  const now = Date.now();
+  const idle = manifests.filter((manifest) => manifest.kind === 'throwaway' && now - lastActiveAt(manifest) >= THROWAWAY_IDLE_MS);
+  const selected = idle.length > 0 ? windowStatus()?.space : null;
+  if (!selected) return [];
+  const expired = [];
+  for (const manifest of idle) {
+    const space = live.spaces.find((item) => item.id === manifest.id);
+    if (!space || space.id === selected || isInUse(manifest, space, live)) continue;
+    try {
+      act('space.close', { id: manifest.id, confirmed: true });
+      retireWorkspace(manifest.id);
+      expired.push(manifest.id);
+    } catch {
+      // The manifest stays and the next prune retries it.
+    }
+  }
+  return expired;
+}
+
+// An artifact outside the state folder is one the user chose to keep.
+function trashRetiredArtifacts(record) {
+  const store = join(stateRoot(), 'workspaces') + sep;
+  const paths = record.artifacts.map((artifact) => artifact.path).filter((path) => path.startsWith(store));
+  moveToTrash(paths);
+  for (const path of paths) {
+    removeIfEmpty(dirname(path));
+    removeIfEmpty(dirname(dirname(path)));
+  }
+}
+
+function purgeOldRetired() {
+  const cutoff = Date.now() - RETIRED_KEEP_MS;
+  for (const record of listRetired()) {
+    if (record.closedAt > cutoff) continue;
+    try {
+      trashRetiredArtifacts(record);
+      removeRetired(record.id);
+    } catch {
+      // The record stays and the next prune retries it.
+    }
+  }
+}
+
 // Manifests are read before the window, so a workspace created during the
 // listing is never pruned. An empty window counts as no answer.
 export function prune() {
   const manifests = listManifests();
   const live = listLive();
   if (!live || live.spaces.length === 0) {
-    return { data: { pruned: [], skipped: true }, text: 'the Herdr window did not answer, so nothing changed' };
+    return { data: { pruned: [], expired: [], skipped: true }, text: 'the Herdr window did not answer, so nothing changed' };
   }
   dropClosedWindows();
   const liveIds = new Set(live.spaces.map((space) => space.id));
@@ -68,7 +142,9 @@ export function prune() {
       // The manifest stays and the next prune retries it.
     }
   }
-  return { data: { pruned, skipped: false }, text: `pruned ${pruned.length}` };
+  const expired = expireIdleThrowaways(manifests.filter((manifest) => liveIds.has(manifest.id)), live);
+  purgeOldRetired();
+  return { data: { pruned, expired, skipped: false }, text: `pruned ${pruned.length}, expired ${expired.length}` };
 }
 
 export function setWorkspace(flags) {
@@ -135,6 +211,13 @@ export function close(flags) {
 
   const fate = chooseArtifactFate(manifest, flags);
   if (fate.decision) return { data: fate };
+
+  // The flag survives this process, which ends with the space when called from inside it.
+  if (flags.trash && manifest.kind === 'throwaway') {
+    updateManifest(manifest.id, (draft) => {
+      draft.discarded = true;
+    });
+  }
 
   // A window's host runs outside the space, so closing the space would not end it.
   for (const surface of manifest.surfaces) {

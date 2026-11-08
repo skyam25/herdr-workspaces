@@ -2,9 +2,10 @@ import { findArtifact, linkFor } from '../artifacts.js';
 import { act, listLive } from '../herdr.js';
 import { listManifests } from '../manifest.js';
 import { workspaceByRef } from '../resolve.js';
+import { listRetired } from '../retired.js';
 
 export function artifactList(flags) {
-  const manifests = flags.workspace ? [workspaceByRef(flags.workspace)] : listManifests({ includeStandalone: true });
+  const manifests = flags.workspace ? [workspaceByRef(flags.workspace)] : [...listManifests({ includeStandalone: true }), ...listRetired()];
   const artifacts = manifests.flatMap((manifest) =>
     manifest.artifacts.map((artifact) => ({ ...artifact, workspace: manifest.id })),
   );

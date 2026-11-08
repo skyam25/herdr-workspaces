@@ -82,7 +82,7 @@ test("Orchestrate this space is disabled with no space, no folder or a remote sp
     const m = await mount("hws-new", { overlay: "ov0" });
     assert.equal(m.has("orchestrate"), true);
     assert.equal(m.clickable("orchestrate"), false);
-    m.view.at = 5;
+    m.view.at = 6;
     await m.key("enter");
     assert.deepEqual(args(H), []);
     assert.deepEqual(H.closed, []);
@@ -92,7 +92,7 @@ test("Orchestrate this space is disabled with no space, no folder or a remote sp
 test("Enter runs Orchestrate this space when it is selected", async () => {
   const H = setup({ spaces: [ACTIVE] });
   const m = await mount("hws-new", { overlay: "ov0" });
-  m.view.at = 5;
+  m.view.at = 6;
   await m.key("enter");
   assert.deepEqual(args(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/Users/me/work", "--json"]]);
 });
@@ -146,6 +146,69 @@ test("the menu opens the form as its own dialog, and the keyboard works", async 
   assert.equal(H.overlays[0].mod, "hws-new");
   assert.equal(H.overlays[0].props.step, "workspace");
   assert.equal(H.overlays[0].modal, true);
+});
+
+const RETIRED = [
+  { id: "sp1", name: "throwaway-1c26", closedAt: Date.now() - 3 * 86400000, sessions: [{ sessionId: "s1", title: "Fix login" }], artifacts: [{ id: "a1" }] },
+  { id: "sp2", name: "plain", closedAt: Date.now(), sessions: [], artifacts: [] },
+];
+
+test("the menu opens Find throwaway as its own dialog", async () => {
+  const H = setup();
+  const m = await mount("hws-new", { overlay: "ov0" });
+  await m.click("find-throwaway");
+  assert.deepEqual(H.closed, ["ov0"]);
+  assert.equal(H.overlays[0].mod, "hws-new");
+  assert.equal(H.overlays[0].props.step, "find");
+});
+
+test("find lists retired throwaways and reopens a clicked one", async () => {
+  const H = setup({ hws: { find: RETIRED, reopen: { id: "sp9" } } });
+  const m = await mount("hws-new", { overlay: "ov1", step: "find" });
+  await settle();
+  assert.deepEqual(args(H), [["find", "--", "--json"]]);
+  assert.match(m.text(), /Fix login.*throwaway-1c26.*3 days ago.*1 artifact.*plain.*Today/);
+  await m.click("retired-sp2");
+  assert.deepEqual(args(H).at(-1), ["reopen", "sp2", "--json"]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("find searches as you type and the keyboard picks a row", async () => {
+  const H = setup({ hws: { find: RETIRED, reopen: { id: "sp9" } } });
+  const m = await mount("hws-new", { overlay: "ov1", step: "find" });
+  await settle();
+  m.view.inputs.query.type(" login ", m.cx);
+  await settle();
+  assert.deepEqual(args(H).at(-1), ["find", "--", "login", "--json"]);
+  await m.key("down");
+  m.view.reopenSelected(m.cx);
+  await settle();
+  assert.deepEqual(args(H).at(-1), ["reopen", "sp2", "--json"]);
+});
+
+test("find ignores a reply that a newer search replaced", async () => {
+  setup({ hws: { find: RETIRED } });
+  const m = await mount("hws-new", { overlay: "ov1", step: "find" });
+  await settle();
+  m.view.results = [];
+  m.view.search(m.cx);
+  m.view.searchId += 1;
+  await settle();
+  assert.deepEqual(m.view.results, []);
+});
+
+test("find explains an empty list and shows a failure", async () => {
+  const H = setup({ hws: { find: [] } });
+  const m = await mount("hws-new", { overlay: "ov1", step: "find" });
+  await settle();
+  assert.match(m.text(), /Throwaways you close or that go idle appear here/);
+  m.view.inputs.query.type("zzz", m.cx);
+  await settle();
+  assert.match(m.text(), /Nothing matches/);
+  H.hws.find = { fail: "boom" };
+  m.view.inputs.query.type("zzzz", m.cx);
+  await settle();
+  assert.match(m.text(), /boom/);
 });
 
 async function form(extra = {}) {

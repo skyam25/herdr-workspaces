@@ -105,12 +105,13 @@ export function fillParent(view, cx) {
 
 // Creates an input whose text lives in view.values[key] and whose state lives
 // in view.inputs[key]. The view must set `values`, `inputs` and `problem`.
-export function makeInput(view, key, { value = "", placeholder = "", submit, rows } = {}) {
+export function makeInput(view, key, { value = "", placeholder = "", submit, rows, change } = {}) {
   view.values[key] = value;
   const state = rows ? TextareaState.new({ value, placeholder, rows }) : InputState.new({ value, placeholder });
   state.on("change", (_e, cx) => {
     view.values[key] = state.value();
     view.problem = null;
+    change?.(cx);
     cx.notify();
   });
   state.on("submit", (_e, cx) => submit?.(cx));
