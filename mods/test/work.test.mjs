@@ -149,19 +149,34 @@ test("board sorts open items by state and Done by newest number", () => {
 
 const ITEMS = "- [ ] #1 Pick a name\n  Claude: Which one?\n- [ ] #2 Build it\n- [x] #3 Shipped\n";
 
-test("Tasks stacks sections below 720 and shows four columns at 720 or wider", async () => {
+test("Tasks is a four-column board at every width", async () => {
   world({ files: { "/w/s1/i.md": ITEMS } });
   const m = await mount("hws-work", { view: "tasks" });
-  widen(m, 719);
-  assert.equal(m.has("stack"), true);
-  assert.equal(m.has("board"), false);
+  for (const width of [368, 860]) {
+    widen(m, width);
+    assert.equal(m.has("board"), true);
+    for (const lane of ["scroll-todo", "scroll-doing", "scroll-waiting", "scroll-done"]) assert.equal(m.has(lane), true);
+  }
   assert.match(m.text(), /Tasks \| 2/);
   assert.match(m.text(), /To do \| 0.*In progress \| 1.*Waiting on you \| 1.*Done \| 1/);
   assert.match(m.text(), /#1 \| Pick a name \| Agent s1 · Which one\?/);
-  widen(m, 720);
-  assert.equal(m.has("board"), true);
-  assert.equal(m.has("stack"), false);
-  for (const lane of ["scroll-todo", "scroll-doing", "scroll-waiting", "scroll-done"]) assert.equal(m.has(lane), true);
+});
+
+test("the panel widens while Tasks shows and returns afterwards", async () => {
+  const panel = (hidden, active) => ({ id: "root", children: [{ id: "panel", hidden, size: { px: 368 }, children: [{ id: "panel-body", active }] }] });
+  const H = world({ files: { "/w/s1/i.md": ITEMS } });
+  H.layout = panel(true, "files");
+  const m = await mount("hws-work", { view: "tasks" });
+  m.render();
+  const resizes = () => H.runs.filter((r) => r.name === "layout.resize").map((r) => r.args.px);
+  assert.deepEqual(resizes(), []);
+  H.layout = panel(false, "tasks");
+  m.render();
+  m.render();
+  assert.deepEqual(resizes(), [860]);
+  H.layout = panel(false, "files");
+  m.render();
+  assert.deepEqual(resizes(), [860, 368]);
 });
 
 test("expand resizes the panel to 860, and to 368 when wide", async () => {
@@ -353,7 +368,7 @@ test("the board shows to-dos and agent items together", async () => {
   const m = await mount("hws-work", { view: "tasks" });
   widen(m, 860);
   assert.match(m.text(), /Tasks \| 4/);
-  assert.match(m.text(), /To do \| 1 \| \+ \| Fix login \| Check the token/);
+  assert.match(m.text(), /To do \| 1 \| \+ \| Fix login \| Check the token \| \+ Add to-do/);
   assert.match(m.text(), /In progress \| 2 \| Ship \| Sent to Claude Code/);
   assert.match(m.text(), /Waiting on you \| 1/);
   assert.match(m.text(), /Done \| 2 \| Old \| Sent to t8/);
@@ -423,13 +438,13 @@ test("dragging a to-do to another column runs hws todo move", async () => {
   hover(m, "lane-todo", false);
   hover(m, "lane-doing", true);
   assert.equal(findNode(m, "lane-doing").bg, "color:selected");
-  assert.equal(findNode(m, "lane-todo").bg, undefined);
+  assert.equal(findNode(m, "lane-todo").bg, "color:surface");
   assert.equal(findNode(m, "todo-a1").opacity, 0.45);
   const lists = todoLists(H);
   await release(m, "lane-doing", "root");
   assert.deepEqual(hwsCalls(H).find((c) => c.args[1] === "move").args, ["todo", "move", "--id", "a1", "--column", "doing", "--space", "spc1", "--json"]);
   assert.equal(todoLists(H), lists + 1);
-  assert.equal(findNode(m, "lane-doing").bg, undefined);
+  assert.equal(findNode(m, "lane-doing").bg, "color:surface");
   assert.equal(findNode(m, "todo-a1").opacity, undefined);
   assert.equal(H.overlays.length, 0);
 });
@@ -451,7 +466,7 @@ test("Waiting on you never accepts a drop or lights up", async () => {
   const m = await mount("hws-work", { view: "tasks" });
   press(m, "todo-a1");
   hover(m, "lane-waiting", true);
-  assert.equal(findNode(m, "lane-waiting").bg, undefined);
+  assert.equal(findNode(m, "lane-waiting").bg, "color:surface");
   await release(m, "lane-waiting", "root");
   assert.equal(moves(H).length, 0);
   assert.equal(H.overlays.length, 0);
@@ -486,7 +501,7 @@ test("a press and release on the same card opens the to-do without a visible dra
   H.hws["todo list"] = todoList(todo("a1", "Fix login"));
   const m = await mount("hws-work", { view: "tasks" });
   press(m, "todo-a1");
-  assert.equal(findNode(m, "lane-todo").bg, undefined);
+  assert.equal(findNode(m, "lane-todo").bg, "color:surface");
   assert.equal(findNode(m, "todo-a1").opacity, undefined);
   await release(m, "todo-a1", "lane-todo", "root");
   assert.deepEqual(H.overlays.map((o) => o.props), [{ view: "todo", space: "spc1", id: "a1" }]);

@@ -296,8 +296,8 @@ Tasks shows your to-dos beside the agents' items on one board.
 | Waiting on you | None | Open, and the last line is Claude's |
 | Done | `column` is `done` | Checked |
 
-- The board shows four columns at 720px or wider, and stacked sections below that.
-- The header's expand button runs `layout.resize` on `panel`, between 368 and 860.
+- The board always shows four columns side by side. They share the width at 840px or wider and scroll sideways at 200px each below that.
+- The panel widens to 860 while Tasks shows and returns to 368 after. The header's expand button also switches between those widths.
 - The board always renders. A problem reaching Agent Brief is one quiet line under the header, and to-dos still work.
 - `hws-work` keeps `shared("hws.tasks.waiting")` equal to the Waiting on you count, and `hws-tabs` shows it on the Tasks button.
 

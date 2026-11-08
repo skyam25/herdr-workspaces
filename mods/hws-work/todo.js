@@ -25,7 +25,7 @@ export class TodoForm {
     this.focusedField = null;
     this.handle = cx.focus_handle();
     this.title = this.track("title", InputState.new({ placeholder: "What needs doing?" }), (cx) => this.save(cx));
-    this.notes = this.track("notes", TextareaState.new({ placeholder: "Notes", rows: 5 }));
+    this.notes = this.track("notes", TextareaState.new({ placeholder: "Add details for the agent (optional)", rows: 4 }));
     this.title.focus();
     cx.timer.after(600, () => this.title.focus());
     if (this.id) this.load(cx);
@@ -207,6 +207,7 @@ export class TodoForm {
             .rounded(6)
             .border_1()
             .border_color(c.key === this.column ? t.accent : t.input)
+            .when(c.key === this.column, (el) => el.bg(t.selected))
             .text_size(12)
             .text_color(c.key === this.column ? t.foreground : t.muted)
             .cursor_pointer()
@@ -274,7 +275,9 @@ export class TodoForm {
       .child(
         h_flex()
           .flex_none()
-          .p(12)
+          .px(18)
+          .pt(4)
+          .pb(18)
           .gap(8)
           .items_center()
           .when(Boolean(this.id), (el) => el.child(this.button(t, "archive-todo", this.busy === "archive" ? "Archiving…" : "Archive", false, (_e, cx) => this.archive(cx), enabled)))

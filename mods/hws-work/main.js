@@ -13,6 +13,8 @@ const WAITING_KEY = "hws.tasks.waiting";
 const WIDE_PX = 720;
 const NARROW_PANEL_PX = 368;
 const WIDE_PANEL_PX = 860;
+const LANE_PX = 200;
+const LANES_FIT_PX = 840;
 const LOADING = "Loading…";
 const TRACKING_OFF = "Item tracking is off for these sessions. Turn it on in the Agent Brief app.";
 const NO_AGENT_ITEMS = { waiting: [], progress: [], done: [] };
@@ -36,6 +38,8 @@ export default class Work extends View {
     this.problem = null;
     this.note = null;
     this.width = 0;
+    this.showing = false;
+    this.widened = false;
     this.doneOpen = false;
     this.touchedOpen = new Set();
     this.docs = new Map();
@@ -128,7 +132,7 @@ export default class Work extends View {
   openTodo(id) {
     if (!this.todoSpace) return;
     const todoProps = { view: "todo", space: this.todoSpace, ...(id ? { id } : {}) };
-    openOverlay({ mod: "hws-work", kind: "dialog", modal: true, width: 440, height: id ? 520 : 370, props: todoProps });
+    openOverlay({ mod: "hws-work", kind: "dialog", modal: true, width: 440, height: id ? 540 : 400, props: todoProps });
   }
 
   moveTodo(id, column, cx) {
@@ -265,6 +269,22 @@ export default class Work extends View {
     return null;
   }
 
+  // The board needs room for its columns, so the panel widens while Tasks shows.
+  syncWidth() {
+    const root = layout();
+    const panel = findNode(root, "panel");
+    const showing = Boolean(panel) && !panel.hidden && findNode(root, "panel-body")?.active === "tasks";
+    if (showing === this.showing) return;
+    this.showing = showing;
+    if (showing && (panel.size?.px ?? 0) < WIDE_PANEL_PX) {
+      this.widened = true;
+      run("layout.resize", { id: "panel", px: WIDE_PANEL_PX });
+    } else if (!showing && this.widened) {
+      this.widened = false;
+      if (panel) run("layout.resize", { id: "panel", px: NARROW_PANEL_PX });
+    }
+  }
+
   // Keeps the tab bar's badge equal to the Waiting on you count.
   publishWaiting(count) {
     if (shared(WAITING_KEY) !== count) setShared(WAITING_KEY, count);
@@ -275,6 +295,7 @@ export default class Work extends View {
     const t = theme();
     this.rebind(cx);
     this.syncTodos(cx);
+    if (this.kind === "tasks") this.syncWidth();
     const blocker = this.blocker();
     const body = this.kind === "outputs" ? this.outputsBody(t, blocker) : this.tasksBody(t, blocker);
     return v_flex()
@@ -329,11 +350,9 @@ export default class Work extends View {
     const open = columns.todo.length + columns.doing.length + columns.waiting.length;
     const controls = h_flex().flex_none().gap(4).items_center().child(this.addButton(t, "add", "+ Add")).child(this.expandButton(t));
     const header = this.header(t, "Tasks", blocker === LOADING ? null : open, controls);
-    const wide = this.width >= WIDE_PX;
-    const lanes = COLUMNS.map((c) => this.lane(t, c, columns[c.key], wide));
-    const content = wide
-      ? h_flex().id("board").flex_1().min_h(0).w_full().items_stretch().p(8).gap(8).children(lanes)
-      : v_flex().id("stack").flex_1().min_h(0).overflow_y_scrollbar().p(8).gap(14).children(lanes);
+    const fits = this.width >= LANES_FIT_PX;
+    const lanes = COLUMNS.map((c) => this.lane(t, c, columns[c.key], fits));
+    const content = h_flex().id("board").flex_1().min_h(0).w_full().items_stretch().p(8).gap(8).overflow_x_scrollbar().children(lanes);
     return { header, quiet: this.quietLine(blocker, agentColumns), content };
   }
 
@@ -383,8 +402,8 @@ export default class Work extends View {
       .child(wide ? "Collapse" : "Expand");
   }
 
-  // One status column: a head and its cards, scrolling on its own when wide.
-  lane(t, column, cards, wide) {
+  // One status column: a head and its cards, scrolling on its own.
+  lane(t, column, cards, fits) {
     const lit = column.drop && Boolean(this.drag?.moved) && this.over === column.key;
     const head = h_flex()
       .id(`head-${column.key}`)
@@ -400,18 +419,15 @@ export default class Work extends View {
     const rows = this.laneRows(t, column, cards);
     const lane = v_flex()
       .id(`lane-${column.key}`)
-      .p(4)
+      .h_full()
+      .min_h(0)
+      .p(6)
       .gap(6)
       .rounded(8)
-      .when(lit, (el) => el.bg(t.selected))
+      .bg(lit ? t.selected : t.surface)
       .on_hover((hovered, cx) => this.hoverLane(column.key, hovered, cx))
       .on_mouse_up("left", (_e, cx) => this.releaseOnLane(column, cx));
-    if (!wide) return lane.flex_none().child(head).children(rows);
-    return lane
-      .h_full()
-      .flex_1()
-      .min_w(0)
-      .min_h(0)
+    return (fits ? lane.flex_1().min_w(0) : lane.flex_none().w(LANE_PX))
       .child(head)
       .child(v_flex().id(`scroll-${column.key}`).flex_1().min_h(0).overflow_y_scrollbar().gap(6).children(rows));
   }
@@ -421,6 +437,7 @@ export default class Work extends View {
     const shown = isDone && !this.doneOpen ? cards.slice(0, DONE_SHOWN) : cards;
     const rows = shown.map((c) => (c.kind === "todo" ? this.todoCard(t, c, column.key) : this.card(t, c)));
     if (isDone && cards.length > DONE_SHOWN) rows.push(this.moreRow(t, cards.length - DONE_SHOWN));
+    if (column.key === "todo") rows.push(this.addRow(t));
     return rows;
   }
 
@@ -435,6 +452,7 @@ export default class Work extends View {
       .rounded(7)
       .border_1()
       .border_color(t.border)
+      .bg(t.background)
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .when(this.drag?.id === item.id && this.drag.moved, (el) => el.opacity(0.45))
@@ -456,6 +474,7 @@ export default class Work extends View {
       .rounded(7)
       .border_1()
       .border_color(t.border)
+      .bg(t.background)
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click(() => this.focusAgent(card.agent))
@@ -467,6 +486,23 @@ export default class Work extends View {
           .child(div().flex_1().min_w(0).line_height("18px").max_h(36).overflow_hidden().whitespace_normal().child(card.title)),
       )
       .child(div().truncate().text_size(11).text_color(t.dim).child(meta));
+  }
+
+  addRow(t) {
+    return div()
+      .id("add-todo-row")
+      .h(28)
+      .flex_none()
+      .px(6)
+      .flex()
+      .items_center()
+      .rounded(7)
+      .text_size(12)
+      .text_color(t.dim)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_click(() => this.openTodo(null))
+      .child("+ Add to-do");
   }
 
   moreRow(t, hidden) {
