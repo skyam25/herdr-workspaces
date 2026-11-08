@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { relocateArtifact } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, findTerminal, isIdleShell, listLive, requireLive, sendText, terminalInfo } from '../herdr.js';
+import { act, findTerminal, isIdleShell, isTerminalAlive, killTerminal, listLive, requireLive, sendText, terminalInfo } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
 import { STANDALONE, keptArtifactDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
 import { resolveWorkspace } from '../resolve.js';
@@ -37,6 +37,17 @@ function retireWorkspace(id) {
   removeIfEmpty(workspaceDir(id));
 }
 
+// A surface in its own window has no pane, so its host terminal says whether it is open.
+function dropClosedWindows() {
+  for (const manifest of listManifests({ includeStandalone: true })) {
+    const closed = manifest.surfaces.filter((surface) => surface.host && !isTerminalAlive(surface.host)).map((surface) => surface.id);
+    if (closed.length === 0) continue;
+    updateManifest(manifest.id, (draft) => {
+      draft.surfaces = draft.surfaces.filter((surface) => !closed.includes(surface.id));
+    });
+  }
+}
+
 // Manifests are read before the window, so a workspace created during the
 // listing is never pruned. An empty window counts as no answer.
 export function prune() {
@@ -45,6 +56,7 @@ export function prune() {
   if (!live || live.spaces.length === 0) {
     return { data: { pruned: [], skipped: true }, text: 'the Herdr window did not answer, so nothing changed' };
   }
+  dropClosedWindows();
   const liveIds = new Set(live.spaces.map((space) => space.id));
   const pruned = [];
   for (const manifest of manifests) {
@@ -124,6 +136,10 @@ export function close(flags) {
   const fate = chooseArtifactFate(manifest, flags);
   if (fate.decision) return { data: fate };
 
+  // A window's host runs outside the space, so closing the space would not end it.
+  for (const surface of manifest.surfaces) {
+    if (surface.host) killTerminal(surface.host);
+  }
   if (live.spaces.some((space) => space.id === manifest.id)) {
     act('space.close', { id: manifest.id, confirmed: true });
   }

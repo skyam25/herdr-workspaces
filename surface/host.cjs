@@ -87,9 +87,65 @@ function adoptPanelWindow(options) {
   return win;
 }
 
+// A web view shows the page, so the panel's window stays hidden and empty.
+function hiddenPanelWindow(options) {
+  const win = new realElectron.BrowserWindow({ ...options, show: false });
+  const inert = () => {};
+  win.show = inert;
+  win.showInactive = inert;
+  win.hide = inert;
+  win.focus = inert;
+  win.loadFile = async () => {};
+  win.loadURL = async () => {};
+  win.isVisible = () => true;
+  return win;
+}
+
+// An ordinary window that floats on the right of the screen, where a split would sit.
+function ownPanelWindow(options) {
+  const { x: _x, y: _y, ...rest } = options;
+  const { screen, Menu } = realElectron;
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const width = Math.min(1100, Math.round(area.width * 0.55));
+  const bounds = { x: area.x + area.width - width - 24, y: area.y + 24, width, height: area.height - 48 };
+  const owner = process.env.HWS_SURFACE_OWNER;
+  const title = [process.env.HWS_SURFACE_TITLE || 'Board', owner].filter(Boolean).join(' — ');
+  const win = new realElectron.BrowserWindow({ ...rest, ...bounds, show: false, focusable: true, frame: true, enableLargerThanScreen: false });
+
+  // Panel treats a surface as offscreen, so its placement calls do nothing here.
+  const inert = () => {};
+  const reveal = win.show.bind(win);
+  Object.assign(win, { show: inert, showInactive: inert, hide: inert, focus: inert, setPosition: inert, setBounds: inert });
+
+  const float = (on) => win.setAlwaysOnTop(on, 'floating');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  float(true);
+  win.once('ready-to-show', () => {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'editMenu' },
+      { label: 'Window', submenu: [{ label: 'Keep on Top', type: 'checkbox', checked: true, click: (item) => float(item.checked) }, { role: 'minimize' }, { role: 'close' }] },
+    ]));
+    reveal();
+    app.focus({ steal: true });
+  });
+  win.setTitle(title);
+  win.on('page-title-updated', (event) => event.preventDefault());
+  win.on('close', () => setImmediate(() => app.quit()));
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.meta && input.key === 'Enter') {
+      event.preventDefault();
+      globalThis.__surfaceDone?.();
+    }
+  });
+  return win;
+}
+
 function PixelBrowserWindow(options) {
   const isPanel = options?.title === 'Agent Brief' && options?.webPreferences?.preload;
-  return isPanel ? adoptPanelWindow(options) : new realElectron.BrowserWindow(options);
+  if (!isPanel) return new realElectron.BrowserWindow(options);
+  if (process.env.HWS_SURFACE_WINDOW === '1') return ownPanelWindow(options);
+  return process.env.HWS_SURFACE_WEB === '1' ? hiddenPanelWindow(options) : adoptPanelWindow(options);
 }
 Object.setPrototypeOf(PixelBrowserWindow, realElectron.BrowserWindow);
 PixelBrowserWindow.prototype = realElectron.BrowserWindow.prototype;
@@ -106,6 +162,12 @@ Module._load = function (request, parent, isMain) {
   if (request === 'electron' && parent?.filename === mainBundle) return shimmedElectron;
   return originalLoad.call(this, request, parent, isMain);
 };
+
+// The main bundle hides the app for a surface. A surface with its own window keeps the Dock icon and Edit menu.
+if (process.env.HWS_SURFACE_WINDOW === '1') {
+  app.setActivationPolicy = () => {};
+  if (app.dock) app.dock.hide = () => {};
+}
 
 app.setPath('logs', path.join(process.env.COMPANION_DATA_DIR, 'logs'));
 app.setAppPath(appDir);

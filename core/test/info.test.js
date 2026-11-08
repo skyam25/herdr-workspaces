@@ -68,7 +68,7 @@ test('list returns every manifest but not the standalone store', (t) => {
   const first = box.app('one');
   const second = box.app('two');
   box.setState({ spaces: [...box.state().spaces, space('sp9', [tab('tb9', [terminal('t9', 'p9')])])], selected: 'sp9' });
-  box.json(['surface', 'open', '--type', 'board', '--standalone']);
+  box.json(['surface', 'open', '--type', 'board', '--in-pane', '--standalone']);
   assert.deepEqual(box.json(['list']).map((item) => item.id).sort(), [first.id, second.id].sort());
 });
 

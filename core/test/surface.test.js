@@ -27,7 +27,7 @@ test('surface open splits beside the owning terminal with the host environment',
   const [{ terminal: owner, tabId }] = manifest.terminals;
   const ownerPane = box.state().spaces[0].tabs.find((item) => item.id === tabId).terminals[0].pane;
 
-  const surface = box.json(['surface', 'open', '--type', 'board', '--title', 'flow', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'flow', '--terminal', owner]);
 
   const [call] = box.actions();
   assert.deepEqual(call.slice(0, 8), ['herdr-app', 'do', 'pane.split', '--direction', 'right', '--pane', ownerPane, '--argv']);
@@ -79,14 +79,14 @@ test('surface open defaults to the calling terminal', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  assert.equal(box.json(['surface', 'open', '--type', 'board'], { HC_TERMINAL_ID: owner }).terminal, owner);
+  assert.equal(box.json(['surface', 'open', '--type', 'board', '--in-pane'], { HC_TERMINAL_ID: owner }).terminal, owner);
 });
 
 test('standalone surface opens a tab in the selected space with no workspace', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
 
-  const surface = box.json(['surface', 'open', '--type', 'board', '--title', 'idea', '--standalone']);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'idea', '--standalone']);
 
   const [call] = box.actions();
   assert.deepEqual(call.slice(0, 10), [
@@ -105,7 +105,7 @@ test('standalone surface opens a tab in the selected space with no workspace', (
 test('standalone surface in a workspace space belongs to that workspace', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
-  const surface = box.json(['surface', 'open', '--type', 'board', '--standalone']);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--standalone']);
   assert.equal(surface.workspace, manifest.id);
   assert.equal(hostEnvOf(box.actions()[0]).HWS_FOLDER, manifest.folder);
   assert.equal(box.manifest(manifest.id).surfaces[0].terminal, null);
@@ -114,7 +114,7 @@ test('standalone surface in a workspace space belongs to that workspace', (t) =>
 test('surface glued to a normal terminal records under standalone', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])] });
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', 't1']);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', 't1']);
   assert.equal(surface.workspace, 'standalone');
   assert.equal(box.manifest('standalone').surfaces[0].terminal, 't1');
 });
@@ -123,9 +123,9 @@ test('surface open rejects bad usage and unknown terminals', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])] });
   assert.equal(box.hws(['surface', 'open', '--type', 'map', '--terminal', 't1']).code, 2);
-  assert.equal(box.hws(['surface', 'open', '--type', 'board']).code, 2);
-  assert.equal(box.hws(['surface', 'open', '--type', 'board', '--terminal', 't1', '--standalone']).code, 2);
-  assert.equal(box.hws(['surface', 'open', '--type', 'board', '--terminal', 't404']).code, 1);
+  assert.equal(box.hws(['surface', 'open', '--type', 'board', '--in-pane']).code, 2);
+  assert.equal(box.hws(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', 't1', '--standalone']).code, 2);
+  assert.equal(box.hws(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', 't404']).code, 1);
 });
 
 // Parks the owner behind a chat pane, so `ls` no longer lists it.
@@ -148,7 +148,7 @@ test('surface open splits beside the chat pane of a flipped agent', (t) => {
   const { owner, chatPane } = flipToChat(box, manifest);
 
   const surface = box.json([
-    'surface', 'open', '--type', 'board', '--terminal', owner, '--beside-pane', chatPane, '--space', manifest.id,
+    'surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner, '--beside-pane', chatPane, '--space', manifest.id,
   ]);
 
   const [call] = box.actions();
@@ -193,7 +193,7 @@ test('done focuses the chat pane when the agent flipped after the surface opened
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner]);
   const { chatPane } = flipToChat(box, manifest);
   const bundle = box.bundle('bundle-flipped');
   box.clearCalls();
@@ -211,7 +211,7 @@ test('done focuses the terminal when the agent flipped back after the surface op
   const manifest = box.app();
   const { owner, chatPane } = flipToChat(box, manifest);
   const surface = box.json([
-    'surface', 'open', '--type', 'board', '--terminal', owner, '--beside-pane', chatPane, '--space', manifest.id,
+    'surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner, '--beside-pane', chatPane, '--space', manifest.id,
   ]);
   box.setState({ hc: { [owner]: { labels: { 'herdr.chat': '' } } } });
   const bundle = box.bundle('bundle-unflipped');
@@ -225,11 +225,35 @@ test('done focuses the terminal when the agent flipped back after the surface op
   ]);
 });
 
+test("a flipped agent's board opens in its own window and returns to the chat", (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const { owner, chatPane } = flipToChat(box, manifest);
+
+  const surface = box.json([
+    'surface', 'open', '--type', 'board', '--terminal', owner, '--beside-pane', chatPane, '--space', manifest.id,
+  ]);
+
+  assert.equal(surface.pane, null);
+  const run = box.actions().find((call) => call[0] === 'hc' && call[1] === 'run');
+  const label = run.find((word) => word.startsWith('HWS_SURFACE_OWNER='));
+  assert.match(label, new RegExp(` · ${owner}$`));
+
+  box.clearCalls();
+  box.json(['surface', 'focus', '--id', surface.id]);
+  assert.deepEqual(box.actions()[0], ['herdr-app', 'do', 'pane.focus', '--pane', chatPane]);
+
+  const bundle = box.bundle('bundle-window');
+  box.clearCalls();
+  box.json(['surface', 'done', '--id', surface.id, '--bundle', bundle]);
+  assert.deepEqual(box.actions().at(-2), ['herdr-app', 'do', 'pane.focus', '--pane', chatPane]);
+});
+
 test('done on a glued surface moves the bundle, sends, closes and focuses', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const surface = box.json(['surface', 'open', '--type', 'board', '--title', 'flow', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'flow', '--terminal', owner]);
   const bundle = box.bundle('bundle-a');
   box.clearCalls();
 
@@ -267,7 +291,7 @@ test('done acts like standalone when the terminal has finished', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner]);
   box.setState({ hc: { [owner]: { state: 'finished', exit_code: 0 } } });
   box.clearCalls();
 
@@ -283,7 +307,7 @@ test('done acts like standalone when hc does not know the terminal', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner]);
   box.setState({ hc: { [owner]: 'missing' } });
   box.clearCalls();
   const result = box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('bundle-gone')]);
@@ -295,7 +319,7 @@ test('done keeps the pane and reports it when the send fails', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner]);
   box.setState({ sendFails: true });
   box.clearCalls();
   const result = box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('bundle-busy')]);
@@ -325,7 +349,7 @@ test('done sends a link in place of a very long prompt', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner]);
   const bundle = box.bundle('bundle-long', 'x'.repeat(MAX_SEND_BYTES + 1));
   box.clearCalls();
   box.json(['surface', 'done', '--id', surface.id, '--bundle', bundle]);
@@ -336,7 +360,7 @@ test('done sends a link in place of a very long prompt', (t) => {
 test('done rejects an unknown surface and a bundle with no prompt', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', manifest.terminals[0].terminal]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
   assert.equal(box.hws(['surface', 'done', '--id', 'nope', '--bundle', box.bundle('b1')]).code, 1);
   const noPrompt = box.folder('empty-bundle');
   assert.equal(box.hws(['surface', 'done', '--id', surface.id, '--bundle', noPrompt]).code, 1);
@@ -348,7 +372,7 @@ test('done rewrites the real path when the bundle arrives through a symlink', (t
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', owner]);
   const real = box.bundle('real-bundle');
   const alias = join(box.dir, 'alias-bundle');
   symlinkSync(real, alias);
@@ -383,8 +407,8 @@ test('surface socket finds the newest surface or the matching title', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
-  const first = box.json(['surface', 'open', '--type', 'board', '--title', 'one', '--terminal', owner]);
-  const second = box.json(['surface', 'open', '--type', 'board', '--title', 'two', '--terminal', owner]);
+  const first = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'one', '--terminal', owner]);
+  const second = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'two', '--terminal', owner]);
 
   assert.equal(box.hws(['surface', 'socket', '--terminal', owner]).stdout.trim(), second.socket);
   assert.equal(box.hws(['surface', 'socket'], { HC_TERMINAL_ID: owner }).stdout.trim(), second.socket);
@@ -399,6 +423,76 @@ test('surface socket finds the newest surface or the matching title', (t) => {
 test('surface socket finds a surface glued to a normal terminal', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])] });
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', 't1']);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', 't1']);
   assert.equal(box.hws(['surface', 'socket', '--terminal', 't1']).stdout.trim(), surface.socket);
+});
+
+function openWindow(t) {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const surface = box.json(['surface', 'open', '--type', 'board', '--title', 'flow', '--terminal', owner]);
+  return { box, manifest, owner, surface };
+}
+
+test('a board opens in its own window, in a terminal with no pane', (t) => {
+  const { box, manifest, owner, surface } = openWindow(t);
+  const [call] = box.actions();
+  assert.deepEqual(call.slice(0, 9), ['hc', 'run', '--bg', '--json', '--no-parent', '--no-notify', '--rm', '--cwd', manifest.folder]);
+  assert.equal(call[9], '--');
+  const pairs = Object.fromEntries(call.slice(11, -1).map((pair) => [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)]));
+  assert.equal(pairs.HWS_SURFACE_WINDOW, '1');
+  assert.match(pairs.HWS_SURFACE_OWNER, new RegExp(`· ${owner}$`));
+  const [record] = box.manifest(manifest.id).surfaces;
+  assert.equal(record.pane, null);
+  assert.equal(record.host, 't90');
+  assert.equal(surface.hostTerminal, 't90');
+});
+
+test('notes and pages stay in a pane', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  box.json(['surface', 'open', '--type', 'note', '--terminal', manifest.terminals[0].terminal]);
+  assert.equal(box.actions()[0][2], 'pane.split');
+});
+
+test('done on a window sends and shows the terminal, and closes no pane', (t) => {
+  const { box, owner, surface } = openWindow(t);
+  box.clearCalls();
+  const result = box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('bundle-w')]);
+  assert.equal(result.delivered, true);
+  const calls = box.actions();
+  assert.equal(calls[0][1], 'send');
+  assert.deepEqual(calls[1], ['herdr-app', 'do', 'pane.focus', '--terminal', owner]);
+  assert.equal(calls.some((call) => call.includes('pane.close')), false);
+});
+
+test('surface focus shows the owning terminal', (t) => {
+  const { box, owner, surface } = openWindow(t);
+  box.clearCalls();
+  assert.deepEqual(box.json(['surface', 'focus', '--id', surface.id]), { focused: owner });
+  assert.deepEqual(box.actions()[0], ['herdr-app', 'do', 'pane.focus', '--terminal', owner]);
+});
+
+test('surface focus refuses a terminal that has ended', (t) => {
+  const { box, owner, surface } = openWindow(t);
+  box.setState({ hc: { [owner]: 'missing' } });
+  box.clearCalls();
+  const result = box.hws(['surface', 'focus', '--id', surface.id, '--json']);
+  assert.notEqual(result.code, 0);
+  assert.deepEqual(box.actions().filter((call) => call[0] === 'herdr-app' && call[1] === 'do'), []);
+});
+
+test('a closed window leaves the manifest at the next prune', (t) => {
+  const { box, manifest } = openWindow(t);
+  box.setState({ hc: { t90: 'missing' } });
+  box.json(['prune']);
+  assert.deepEqual(box.manifest(manifest.id).surfaces, []);
+});
+
+test('closing a workspace ends its windows', (t) => {
+  const { box, manifest } = openWindow(t);
+  box.clearCalls();
+  box.json(['close', '--workspace', manifest.id]);
+  assert.ok(box.actions().some((call) => call[0] === 'hc' && call[1] === 'kill' && call[2] === 't90'));
 });

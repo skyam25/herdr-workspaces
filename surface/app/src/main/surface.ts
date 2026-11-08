@@ -27,6 +27,7 @@ export interface SurfaceConfig {
   folder: string;
   dataDir: string;
   hws: string;
+  owner?: string;
 }
 
 /** The surface this process hosts, or undefined when it runs as the plain app. */
@@ -45,6 +46,7 @@ export function surfaceFromEnv(env: NodeJS.ProcessEnv): SurfaceConfig | undefine
     folder,
     dataDir: env.COMPANION_DATA_DIR ?? '',
     hws: env.HWS_BIN || 'hws',
+    ...(env.HWS_SURFACE_OWNER ? { owner: env.HWS_SURFACE_OWNER } : {}),
   };
 }
 
@@ -116,6 +118,8 @@ export interface SurfaceDeps {
   socket: string;
   push: (state: SurfaceState) => void;
   copy: (text: string) => void;
+  /** Ends a surface with no pane for `hws` to close. */
+  close?: () => void;
 }
 
 type HwsResult = { standalone?: boolean; artifact?: string; link?: string; text?: string; deliveryError?: string };
@@ -139,7 +143,13 @@ export class SurfaceHost {
   ) {
     this.sessionId = `surface-${cfg.id}`;
     this.cwd = sessionCwd(cfg);
-    this.state = { type: cfg.type, title: cfg.title, sessionId: this.sessionId, standalone: !cfg.terminal };
+    this.state = {
+      type: cfg.type,
+      title: cfg.title,
+      sessionId: this.sessionId,
+      standalone: !cfg.terminal,
+      ...(cfg.owner ? { owner: cfg.owner } : {}),
+    };
   }
 
   info(): SurfaceState {
@@ -168,9 +178,18 @@ export class SurfaceHost {
     }
   }
 
-  /** Remembers what a standalone press wants done with the artifact the next delivery makes. */
+  /** Goes to the owning terminal now. Other actions wait for the artifact the next delivery makes. */
   want(action: SurfaceAction): void {
-    this.action = action;
+    if (action === 'owner') void this.focusOwner();
+    else this.action = action;
+  }
+
+  private async focusOwner(): Promise<void> {
+    try {
+      await this.hws(['surface', 'focus', '--id', this.cfg.id, '--json']);
+    } catch (err) {
+      this.update({ notice: { text: (err as Error).message, error: true } });
+    }
   }
 
   private update(patch: Partial<SurfaceState>): void {
@@ -223,6 +242,7 @@ export class SurfaceHost {
         return;
       }
       this.update({ busy: false, delivered: true, notice: { text: 'Delivered.' } });
+      this.deps.close?.();
     } catch (err) {
       this.update({ busy: false, notice: { text: `Done failed: ${(err as Error).message}`, error: true } });
     }

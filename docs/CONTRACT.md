@@ -95,7 +95,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list` | Every manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest |
 | `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal |
-| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone]` | Splits a pane beside T, starts the host, records the surface. For an agent flipped to Chat, `--beside-pane` and `--space` split beside its chat pane P in space S and fail unless T's `herdr.chat` label equals P |
+| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane]` | Starts the host and records the surface. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T. For an agent flipped to Chat, `--beside-pane` and `--space` name its chat pane P and space S, and fail unless T's `herdr.chat` label equals P |
+| `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface done --id S --bundle DIR` | Moves DIR to the artifact store, delivers, closes the pane |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
 | `hws artifact list [--workspace W]` | Artifacts |
@@ -133,6 +134,29 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `COMPANION_DATA_DIR` | The surface data folder |
 
 The host's start script is `surface/run.sh`.
+
+## Own window
+
+`hws surface open` shows a board in an ordinary floating window, unless `--in-pane` asks for Pixel. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The surface record has `pane: null` and `host`, that terminal's address.
+
+Closing the window quits the host, and the next prune drops the record. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host.
+
+## Web host
+
+Setting `HWS_SURFACE_WEB=1` shows a surface in any web view in place of Pixel. Without it the host opens no TCP port.
+
+| Item | Behaviour |
+|---|---|
+| Listener | `127.0.0.1` on a free port |
+| Address | Written to `$COMPANION_DATA_DIR/web-url`, mode 600, as `http://127.0.0.1:<port>/#t=<token>` |
+| Page and assets | Served without the token |
+| `/api/*` | Needs `Authorization: Bearer <token>` |
+| Every request | Must name this server in `Host`. `/api/*` also refuses a foreign `Origin` |
+| `POST /api/invoke`, `POST /api/send` | Body is `{channel, args}`. Only channels the main process registered are accepted |
+| `GET /api/events` | Server-sent events, each `{channel, args}` |
+| Encoding | `shared/web-wire.ts`, which keeps bytes and undefined arguments |
+
+Page surfaces do not work in this mode yet, because reviews load from an Electron-only scheme.
 
 ## External commands
 
@@ -220,7 +244,7 @@ Each region of the `hws` layout has one job.
 | Tab bar | Switch tabs, toggle the right panel | `hws-tabs`, with Files, Changes, Tasks, Outputs |
 | Pane header | Act on this agent | `hws-pane` `+`, always visible on agent and chat panes |
 | Chat composer | Act on this agent while typing | The same menu, plus Attach file |
-| Pane beside the agent | Do the work | Board, note and page surfaces |
+| Own window, or a pane beside the agent | Do the work | Boards in their own window, notes and pages in a pane |
 | Right panel | See what the work produced | Files, Changes, Tasks, Outputs |
 
 ### New menu: `hws-actions`
@@ -255,7 +279,7 @@ A flipped agent has no pane, and `herdr-app ls` does not list chat panes. Mods f
 2. Find the live terminal in `terminals()` whose `herdr.chat` label equals that pane.
 3. Its tab is the pane's `tab`. Its space is the entry in `spaces()` that holds that tab.
 
-`hws surface open --terminal T --beside-pane P --space S` splits beside P. It fails unless T's `herdr.chat` label equals P. On Done, `hws` reads T's `herdr.chat` label again. It focuses that pane when the label is set and the terminal otherwise.
+`hws surface open --terminal T --beside-pane P --space S` opens a board in its own window and splits a note or page beside P. It fails unless T's `herdr.chat` label equals P. On Done, `hws` reads T's `herdr.chat` label again. It focuses that pane when the label is set and the terminal otherwise.
 
 ### Right panel: `hws-work`
 

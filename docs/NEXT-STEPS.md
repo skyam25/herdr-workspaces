@@ -34,7 +34,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Standalone | Shows Open terminal and Copy link in place of Done |
 | Throwaway | Asks Keep or Trash on close only if something was made |
 | Studio | Removed. New board and New note cover the need |
-| Rendering | Pixel runs the real React UI in a pane. A native GPUI board was rejected as too costly |
+| Rendering | Boards open in their own floating window. Notes and pages stay on Pixel in a pane. A native GPUI board was rejected as too costly |
 
 ## Next steps, in order
 
@@ -42,7 +42,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
 Nothing below has been done with a real pointer or keyboard.
 
-- [ ] Draw on a board and judge the lag.
+- [x] Draw on a board and judge the lag. Pixel lagged, and a real window felt much better, so boards moved to a window.
 - [ ] Click the Done button.
 - [ ] Press ⌘Enter on the physical keyboard. Herdr or Ghostty may claim it first.
 - [ ] Record Talk and annotate.
@@ -111,7 +111,19 @@ The audit found these from reading code.
 - [x] Make `hws surface open` work for a flipped agent.
 - [ ] Revisit the iOS shell around a web client.
 
-### 9. Test the new UI homes by hand
+### 9. Move surfaces to a native web view
+
+Pixel streams frames through the terminal. Herdr shows a full-window board at 1-2 fps ([herdr-app #498](https://github.com/herdrdev/herdr-app/issues/498)). A web view draws directly, and mods cannot host one today.
+
+- [x] Serve board surfaces over loopback behind `HWS_SURFACE_WEB=1`. `node scripts/verify-web.mjs` in `surface/app` checks WebKit and Chromium.
+- [ ] Ask on [#218](https://github.com/herdrdev/herdr-app/issues/218) whether the official browser mod can load a local app. This decides the host.
+- [ ] Serve page surfaces, which load from the Electron-only review scheme today.
+- [ ] Test notes, Talk and the microphone in WebKit.
+- [ ] Replace the remaining Electron APIs in `src/main`, so the host is a plain Node process.
+- [ ] Revisit a board inside the pane if Herdr ships a browser mod that can load a local app. Patching Herdr is ruled out.
+- [ ] Add the host address to the manifest through `hws`.
+
+### 10. Test the new UI homes by hand
 
 `docs/CONTRACT.md` describes these under UI homes.
 

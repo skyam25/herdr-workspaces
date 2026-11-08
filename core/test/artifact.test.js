@@ -11,7 +11,7 @@ test('artifact list covers every workspace, standalone included', (t) => {
   const manifest = box.app();
   const { artifact } = box.finishGlued(manifest);
   box.setState({ spaces: [...box.state().spaces, space('sp9', [tab('tb9', [terminal('t9', 'p9')])])], selected: 'sp9' });
-  const solo = box.json(['surface', 'open', '--type', 'board', '--standalone']);
+  const solo = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--standalone']);
   box.json(['surface', 'done', '--id', solo.id, '--bundle', box.bundle('solo-bundle')]);
 
   const all = box.json(['artifact', 'list']);
@@ -51,7 +51,7 @@ test('artifact terminal opens claude with the prompt in the workspace', (t) => {
 test('artifact terminal opens a standalone artifact in the selected space from home', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
-  const surface = box.json(['surface', 'open', '--type', 'board', '--title', 'idea', '--standalone']);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'idea', '--standalone']);
   const { artifact } = box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('b')]);
   box.clearCalls();
   box.json(['artifact', 'terminal', artifact]);

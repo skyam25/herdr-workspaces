@@ -302,7 +302,7 @@ export interface InitInfo {
 }
 
 export type SurfaceType = 'board' | 'note' | 'page';
-export type SurfaceAction = 'terminal' | 'link';
+export type SurfaceAction = 'terminal' | 'link' | 'owner';
 
 /** What the surface's Done area shows. */
 export interface SurfaceState {
@@ -312,6 +312,8 @@ export interface SurfaceState {
   sessionId: string;
   /** No terminal waits for this surface, so it offers Open terminal and Copy link. */
   standalone: boolean;
+  /** Names the terminal this surface belongs to, for a surface shown apart from it. */
+  owner?: string;
   busy?: boolean;
   delivered?: boolean;
   artifact?: string;

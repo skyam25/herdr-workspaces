@@ -68,7 +68,7 @@ export default class Launcher extends View {
       { id: "new-terminal", name: "New terminal", line: "A plain tab with no workspace.", go: (cx) => this.newTerminal(cx) },
       { id: "new-workspace", name: "New workspace…", line: "A named place with instructions, tabs and kept work.", go: () => this.openForm() },
       { id: "new-throwaway", name: "Throwaway", line: "Claude in a scratch workspace.", go: (cx) => this.launch("new-throwaway", ["new", "throwaway"], cx) },
-      { id: "new-board", name: "New board", line: "A sketch on its own, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled board", "--standalone"], cx) },
+      { id: "new-board", name: "New board", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled board", "--standalone"], cx) },
       { id: "new-note", name: "New note", line: "A prompt, template or note on its own.", go: (cx) => this.launch("new-note", ["surface", "open", "--type", "note", "--title", "Untitled note", "--standalone"], cx) },
     ];
   }

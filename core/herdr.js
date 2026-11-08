@@ -92,6 +92,27 @@ export async function closePaneThenFocus(pane, target, kind = 'terminal') {
   await once(child, 'exit');
 }
 
+// Starts a program in a terminal with no pane, tied to nothing that can end it early.
+export function runDetached(argv, cwd) {
+  const result = run(hcBin(), ['run', '--bg', '--json', '--no-parent', '--no-notify', '--rm', '--cwd', cwd, '--', ...argv], ACT_MS);
+  const reply = parseJson(result.stdout);
+  if (!result.ok || !reply?.address) {
+    throw new HwsError(result.stderr.trim() || result.stdout.trim() || result.failure || 'hc run failed');
+  }
+  return reply.address;
+}
+
+export function killTerminal(terminal) {
+  return run(hcBin(), ['kill', terminal], READ_MS).ok;
+}
+
+// Shows the terminal, or its chat pane when flipped, and brings the Herdr window forward.
+export function focusTerminal(terminal) {
+  const chatPane = chatPaneOf(terminal);
+  act('pane.focus', chatPane ? { pane: chatPane } : { terminal });
+  run(process.env.HWS_OSASCRIPT || '/usr/bin/osascript', ['-e', 'tell application id "dev.herdr.app" to activate'], READ_MS);
+}
+
 export function sendText(terminal, text) {
   const result = run(hcBin(), ['send', terminal, text], ACT_MS);
   if (!result.ok) {
@@ -135,7 +156,7 @@ export function findTerminal(live, terminal) {
     for (const tab of space.tabs ?? []) {
       for (const record of tab.terminals ?? []) {
         if (record.terminal === terminal || subAgentAddresses(record).includes(terminal)) {
-          return { space, tab, pane: record.pane };
+          return { space, tab, record, pane: record.pane };
         }
       }
     }
