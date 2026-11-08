@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MAC_CLIPBOARD, parseMacClipboard, insertedText, isImageNames, namesMatch } from "../hws-chat/clipboard.js";
+import { MAC_CLIPBOARD, parseMacClipboard, insertedRange, isImageNames, namesMatch, imagePaths } from "../hws-chat/clipboard.js";
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
 const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -34,8 +34,8 @@ test("parses copied files and pasted images", () => {
 });
 
 test("finds what a paste inserted", () => {
-  assert.equal(insertedText("ab", "aXYb"), "XY");
-  assert.equal(insertedText("", "shot.png"), "shot.png");
+  assert.deepEqual(insertedRange("ab", "aXYb"), { start: 1, end: 3, text: "XY" });
+  assert.deepEqual(insertedRange("", "shot.png"), { start: 0, end: 8, text: "shot.png" });
 });
 
 test("recognises Finder's pasted names", () => {
@@ -45,6 +45,19 @@ test("recognises Finder's pasted names", () => {
   assert.equal(isImageNames(""), false);
   assert.equal(namesMatch("a.png\nb.jpg", [{ name: "b.jpg" }, { name: "a.png" }]), true);
   assert.equal(namesMatch("a.png", [{ name: "b.png" }]), false);
+});
+
+test("recognises a copied image as a path or a file URL", () => {
+  const path = "/Users/me/Library/Application Support/CleanShot/media/CleanShot 2026-11-08 at 2.28.05 AM@2x.png";
+  assert.deepEqual(imagePaths(path), [path]);
+  assert.deepEqual(imagePaths(`file://${path.replaceAll(" ", "%20")}`), [path]);
+  assert.deepEqual(imagePaths(`'${path}'`), [path]);
+  assert.deepEqual(imagePaths(path.replaceAll(" ", "\\ ")), [path]);
+  assert.deepEqual(imagePaths("/a.png\n/b.jpg"), ["/a.png", "/b.jpg"]);
+  assert.equal(imagePaths("see /a.png"), null);
+  assert.equal(imagePaths("/a/notes.txt"), null);
+  assert.equal(imagePaths("https://example.com/a.png"), null);
+  assert.equal(imagePaths(""), null);
 });
 
 test("reads a PNG, a TIFF, copied files and an empty pasteboard", { skip: !onMac }, () => {

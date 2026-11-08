@@ -29,6 +29,28 @@ for p in "$pid" $(kids "$pid"); do
     [ -n "$f" ] && { echo "$f"; exit 0; }
   fi
 done
+[ "$kind" = codex ] || exit 0
+
+# Codex's shared app-server holds the log now, so the process can't name it. The session must be
+# the only one started in this folder since this process began, with no other Codex in the folder.
+cwd_of() {
+  if [ -d "/proc/$1" ]; then readlink "/proc/$1/cwd"; else lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1; fi
+}
+cwd=$(cwd_of "$pid")
+[ -n "$cwd" ] || exit 0
+case "$cwd" in *\\'*) exit 0 ;; esac
+for q in $(pgrep -x codex 2>/dev/null); do
+  [ "$q" != "$pid" ] && [ "$(cwd_of "$q")" = "$cwd" ] && exit 0
+done
+db=$(ls -t "$HOME"/.codex/state_*.sqlite 2>/dev/null | head -1)
+[ -n "$db" ] || exit 0
+age=$(ps -o etime= -p "$pid" | awk -F'[-:]' '{ n=NF; s=$n+$(n-1)*60; if(n>=3)s+=$(n-2)*3600; if(n==4)s+=$1*86400; print s }')
+[ -n "$age" ] || exit 0
+since=$(( ($(date +%s) - age - 2) * 1000 ))
+rows=$(sqlite3 -readonly "$db" "select rollout_path from threads where cwd='$cwd' and originator='codex-tui' and created_at_ms>=$since" 2>/dev/null)
+count=$(printf '%s\\n' "$rows" | grep -c .)
+[ "$count" = 0 ] && echo pending
+[ "$count" = 1 ] && echo "$rows"
 true`;
 
 // Reads a log on the agent's machine, sending back only what the chat shows. Each kept line
@@ -163,7 +185,23 @@ const time = (s) => Date.parse(s ?? "") || 0;
 
 // Text Claude Code puts in a user line that the person didn't type.
 const INJECTED = /^\s*(<(local-command-|system-reminder|bash-|task-notification|user-memory-input|user-prompt-submit-hook|command-message)|Caveat: The messages below|\[Request interrupted)/;
-const CODEX_INJECTED = /^\s*(# AGENTS\.md instructions|<(environment_context|user_instructions|user_shell_command|turn_aborted|subagent_notification|skill|INSTRUCTIONS)\b)/;
+const CODEX_IMAGE_TAG = /^<image name=\[Image #\d+\] path="(.*)">$/;
+const IMAGE_PATH_LINE = /^\/\S+\.(png|jpe?g|gif|webp|bmp|tiff?|heic)$/i;
+
+// The chat sends images to Codex as path lines after the words. -> the words and those paths.
+function splitTrailingImagePaths(text) {
+  const lines = String(text).split("\n");
+  const paths = [];
+  while (lines.length) {
+    const last = lines[lines.length - 1].trim();
+    if (last && !IMAGE_PATH_LINE.test(last)) break;
+    if (last) paths.unshift(last);
+    lines.pop();
+  }
+  return { text: paths.length ? lines.join("\n") : String(text), paths };
+}
+
+const CODEX_INJECTED =/^\s*(# AGENTS\.md instructions|<(environment_context|user_instructions|user_shell_command|turn_aborted|subagent_notification|skill|INSTRUCTIONS)\b)/;
 
 // What the person typed, without what the CLI or herdr-core wrapped around it.
 // A message another agent sent with `hc send` comes as <hc from="t3 name">text</hc>.
@@ -354,7 +392,7 @@ function claudeUser(c) {
   // "[Image #1]" markers it leaves in the text go.
   const images = c.filter((b) => b?.type === "image").length;
   const parts = c.filter((b) => b?.type === "text" && typeof b.text === "string")
-    .map((b) => cleanUser(images ? b.text.replace(/\[Image #\d+\]\s*/g, "") : b.text)).filter(Boolean);
+    .map((b) => cleanUser(images ? b.text.replace(/^(?:\[Image #\d+\]\s*)+/, "") : b.text)).filter(Boolean);
   if (!parts.length) return images ? { text: "", images } : null;
   const reactions = parts.flatMap((p) => p.reactions ?? []), news = parts.flatMap((p) => p.news ?? []);
   const pilot = parts.find((p) => p.pilot)?.pilot;
@@ -698,8 +736,8 @@ export class Conversation {
     const c = typeof l.content === "string" ? l.content : "";
     if (l.operation === "enqueue") {
       // its pictures are "[Image #1]" markers in the words there
-      const images = (c.match(/\[Image #\d+\]/g) ?? []).length;
-      const u = c && !c.includes("<task-notification>") ? claudeUser(c.replace(/\[Image #\d+\]\s*/g, "")) : null;
+      const images = new Set(c.match(/\[Image #\d+\]/g) ?? []).size;
+      const u = c && !c.includes("<task-notification>") ? claudeUser(c.replace(/^(?:\[Image #\d+\]\s*)+/, "")) : null;
       if (u || images) this.queue.push({ id: `q${off}`, raw: c, at: time(l.timestamp), text: u?.text ?? "", images });
       else this.queue.push({ id: `q${off}`, raw: c, at: time(l.timestamp) });
       if (this.queue.length > 50) this.queue.shift();
@@ -940,13 +978,25 @@ export class Conversation {
       if (p.type === "message" && p.role === "user") {
         const items = Array.isArray(p.content) ? p.content : [];
         const kinds = p.internal_chat_message_metadata_passthrough?.content_item_kinds;
+        const tagged = [];
         const words = items.map((it, i) => {
           if (it?.type !== "input_text" || typeof it.text !== "string") return "";
+          const tag = CODEX_IMAGE_TAG.exec(it.text.trim());
+          if (tag) { tagged.push(tag[1]); return ""; }
+          if (it.text.trim() === "</image>") return "";
           if (Array.isArray(kinds) && kinds.length === items.length) return kinds[i] === "user.text" ? it.text.trim() : "";
           return CODEX_INJECTED.test(it.text) ? "" : it.text.trim();
         }).filter(Boolean).join("\n\n");
-        const u = words ? cleanUser(words) : null;
-        if (u) this.user(`u${off}`, { ...u, at: time(l.timestamp) });
+
+        const { text, paths: sentPaths } = splitTrailingImagePaths(words.replace(/^(?:\[Image #\d+\]\s*)+/, ""));
+        const paths = [...tagged, ...sentPaths];
+        const images = Math.max(items.filter((it) => it?.type === "input_image").length, paths.length);
+        const u = text ? cleanUser(text) : images ? { text: "" } : null;
+        if (u) {
+          this.user(`u${off}`, { ...u, at: time(l.timestamp), images });
+          const last = this.items[this.items.length - 1];
+          if (paths.length && last?.kind === "user") last.paths = paths;
+        }
       } else if (p.type === "message" && p.role === "assistant") {
         const words = this.agentText((Array.isArray(p.content) ? p.content : []).filter((it) => it?.type === "output_text" && it.text?.trim()).map((it) => it.text.trim()).join("\n\n"));
         if (words) this.push({ kind: "agent", id: `a${off}`, text: words, at: time(l.timestamp) });

@@ -7,7 +7,12 @@ const RULE = "─".repeat(100);
 test("Claude Code's lines come from below the prompt box", () => {
   const screen = ["⏺ pineapple", "", "✎ Sketch", RULE, "❯ ", RULE,
     "  Opus 5.5 | herdr-workspaces | main", "  [█████░░░░░] 26% | $4.30", "  ⏵⏵ auto mode on (shift+tab to cycle)", "", ""].join("\n");
-  assert.deepEqual(statusLines(screen, "claude"), ["Opus 5.5 | herdr-workspaces | main", "[█████░░░░░] 26% | $4.30", "⏵⏵ auto mode on (shift+tab to cycle)"]);
+  assert.deepEqual(statusLines(screen, "claude"), ["herdr-workspaces | main", "[█████░░░░░] 26% | $4.30", "⏵⏵ auto mode on (shift+tab to cycle)"]);
+});
+
+test("the model and effort are dropped because the model button shows them", () => {
+  const screen = [RULE, "❯ ", RULE, "  Opus 5.5 | herdr-workspaces | main | effort:high | Max", "  Haiku 5.5"].join("\n");
+  assert.deepEqual(statusLines(screen, "claude"), ["herdr-workspaces | main | Max"]);
 });
 
 test("Claude Code with no status line gives an empty list", () => {
@@ -25,7 +30,7 @@ test("a screen with no prompt box keeps the last lines", () => {
 
 test("Codex's lines come from below its prompt, without the key hints", () => {
   const screen = ["", "› Ask Codex to do anything", "", "  GPT-6.1-Sol high · ~/Projects/InstantJams · Context 0% used · 5h 100% left", "  ← for agents · ? for shortcuts", ""].join("\n");
-  assert.deepEqual(statusLines(screen, "codex"), ["GPT-6.1-Sol high · ~/Projects/InstantJams · Context 0% used · 5h 100% left"]);
+  assert.deepEqual(statusLines(screen, "codex"), ["~/Projects/InstantJams · Context 0% used · 5h 100% left"]);
 });
 
 test("a Codex choice screen keeps the last lines", () => {

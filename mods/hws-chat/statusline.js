@@ -7,6 +7,8 @@ const CHOICE = /^\s*[❯›]\s*\d+\./;
 const CLAUDE_PROMPT = /^\s*[❯>]/;
 const CODEX_PROMPT = /^\s*›/;
 const KEY_HINT = /^(← for agents · )?\? for shortcuts$/;
+const MODEL = /^(claude\s+)?(opus|sonnet|haiku|fable|gpt|o[134])\b[-\w. ]*$/i;
+const EFFORT = /^effort:\s*\S+$/i;
 
 function belowClaudePrompt(lines) {
   const rules = lines.flatMap((line, i) => (RULE.test(line) ? [i] : []));
@@ -21,10 +23,20 @@ function belowCodexPrompt(lines) {
   return prompt < 0 || CHOICE.test(lines[prompt]) ? null : lines.slice(prompt + 1);
 }
 
+// Drops the model and effort, which the chat's model button already shows.
+function withoutModel(line) {
+  const separator = [" | ", " · "].find((s) => line.includes(s)) ?? " | ";
+  return line.split(separator).filter((part) => !MODEL.test(part.trim()) && !EFFORT.test(part.trim())).join(separator);
+}
+
 export function statusLines(screen, kind) {
   const lines = String(screen ?? "").split("\n");
   const below = kind === "claude" ? belowClaudePrompt(lines) : kind === "codex" ? belowCodexPrompt(lines) : null;
   if (!below) return null;
-  const shown = below.map((line) => line.trim()).filter((line) => line && !KEY_HINT.test(line) && !line.startsWith("[hc]"));
+  const shown = below
+    .map((line) => line.trim())
+    .filter((line) => line && !KEY_HINT.test(line) && !line.startsWith("[hc]"))
+    .map(withoutModel)
+    .filter(Boolean);
   return shown.length <= MAX_LINES ? shown : null;
 }

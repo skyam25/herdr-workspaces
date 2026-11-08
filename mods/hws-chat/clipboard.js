@@ -34,16 +34,34 @@ export function parseMacClipboard(stdout) {
   return image ? { image: image[1] } : null;
 }
 
-// What an edit inserted, given the box's text before and after.
-export function insertedText(was, now) {
+// What an edit inserted, given the box's text before and after. -> { start, end, text }.
+export function insertedRange(was, now) {
   let start = 0;
   while (start < was.length && was[start] === now[start]) start++;
-  let end = 0;
-  while (end < was.length - start && was[was.length - 1 - end] === now[now.length - 1 - end]) end++;
-  return now.slice(start, now.length - end);
+  let tail = 0;
+  while (tail < was.length - start && was[was.length - 1 - tail] === now[now.length - 1 - tail]) tail++;
+  const end = now.length - tail;
+  return { start, end, text: now.slice(start, end) };
 }
 
 const nameLines = (text) => String(text).split("\n").map((line) => line.trim()).filter(Boolean);
+
+function imagePath(line) {
+  let path = line.replace(/^(['"])(.*)\1$/, "$2");
+  if (path.startsWith("file://")) {
+    try { path = decodeURIComponent(path.slice(7).replace(/^localhost/, "")); } catch { return null; }
+  } else {
+    path = path.replace(/\\(.)/g, "$1");
+  }
+  return path.startsWith("/") && IMAGE_NAME.test(path) ? path : null;
+}
+
+// The box receives a copied image file as its path or file URL. -> the paths, or null for other text.
+export function imagePaths(text) {
+  const lines = nameLines(text);
+  const paths = lines.map(imagePath);
+  return lines.length && paths.every(Boolean) ? paths : null;
+}
 
 // Finder pastes a copied file's name as text. Only text shaped like that is worth checking.
 export const isImageNames = (text) => nameLines(text).length > 0 && nameLines(text).every((line) => IMAGE_NAME.test(line));

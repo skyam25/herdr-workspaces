@@ -64,7 +64,8 @@ import { CallScreen } from "./call-screen.js";
 import { on as addonOn } from "./addons.js";
 import { note } from "./usage.js";
 import { statusLines } from "./statusline.js";
-import { insertedText, isImageNames, namesMatch } from "./clipboard.js";
+import { insertedRange, isImageNames, namesMatch, imagePaths } from "./clipboard.js";
+import { imageToken, nextImageNumber, numberForSend, orphanedImages, withoutLeadingLabels } from "./imagelabels.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
 const PAGE = 200;
@@ -73,7 +74,15 @@ const PAGE = 200;
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
 const COLUMN = 760;
+const FLIP_FADE_MS = 160;
+const REVEAL_LATEST_MS = 350;
 const CLI_STATUS_MS = 3000;
+const CLI_STATUS_FIRST_MS = 200;
+const CLI_STATUS_FIRST_FOR_MS = 15000;
+
+// The last values per terminal, so a chat opened again shows them at once.
+const lastCliStatus = new Map();
+const lastPick = new Map();
 const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
@@ -267,6 +276,11 @@ export default class Chat extends View {
     this.results = new Map();
     this.pinned = true;
     this.width = 600;
+
+    // The pane fades in once its conversation is ready, or after a short wait at most.
+    this.revealed = this.inner || this.thread;
+    if (!this.revealed) cx.timer.after(REVEAL_LATEST_MS, (cx) => { this.revealed = true; cx.notify(); });
+
     this.heights = new Map();
     // When each row's height was first measured: kept measuring a few seconds after (measurer).
     this.measuredAt = new Map();
@@ -288,6 +302,7 @@ export default class Chat extends View {
       // A big paste (over 8 KB or 200 lines) becomes a text file to send, not text in the box.
       const was = this.lastValue ?? "", now = this.box.value();
       this.lastValue = now;
+      this.syncImageLabels();
       if (now.length - was.length > 8192 || now.split("\n").length - was.split("\n").length > 200) {
         let a = 0;
         while (a < was.length && was[a] === now[a]) a++;
@@ -300,14 +315,33 @@ export default class Chat extends View {
         cx.spawn(async (cx) => { const f = await attach.textFile(pasted); if (f) { this.addFiles([f]); this.saveSoon(cx); cx.notify(); } });
         return;
       }
+      const inserted = now.length - was.length > 1 ? insertedRange(was, now) : { start: 0, end: 0, text: "" };
+      const removeInserted = () => {
+        this.box.set_selected_range({ start: inserted.start, end: inserted.end });
+        this.box.replace("");
+        this.lastValue = this.box.value();
+      };
+
+      // A copied image file arrives as its path or file URL, so a label replaces it at once.
+      const pastedImages = imagePaths(inserted.text);
+      if (pastedImages) {
+        const before = this.box.content();
+        removeInserted();
+        cx.spawn(async (cx) => {
+          if (await attach.allExist(pastedImages)) this.addInline(attach.paths(pastedImages));
+          else { this.box.set_value(before); this.lastValue = this.box.value(); }
+          this.saveSoon(cx);
+          cx.notify();
+        });
+        return;
+      }
+
       // Finder pastes a copied file's name as text, so a matching name becomes an attachment.
-      const inserted = now.length - was.length > 1 ? insertedText(was, now) : "";
-      if (isImageNames(inserted)) cx.spawn(async (cx) => {
+      if (isImageNames(inserted.text)) cx.spawn(async (cx) => {
         const got = await attach.fromClipboard().catch(() => []);
-        if (!namesMatch(inserted, got) || this.box.value() !== now) return;
-        this.box.set_value(was);
-        this.lastValue = was;
-        this.addFiles(got);
+        if (!namesMatch(inserted.text, got) || this.box.value() !== now) return;
+        removeInserted();
+        this.addInline(got);
         this.saveSoon(cx);
         cx.notify();
       });
@@ -328,7 +362,7 @@ export default class Chat extends View {
     // A paste with no text: the clipboard's image or copied files become attachments.
     this.box.on("paste_other", (_e, cx) => cx.spawn(async (cx) => {
       const got = await attach.fromClipboard().catch(() => []);
-      if (got.length) { this.addFiles(got); this.saveSoon(cx); cx.notify(); }
+      if (got.length) { this.addInline(got); this.saveSoon(cx); cx.notify(); }
     }));
     this.wasFocused = false;
     // Up/Down/Tab/Escape reach the textarea first, which keeps them. While the "/" list shows
@@ -450,6 +484,13 @@ export default class Chat extends View {
       if (this.status() === "working" || rows.some((r) => Date.now() - (r.at ?? 0) < 61000) || (rows.length && ticks % 30 === 0)) cx.notify();
     });
     cx.timer.every(CLI_STATUS_MS, (cx) => this.readCliStatus(cx));
+
+    // The first read can't wait for the slow timer, and it needs the agent's kind and pane first.
+    const openedAt = Date.now();
+    cx.timer.every(CLI_STATUS_FIRST_MS, (cx) => {
+      if (!lastCliStatus.has(this.addr) && Date.now() - openedAt < CLI_STATUS_FIRST_FOR_MS) this.readCliStatus(cx);
+    });
+
     // An Assistant's chat keeps its tasks current for their news lines (newsLines()): herdr-task's own
     // statuses, the same as the Tasks panel's and the news it sends.
     cx.timer.every(8000, (cx) => {
@@ -608,7 +649,8 @@ export default class Chat extends View {
     let d = null;
     try { d = JSON.parse(text ?? "null"); } catch {}
     if (!d) return;
-    if (d.text && !this.box.value()) this.box.set_value(d.text);
+    if (d.text && !this.box.value()) this.box.set_value(d.tokens?.length ? { text: d.text, tokens: d.tokens } : d.text);
+    this.lastValue = this.box.value();
     this.files = Array.isArray(d.files) ? d.files : [];
     this.quote = d.quote ?? null;
     this.queue = Array.isArray(d.queue) ? d.queue : [];
@@ -621,7 +663,7 @@ export default class Chat extends View {
   }
 
   async saveDraft() {
-    const d = { text: this.box.value(), files: this.files, quote: this.quote, queue: this.queue };
+    const d = { text: this.box.value(), tokens: this.box.tokens(), files: this.files, quote: this.quote, queue: this.queue };
     this.markTyping(!!(d.text.trim() || d.files.length || d.quote));
     const empty = !d.text.trim() && !d.files.length && !d.quote && !d.queue.length;
     try {
@@ -641,6 +683,44 @@ export default class Chat extends View {
     this.typing = on && addr ? { addr, at } : null;
     if (was && was.addr && was.addr !== this.typing?.addr) hc(["label", was.addr, "herdr.typing="]).catch(() => {});
     if (this.typing) hc(["label", addr, `herdr.typing=${at}`]).catch(() => {});
+  }
+
+  // Attaches files, and labels each image in the box at the caret.
+  addInline(list) {
+    for (const f of list) {
+      if (!f.image || this.files.some((x) => x.path === f.path)) { this.addFiles([f]); continue; }
+      const number = nextImageNumber(this.files);
+      this.addFiles([{ ...f, label: number }]);
+      this.box.replace_with_token(imageToken(number));
+      this.box.replace(" ");
+    }
+    this.lastValue = this.box.value();
+    this.sizeBox();
+  }
+
+  removeImageLabel(file) {
+    if (!file.label) return;
+    const span = this.box.tokens().find((s) => s.token.id === imageToken(file.label).id);
+    if (!span) return;
+    this.box.set_selected_range(span.range);
+    this.box.replace("");
+    this.lastValue = this.box.value();
+  }
+
+  // Deleting an image's label from the box removes the image.
+  syncImageLabels() {
+    const gone = orphanedImages(this.files, this.box.tokens());
+    if (!gone.length) return;
+    for (const f of gone) attach.drop(f);
+    this.files = this.files.filter((f) => !gone.includes(f));
+  }
+
+  // Claude Code numbers images across its session, so labels continue from the highest in its log.
+  async imageBase() {
+    if (this.kind !== "claude" || !this.path) return 0;
+    const script = 'grep -oE "\\[Image #[0-9]+\\]" "$1" | tr -dc "0-9\\n" | sort -n | tail -1';
+    const r = await exec("sh", ["-c", script, "x", this.path], { on: this.machine }).catch(() => null);
+    return Math.max(Number(r?.stdout?.trim()) || 0, this.imagesUsed ?? 0);
   }
 
   addFiles(list) {
@@ -1390,16 +1470,28 @@ export default class Chat extends View {
       return;
     }
     // Herdr tag lines before the words: the message it replies to, the tasks it mentions.
-    const body = messageBody({ text: msg.text, quote: msg.quote?.text ?? null, tags: this.taskTags(msg.text) });
+    let body = messageBody({ text: msg.text, quote: msg.quote?.text ?? null, tags: this.taskTags(msg.text) });
     const p = { id: `pending-${msg.id}`, text: msg.text, replyTo: msg.quote ? excerpt(msg.quote.text, 80) : null, files: msg.files.filter((f) => !f.image).map((f) => f.name),
       paths: msg.files.filter((f) => f.image).map((f) => f.path), at: Date.now(), sent: body,
-      match: norm(msg.text).slice(0, 60) || null, msg };
+      match: norm(withoutLeadingLabels(msg.text)).slice(0, 60) || null, msg };
     this.pending.push(p);
     const menu = msg.files.length ? null : slash.opensMenu(this.kind, msg.text);
     if (menu) this.note = { id: `note-${msg.id}`, text: `/${menu} opens a menu in the terminal. Switching to it.` };
     cx.spawn(async (cx) => {
       let r;
       try {
+        if (!msg.numbered && msg.files.some((f) => f.label)) {
+          const base = await this.imageBase();
+          const sent = numberForSend(msg.text, msg.files, base);
+          msg.text = sent.text;
+          msg.files = sent.files;
+          msg.numbered = true;
+          this.imagesUsed = base + msg.files.filter((f) => f.image).length;
+          body = messageBody({ text: msg.text, quote: msg.quote?.text ?? null, tags: this.taskTags(msg.text) });
+          p.text = msg.text;
+          p.paths = msg.files.filter((f) => f.image).map((f) => f.path);
+          p.match = norm(withoutLeadingLabels(msg.text)).slice(0, 60) || null;
+        }
         const paths = await attach.deliver(msg.files, this.addr, this.machine);
         p.sent = [body, ...paths].filter(Boolean).join("\n\n");
         // (a message with pictures: its Enter again if Claude Code lost it, sendTyped(); one that stayed in its box
@@ -1500,7 +1592,8 @@ export default class Chat extends View {
     this.queue = this.queue.filter((m) => m !== msg);
     const now = this.box.value().trim();
     this.box.set_value(now ? `${msg.text}\n\n${now}` : msg.text);
-    this.addFiles(msg.files);
+    // The text comes back without tokens, so labels on these files would count as deleted.
+    this.addFiles(msg.files.map(({ label, ...file }) => file));
     if (msg.quote && !this.quote) this.quote = msg.quote;
     this.box.focus();
     this.saveSoon(cx);
@@ -3686,7 +3779,7 @@ export default class Chat extends View {
         return div().relative().flex_none().child(tile)
           .child(div().id(`file-x-${i}`).absolute().top(-6).right(-6).size(18).flex().items_center().justify_center().rounded(9).cursor_pointer()
             .bg(t.popover).border_1().border_color(t.border).text_color(t.muted).hover((s) => s.text_color(t.foreground))
-            .on_click((_e, cx) => { cx.stop_propagation(); attach.drop(f); this.files = this.files.filter((x) => x !== f); this.saveSoon(cx); cx.notify(); })
+            .on_click((_e, cx) => { cx.stop_propagation(); attach.drop(f); this.removeImageLabel(f); this.files = this.files.filter((x) => x !== f); this.saveSoon(cx); cx.notify(); })
             .child(svg("mods/hws-chat/x.svg").size(10)));
       }))));
   }
@@ -3800,7 +3893,7 @@ export default class Chat extends View {
       const list = (r?.stdout ?? "").split("\n").filter(Boolean);
       if (r && r.code !== 0) this.error = "Couldn't open the file picker.";
       if (!list.length) { cx.notify(); return; }
-      this.addFiles(attach.paths(list));
+      this.addInline(attach.paths(list));
       this.saveSoon(cx);
       this.box.focus();
       cx.notify();
@@ -3827,7 +3920,9 @@ export default class Chat extends View {
 
   // The bottom row's left part, the same in a call and out of it: what the agent runs on (opens the picker; not during a call).
   pickParts(t, open) {
-    const c = this.current();
+    const live = this.current();
+    if (live?.label || live?.model) lastPick.set(this.addr, live);
+    const c = live?.label || live?.model ? live : lastPick.get(this.addr) ?? live;
     // Sized to its words, never cut: a narrow chat drops "· 1M" first.
     const model = String(c?.label ?? agent.modelName(c?.model) ?? "");
     const pick = [(this.width ?? 600) < 460 ? model.replace(/\s*·?\s*1M$/, "") : model, agent.levelName(c?.effort), c?.fast ? "Fast" : null].filter(Boolean).join(" · ") || agent.NAMES[this.kind] || "Agent";
@@ -3962,7 +4057,7 @@ export default class Chat extends View {
         cx.stop_propagation();
         this.enter(cx, Boolean(m.control || m.platform));
       })
-      .on_drop((e, cx) => { this.addFiles(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); })
+      .on_drop((e, cx) => { this.addInline(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); })
       // Where the box is in the window, for a typed /model's picker (modelCommand()).
       .on_mouse_move((e) => { if (e.bounds) this.composerAt = e.bounds; })
       .border_color(this.focused ? t.accent : t.input).bg(t.background)
@@ -4015,9 +4110,8 @@ export default class Chat extends View {
         const screen = (await hc(["read", addr]).catch(() => null))?.stdout;
         const lines = screen === undefined ? null : statusLines(screen, this.kind);
         if (!lines || addr !== this.addr) return;
-        if (addr === this.cliStatusAddr && JSON.stringify(lines) === JSON.stringify(this.cliStatusLines)) return;
-        this.cliStatusAddr = addr;
-        this.cliStatusLines = lines;
+        if (JSON.stringify(lines) === JSON.stringify(lastCliStatus.get(addr))) return;
+        lastCliStatus.set(addr, lines);
         cx.notify();
       } finally {
         this.cliStatusReading = false;
@@ -4026,10 +4120,11 @@ export default class Chat extends View {
   }
 
   cliStatus(t) {
-    if (this.cliStatusAddr !== this.addr || !this.cliStatusLines?.length) return null;
+    const lines = lastCliStatus.get(this.addr);
+    if (!lines?.length) return null;
     return v_flex().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(20).pt(6).gap(1)
       .font_family(settings().font_family ?? "JetBrains Mono").text_size(11.5).text_color(t.muted)
-      .children(this.cliStatusLines.map((line, i) => div().id(`chat-cli-status-${i}`).w_full().truncate().child(line)));
+      .children(lines.map((line, i) => div().id(`chat-cli-status-${i}`).w_full().truncate().child(line)));
   }
 
   // ---- alerts ---------------------------------------------------------------------------------
@@ -4212,7 +4307,14 @@ export default class Chat extends View {
     if (st === "working" && this.lastWorking !== "working") this.workingSince = Date.now();
     if (st !== "working") this.stopping = false;
     this.lastWorking = st;
+    if (!this.revealed && !this.revealing && this.phase !== "finding") {
+      this.revealing = true;
+      cx.timer.after(0, (cx) => { this.revealed = true; cx.notify(); });
+    }
+    const chatPane = this.myPane();
+    const leaving = Boolean(chatPane) && shared("hws-chat.leaving")?.pane === chatPane;
     const root = v_flex().id("chat").size_full().bg(t.background).text_color(t.foreground).text_size(13)
+      .opacity(this.revealed && !leaving ? 1 : 0).transition("opacity", { duration: FLIP_FADE_MS, easing: "ease-out" })
       .on_size_change((size, cx) => {
         if (Math.abs(size.width - this.width) > 1) this.width = size.width;
         this.height = size.height;
@@ -4224,7 +4326,7 @@ export default class Chat extends View {
       // Where a press was, for the action buttons under messages (rows can't take handlers).
       .on_mouse_down("left", (e) => { this.press = { x: e.local_position?.x, y: e.local_position?.y, at: Date.now() }; holdKeys(this.areaKey()); this.pressWin = e.position; this.keepIcons = null; if (e.bounds) this.noteArea(e.bounds); })
       // Files dropped anywhere on the chat go with the next message.
-      .on_drop((e, cx) => { this.addFiles(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); });
+      .on_drop((e, cx) => { this.addInline(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); });
 
     // Starting (or the new agent's log not there yet): the person's message shows at once.
     const starting = (this.phase === "starting" || (this.phase === "finding" && this.role && !this.path)) && this.pending.length > 0;

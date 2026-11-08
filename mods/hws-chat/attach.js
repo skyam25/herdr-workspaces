@@ -45,6 +45,11 @@ export async function fromClipboard() {
 // Dropped or pasted file paths as attachments.
 export const paths = (list) => list.filter(Boolean).map((p) => ({ path: p, name: base(p), image: isImage(p), temp: false }));
 
+export async function allExist(list) {
+  const checks = await Promise.all(list.map((p) => exec("test", ["-f", p]).catch(() => null)));
+  return checks.every((r) => r?.code === 0);
+}
+
 // An agent reads an image only from a path without spaces, and screenshot names have them.
 async function spacelessPath(f) {
   if (!f.image || !/\s/.test(f.path)) return f.path;

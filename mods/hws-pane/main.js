@@ -5,7 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { props, run, theme, home, exec, hc, nextCommand } from "herdr";
+import { props, run, theme, home, exec, hc, nextCommand, setShared } from "herdr";
 import { panes, terminals, inRender } from "./live.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { LABEL, sweep } from "./parked.js";
@@ -14,6 +14,8 @@ const CHAT = "hws-chat";
 const SWEEP_MS = 4000;
 const NEW_COPY_MS = 2000;
 const SWAP_GAP_MS = 3000;
+const CHAT_FADE_OUT_MS = 120;
+const LEAVING = "hws-chat.leaving";
 
 // Every header copy shares these.
 let lastSwap = 0;
@@ -116,15 +118,18 @@ export default class Pane extends View {
     if (open) { run("pane.focus", { pane: open }); return; }
     if (this.busy) return;
     this.busy = true;
+    this.going = "chat";
     const terminal = p.terminal;
     cx.spawn(async (cx) => {
       try {
         const out = await app("pane.split", { direction: "right", pane: p.pane, mod: CHAT, props: { terminal } });
         if (!out.pane) throw new Error("Herdr didn't open the chat");
-        await hc(["label", terminal, `${LABEL}=${out.pane}`]);
         run("pane.focus", { pane: out.pane });
-        await app("terminal.park", { terminal });
+
+        // These run together so the half-width split barely shows.
+        await Promise.all([hc(["label", terminal, `${LABEL}=${out.pane}`]), app("terminal.park", { terminal })]);
       } catch (e) {
+        this.going = null;
         toast({ title: "Chat didn't open", body: plainError(e), level: "error" });
       }
       this.busy = false;
@@ -150,19 +155,24 @@ export default class Pane extends View {
 
     if (this.busy) return;
     this.busy = true;
-    cx.spawn(async (cx) => {
+    this.going = "terminal";
+    setShared(LEAVING, { pane: chat, at: Date.now() });
+
+    // The chat fades out first, because a terminal can't fade in.
+    cx.timer.after(CHAT_FADE_OUT_MS, (cx) => cx.spawn(async (cx) => {
       try {
         await app("pane.focus", { pane: chat });
-        const out = await app("terminal.keep", { terminal, place: "right" });
-        await hc(["label", terminal, `${LABEL}=`]);
+        const [out] = await Promise.all([app("terminal.keep", { terminal, place: "right" }), hc(["label", terminal, `${LABEL}=`])]);
         if (out.pane) run("pane.focus", { pane: out.pane });
         await app("pane.close", { pane: chat });
       } catch (e) {
+        this.going = null;
+        setShared(LEAVING, null);
         toast({ title: "Terminal didn't come back", body: plainError(e), level: "error" });
       }
       this.busy = false;
       cx.notify();
-    });
+    }));
   }
 
   // Closing a chat ends its agent, as closing the agent's own pane would.
@@ -220,7 +230,7 @@ export default class Pane extends View {
         .child(this.button(t, `ph-d-${pane}`, "split-down", () => run("pane.split", { direction: "down", pane })))
         .child(this.button(t, `ph-z-${pane}`, self.zoomed ? "unzoom" : "zoom", () => run("pane.zoom", { pane })))
         .child(this.button(t, `ph-x-${pane}`, "close", () => { if (agent) this.ending = true; else run("pane.close", { pane }); })))
-      .when(canSwitch, (el) => el.child(segmented(`ph-mode-${pane}`, [["chat", "Chat"], ["terminal", "Terminal"]], chatMode ? "chat" : "terminal",
+      .when(canSwitch, (el) => el.child(segmented(`ph-mode-${pane}`, [["chat", "Chat"], ["terminal", "Terminal"]], this.going ?? (chatMode ? "chat" : "terminal"),
         (v, _e, cx) => (v === "chat" ? this.toChat(self, cx) : this.toTerminal(pane, cx)))));
   }
 }

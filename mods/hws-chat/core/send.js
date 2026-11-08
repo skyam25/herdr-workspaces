@@ -98,7 +98,7 @@ export function holds(box, body, exact = false) {
   const words = wordsLine(body);
   if (exact) {
     const bare = rest.replace(MARKS, " ").replace(/\s+/g, " ").trim();
-    return bare === words.replace(/\s+/g, " ") || (!bare && /\[(Image|Pasted text) #\d+/.test(rest));
+    return bare === words.replace(MARKS, " ").replace(/\s+/g, " ").trim() || (!bare && /\[(Image|Pasted text) #\d+/.test(rest));
   }
   if (words && rest.includes(words.slice(0, 24))) return true;
   return /\[(Image|Pasted text) #\d+/.test(rest);

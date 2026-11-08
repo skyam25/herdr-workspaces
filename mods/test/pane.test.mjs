@@ -51,7 +51,9 @@ test("Terminal restores the pane, clears the label, and closes the chat last", a
   const H = world({ panes: [CHAT_PANE], terminals: [parked("t1")] });
   const m = await mount("hws-pane", { pane: "p2" });
   await m.click("ph-mode-p2-terminal");
+  assert.deepEqual(H.log, [], "the chat fades out before the swap");
 
+  await m.fireTimer(120);
   assert.deepEqual(H.log, ["pane.focus", "terminal.keep", "pane.close"]);
   assert.deepEqual(H.hcCalls, [["label", "t1", "herdr.chat="]]);
 });

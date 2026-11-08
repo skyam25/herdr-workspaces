@@ -12,3 +12,5 @@
 - `hws-pane` drops Autopilot and Assistant slots and runs the parked-agent sweep.
 - `hws-chat` shows the CLI's status lines under the box, in `statusline.js`.
 - `hws-chat` reads the macOS clipboard and accepts Finder's copied files, in `clipboard.js` and `attach.js`.
+- `hws-chat` finds a Codex session by folder and start time when no process holds its log, in `core/chat-log.js`.
+- `hws-chat` labels attached images in the box as `[Image #N]`, in `imagelabels.js`, and keeps mid-message labels in the thread.
