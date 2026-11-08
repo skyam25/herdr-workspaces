@@ -13,6 +13,22 @@ export function locateTerminal(terminal) {
   return { manifest, tabId: manifest.terminals.find((t) => t.terminal === terminal).tabId };
 }
 
+export function workspaceOfTerminal(terminal) {
+  const { manifest } = locateTerminal(terminal);
+  if (!manifest) throw new HwsError(`terminal ${terminal} is not in a workspace`);
+  return manifest;
+}
+
+export function callingTerminal(flags) {
+  return flags.terminal ?? process.env.HC_TERMINAL_ID;
+}
+
+export function requireCallingTerminal(flags) {
+  const terminal = callingTerminal(flags);
+  if (!terminal) throw new UsageError('pass --terminal or run inside a Herdr terminal');
+  return terminal;
+}
+
 export function workspaceByRef(ref) {
   const byId = readManifest(ref);
   if (byId) return byId;
@@ -27,9 +43,7 @@ export function resolveWorkspace(flags) {
   if (flags.workspace) return workspaceByRef(flags.workspace);
   const terminal = process.env.HC_TERMINAL_ID;
   if (!terminal) throw new UsageError('pass --workspace or run inside a Herdr terminal');
-  const { manifest } = locateTerminal(terminal);
-  if (!manifest) throw new HwsError(`terminal ${terminal} is not in a workspace`);
-  return manifest;
+  return workspaceOfTerminal(terminal);
 }
 
 export function requireFlag(flags, name) {

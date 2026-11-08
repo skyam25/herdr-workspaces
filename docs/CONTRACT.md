@@ -93,7 +93,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws parent` | Prints the folder new work starts in: the last used, else `~/Projects`, else home |
 | `hws new throwaway [--name N]` | Creates a throwaway with one tab running `claude` |
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
-| `hws list` | Every manifest |
+| `hws list` | Every manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest |
 | `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T \| --standalone]` | Splits a pane beside T, starts the host, records the surface |
 | `hws surface done --id S --bundle DIR` | Moves DIR to the artifact store, delivers, closes the pane |
@@ -101,7 +101,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws artifact list [--workspace W]` | Artifacts |
 | `hws link ARTIFACT` | Prints `@<absolute prompt.md path>`, ready to paste into Claude |
 | `hws artifact terminal ARTIFACT` | Opens a new tab running `claude` with that artifact's prompt |
-| `hws promote --name N --folder F [--kind K]` | Makes the current throwaway a kept workspace and moves its artifacts |
+| `hws promote [--workspace W] --name N --folder F [--kind K]` | Makes a throwaway a kept workspace and moves its artifacts. W defaults to the current workspace |
 | `hws close [--workspace W] [--keep\|--trash]` | Closes the space. A throwaway with artifacts and no flag returns `{"decision":"needed","artifacts":[...]}` and closes nothing |
 | `hws resume [--workspace W]` | Runs `claude --resume` in shell panes whose recorded session lost its process |
 | `hws prune` | Removes manifests whose space no longer exists. Does nothing when the Herdr window does not answer |

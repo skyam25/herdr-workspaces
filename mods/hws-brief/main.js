@@ -80,7 +80,6 @@ export default class Brief extends View {
     this.note = null;
     this.last = null;
     this.picked = new Map();
-    this.docId = null;
     this.doc = EMPTY_DOC;
     this.current = null;
     this.at = 0;
@@ -164,9 +163,9 @@ export default class Brief extends View {
   }
 
   ensure(session, cx) {
+    const isSameSession = this.current?.sessionId === session.sessionId;
     this.current = session;
-    if (this.docId === session.sessionId) return;
-    this.docId = session.sessionId;
+    if (isSameSession) return;
     this.doc = EMPTY_DOC;
     this.note = null;
     this.load(session, cx);
@@ -174,7 +173,6 @@ export default class Brief extends View {
 
   clearDoc() {
     this.current = null;
-    this.docId = null;
     this.doc = EMPTY_DOC;
   }
 
@@ -185,7 +183,7 @@ export default class Brief extends View {
     const itemsPath = session.itemsPath ?? `${cwd}/.feedback/items/${id}.md`;
     cx.spawn(async (cx) => {
       const [outputs, items] = await Promise.all([readTextFile(outputsPath).catch(() => null), readTextFile(itemsPath).catch(() => null)]);
-      if (this.docId !== id) return;
+      if (this.current?.sessionId !== id) return;
       this.doc = { outputs: outputs === null ? [] : parseOutputs(outputs), items: items === null ? null : parseItems(items) };
       // A missing folder has nothing to watch, so the 10-second refresh arms this later.
       if (outputs !== null || items !== null) this.watch(`${cwd}/.feedback`, cx);

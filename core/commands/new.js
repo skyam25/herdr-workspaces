@@ -14,6 +14,12 @@ export function keptKind(value = 'general') {
   return value;
 }
 
+export function keptFields(flags) {
+  const name = requireFlag(flags, 'name');
+  const folder = requireFolder(expandFolder(requireFlag(flags, 'folder')));
+  return { name, folder, kind: keptKind(flags.kind) };
+}
+
 function createWorkspace({ name, kind, folder, instructions, tabNames, argv }) {
   const first = act('space.new', { name, folder, argv });
   act('tab.rename', { id: first.tab, name: tabNames[0] });
@@ -44,9 +50,7 @@ export function newTerminal(flags) {
 }
 
 export function newWorkspace(flags) {
-  const name = requireFlag(flags, 'name');
-  const folder = requireFolder(expandFolder(requireFlag(flags, 'folder')));
-  const kind = keptKind(flags.kind);
+  const { name, folder, kind } = keptFields(flags);
   const manifest = createWorkspace({
     name,
     kind,

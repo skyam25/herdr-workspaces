@@ -9,7 +9,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Part | State | Tests |
 |---|---|---|
 | `hws` CLI | Built | 81 pass |
-| Herdr mods | Built and installed | 49 simulated pass |
+| Herdr mods | Built and installed | 47 simulated pass |
 | Claude plugin | Built, not enabled | 22 pass |
 | Surface | Built | 1,209 unit tests pass, pty checks pass |
 

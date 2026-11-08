@@ -2,9 +2,9 @@
 // form as a second dialog, because the two need different sizes.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { theme, props, closeOverlay, openOverlay, focused, spaces } from "herdr";
-import { hws, message, FORM_SIZE, checkFolder, fillParent, makeInput, moveFocus, fieldLabel, field, areaField, button, folderRow, problemLine } from "./hws.js";
+import { v_flex } from "gpui-base";
+import { theme, props, closeOverlay, focused, spaces } from "herdr";
+import { hws, submitDialog, openWorkspaceForm, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine } from "./hws.js";
 
 export default class Launcher extends View {
   init(_props, cx) {
@@ -26,30 +26,15 @@ export default class Launcher extends View {
     makeInput(this, "instructions", { rows: 4, placeholder: "Optional. How agents should work and organize context here." });
     makeInput(this, "tabs", { value: "Plan, Build", submit });
     fillParent(this, cx);
-    this.inputs.name.focus();
-    cx.timer.after(600, () => this.inputs.name.focus());
+    focusField(this, "name", cx);
   }
 
   dismiss() {
     closeOverlay(props()?.overlay);
   }
 
-  // The dialog stays open until hws answers, so a failure can show in it.
   launch(key, args, cx) {
-    if (this.busy) return;
-    this.busy = key;
-    this.problem = null;
-    cx.notify();
-    cx.spawn(async (cx) => {
-      try {
-        await hws(args);
-        this.dismiss();
-      } catch (e) {
-        this.problem = message(e);
-        this.busy = null;
-        cx.notify();
-      }
-    });
+    submitDialog(this, key, () => hws(args), cx);
   }
 
   newTerminal(cx) {
@@ -60,39 +45,22 @@ export default class Launcher extends View {
 
   openForm() {
     this.dismiss();
-    openOverlay({ mod: "hws-new", kind: "dialog", modal: true, ...FORM_SIZE, props: { step: "workspace" } });
+    openWorkspaceForm();
   }
 
   create(cx) {
-    if (this.busy) return;
-    this.busy = "create";
-    this.problem = null;
-    cx.notify();
-    cx.spawn(async (cx) => {
-      const { path, problem } = await checkFolder(this.values.folder);
-      if (problem) {
-        this.problem = problem;
-        this.busy = null;
-        cx.notify();
-        return;
-      }
+    submitDialog(this, "create", async () => {
+      const path = await checkFolder(this.values.folder);
       const tabs = this.values.tabs.split(",").map((s) => s.trim()).filter(Boolean);
       const instructions = this.values.instructions.trim();
-      try {
-        await hws([
-          "new", "workspace",
-          "--name", this.values.name.trim() || "Untitled workspace",
-          "--folder", path,
-          ...(tabs.length > 0 ? ["--tabs", tabs.join(",")] : []),
-          ...(instructions ? ["--instructions", instructions] : []),
-        ]);
-        this.dismiss();
-      } catch (e) {
-        this.problem = message(e);
-        this.busy = null;
-        cx.notify();
-      }
-    });
+      await hws([
+        "new", "workspace",
+        "--name", this.values.name.trim() || "Untitled workspace",
+        "--folder", path,
+        ...(tabs.length > 0 ? ["--tabs", tabs.join(",")] : []),
+        ...(instructions ? ["--instructions", instructions] : []),
+      ]);
+    }, cx);
   }
 
   menuItems() {
@@ -149,20 +117,9 @@ export default class Launcher extends View {
 
   renderForm(t) {
     const isCreating = this.busy === "create";
-    return v_flex()
-      .id("hws-new-form")
+    return dialogRoot(t, "hws-new-form")
       .track_focus(this.handle)
-      .on_key_down((e, cx) => {
-        if (e.key === "tab") moveFocus(this, e.modifiers?.shift);
-        else if (e.key === "escape") this.dismiss();
-        else return;
-        cx.stop_propagation();
-      })
-      .size_full()
-      .min_h(0)
-      .bg(t.popover)
-      .text_color(t.foreground)
-      .text_size(13)
+      .on_key_down(formKeys(this, () => this.dismiss()))
       .child(
         v_flex()
           .id("hws-new-body")
@@ -172,18 +129,14 @@ export default class Launcher extends View {
           .p(18)
           .gap(12)
           .child(div().text_size(15).font_semibold().child("New workspace"))
-          .child(v_flex().child(fieldLabel(t, "Name")).child(field(t, this, "name")))
-          .child(v_flex().child(fieldLabel(t, "Folder")).child(folderRow(t, this)))
-          .child(v_flex().child(fieldLabel(t, "Instructions")).child(areaField(t, this, "instructions")))
-          .child(v_flex().child(fieldLabel(t, "Starting tabs, separated by commas")).child(field(t, this, "tabs")))
+          .child(labeled(t, "Name", field(t, this, "name")))
+          .child(labeled(t, "Folder", folderRow(t, this)))
+          .child(labeled(t, "Instructions", areaField(t, this, "instructions")))
+          .child(labeled(t, "Starting tabs, separated by commas", field(t, this, "tabs")))
           .when(Boolean(this.problem), (el) => el.child(problemLine(t, this.problem))),
       )
       .child(
-        h_flex()
-          .flex_none()
-          .p(12)
-          .gap(8)
-          .justify_end()
+        dialogFooter()
           .border_t(1)
           .border_color(t.border)
           .child(button(t, "cancel", "Cancel", false, () => this.dismiss()))

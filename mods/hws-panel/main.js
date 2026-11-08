@@ -4,20 +4,16 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, panes, spaces, focused, props, exec, home, theme, run, openOverlay, closeOverlay, watchFolder } from "herdr";
-import { hws, message, FORM_SIZE, KINDS, checkFolder, fillParent, makeInput, moveFocus, fieldLabel, field, areaField, button, folderRow, problemLine } from "./hws.js";
+import { agents, panes, spaces, focused, props, exec, theme, run, openOverlay, closeOverlay, watchFolder } from "herdr";
+import { hws, message, submitDialog, openWorkspaceForm, KINDS, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 
 const MOD = "hws-panel";
 const REFRESH_MS = 20000;
 const INSTRUCTIONS_HINT = "How agents should work and organize context here.";
-const STATE_ROOT = () => `${home()}/.local/state/herdr-workspaces`;
 
 const STATUS_WORD = { working: "Working", blocked: "Needs you", done: "Done", idle: "Idle" };
-const FIXED_KIND_NAME = { throwaway: "Throwaway" };
 
-const manifestsFrom = (value) => (Array.isArray(value) ? value : (value?.workspaces ?? value?.manifests ?? []));
-const linkFrom = (value) => (typeof value === "string" ? value : (value?.link ?? ""));
-const tilde = (path) => (path?.startsWith(`${home()}/`) ? `~${path.slice(home().length)}` : (path ?? ""));
+const openDialog = (width, height, dialogProps) => openOverlay({ mod: MOD, kind: "dialog", modal: true, width, height, props: dialogProps });
 
 function ago(ms) {
   const minutes = Math.floor(Math.max(0, ms) / 60000);
@@ -45,12 +41,10 @@ export default class Panel extends View {
       makeInput(this, "name", { value: p.name ?? "", placeholder: "Untitled workspace", submit });
       makeInput(this, "folder", { submit });
       fillParent(this, cx);
-      this.inputs.name.focus();
-      cx.timer.after(600, () => this.inputs.name.focus());
+      focusField(this, "name", cx);
     } else if (this.view === "instructions") {
       makeInput(this, "instructions", { rows: 9, value: p.instructions ?? "", placeholder: INSTRUCTIONS_HINT });
-      this.inputs.instructions.focus();
-      cx.timer.after(600, () => this.inputs.instructions.focus());
+      focusField(this, "instructions", cx);
     } else if (this.view === "decide") {
       this.handle.focus();
     } else {
@@ -88,7 +82,7 @@ export default class Panel extends View {
     this.fetching = true;
     cx.spawn(async (cx) => {
       try {
-        this.manifests = manifestsFrom(await hws(["list"]));
+        this.manifests = await hws(["list"]);
         this.problem = null;
       } catch (e) {
         this.problem = message(e);
@@ -105,8 +99,7 @@ export default class Panel extends View {
   // Reloads when this workspace's manifest changes. Surfaces write constantly
   // under the same folder, so other paths are ignored. A missing folder ends
   // the watch, and the next render arms it again.
-  watch(id, cx) {
-    const dir = `${STATE_ROOT()}/workspaces/${id}`;
+  watch(dir, cx) {
     this.watchDir = dir;
     if (this.watching.has(dir)) return;
     this.watching.add(dir);
@@ -160,7 +153,7 @@ export default class Panel extends View {
 
   copyLink(artifact, cx) {
     this.act(`link-${artifact.id}`, async () => {
-      const link = linkFrom(await hws(["link", artifact.id]));
+      const { link } = await hws(["link", artifact.id]);
       const r = await exec("sh", ["-c", 'printf %s "$1" | pbcopy', "sh", link]);
       if (r.code !== 0) throw new Error("Could not copy the link.");
       return "Link copied.";
@@ -179,54 +172,28 @@ export default class Panel extends View {
     this.act("close", async (cx) => {
       const answer = await hws(["close", "--workspace", workspace.id]);
       if (answer?.decision === "needed") {
-        openOverlay({ mod: MOD, kind: "dialog", modal: true, width: 460, height: 400, props: { view: "decide", workspace: workspace.id, name: workspace.name, artifacts: answer.artifacts ?? [] } });
+        openDialog(460, 400, { view: "decide", workspace: workspace.id, name: workspace.name, artifacts: answer.artifacts ?? [] });
       } else {
         this.refresh(cx);
       }
     }, cx);
   }
 
-  // Any live terminal of the workspace. `hws promote` finds the workspace through it.
-  promoteTerminal(workspace) {
-    const tabs = new Set(spaces().find((s) => s.id === workspace.id)?.tabs.map((tab) => tab.id) ?? []);
-    const live = panes().filter((p) => tabs.has(p.tab) && p.terminal).map((p) => p.terminal);
-    return workspace.terminals?.map((x) => x.terminal).find((address) => live.includes(address)) ?? live[0] ?? null;
-  }
-
   openPromote(workspace) {
-    openOverlay({ mod: MOD, kind: "dialog", modal: true, width: 460, height: 270, props: { view: "promote", name: workspace.name, terminal: this.promoteTerminal(workspace) } });
+    openDialog(460, 270, { view: "promote", workspace: workspace.id, name: workspace.name });
   }
 
   openInstructions(workspace) {
-    openOverlay({ mod: MOD, kind: "dialog", modal: true, width: 520, height: 340, props: { view: "instructions", workspace: workspace.id, instructions: workspace.instructions ?? "" } });
+    openDialog(520, 340, { view: "instructions", workspace: workspace.id, instructions: workspace.instructions ?? "" });
   }
 
   // Runs in the instructions dialog.
   saveInstructions(cx) {
-    if (this.busy) return;
-    this.busy = "instructions";
-    this.problem = null;
-    cx.notify();
-    cx.spawn(async (cx) => {
-      try {
-        await hws(["set", "--workspace", props().workspace, "--instructions", this.values.instructions.trim()]);
-        closeOverlay(props().overlay);
-      } catch (e) {
-        this.problem = message(e);
-        this.busy = null;
-        cx.notify();
-      }
-    });
+    submitDialog(this, "instructions", () => hws(["set", "--workspace", props().workspace, "--instructions", this.values.instructions.trim()]), cx);
   }
 
   renderInstructions(t) {
-    return v_flex()
-      .id("hws-instructions")
-      .size_full()
-      .min_h(0)
-      .bg(t.popover)
-      .text_color(t.foreground)
-      .text_size(13)
+    return dialogRoot(t, "hws-instructions")
       .child(
         v_flex()
           .flex_1()
@@ -239,11 +206,7 @@ export default class Panel extends View {
           .when(Boolean(this.problem), (el) => el.child(problemLine(t, this.problem))),
       )
       .child(
-        h_flex()
-          .flex_none()
-          .p(12)
-          .gap(8)
-          .justify_end()
+        dialogFooter()
           .child(button(t, "cancel", "Cancel", false, () => closeOverlay(props().overlay)))
           .child(button(t, "save-instructions", this.busy ? "Saving…" : "Save", true, (_e, cx) => this.saveInstructions(cx), !this.busy)),
       );
@@ -291,45 +254,15 @@ export default class Panel extends View {
 
   // Runs in the decide dialog.
   decide(flag, cx) {
-    if (this.busy) return;
-    this.busy = flag;
-    this.problem = null;
-    cx.notify();
-    cx.spawn(async (cx) => {
-      try {
-        await hws(["close", "--workspace", props().workspace, `--${flag}`]);
-        closeOverlay(props().overlay);
-      } catch (e) {
-        this.problem = message(e);
-        this.busy = null;
-        cx.notify();
-      }
-    });
+    submitDialog(this, flag, () => hws(["close", "--workspace", props().workspace, `--${flag}`]), cx);
   }
 
   // Runs in the Promote dialog.
   promote(cx) {
-    if (this.busy) return;
-    this.busy = "promote";
-    this.problem = null;
-    cx.notify();
-    cx.spawn(async (cx) => {
-      const { path, problem } = await checkFolder(this.values.folder);
-      if (problem) {
-        this.problem = problem;
-        this.busy = null;
-        cx.notify();
-        return;
-      }
-      try {
-        await hws(["promote", "--name", this.values.name.trim() || "Untitled workspace", "--folder", path], { terminal: props().terminal });
-        closeOverlay(props().overlay);
-      } catch (e) {
-        this.problem = message(e);
-        this.busy = null;
-        cx.notify();
-      }
-    });
+    submitDialog(this, "promote", async () => {
+      const path = await checkFolder(this.values.folder);
+      await hws(["promote", "--workspace", props().workspace, "--name", this.values.name.trim() || "Untitled workspace", "--folder", path]);
+    }, cx);
   }
 
   smallButton(t, id, text, action, enabled = true) {
@@ -483,6 +416,7 @@ export default class Panel extends View {
     const space = spaces().find((s) => s.id === workspace.id);
     const target = this.trackAgent(workspace.id);
     const canAttach = Boolean(target) && !this.busy;
+    const isThrowaway = workspace.kind === "throwaway";
     return v_flex()
       .id("hws-panel")
       .size_full()
@@ -503,13 +437,13 @@ export default class Panel extends View {
               .gap(8)
               .items_center()
               .child(div().flex_1().min_w(0).truncate().font_semibold().child(workspace.name))
-              .when(Boolean(FIXED_KIND_NAME[workspace.kind]), (el) =>
-                el.child(div().flex_none().px(5).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(FIXED_KIND_NAME[workspace.kind] ?? "")),
+              .when(isThrowaway, (el) =>
+                el.child(div().flex_none().px(5).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child("Throwaway")),
               ),
           )
           .when(Boolean(workspace.instructions), (el) => el.child(div().truncate().text_size(12).text_color(t.muted).child(workspace.instructions.split("\n")[0])))
           .child(div().truncate().text_size(11).text_color(t.dim).child(tilde(workspace.folder)))
-          .when(!FIXED_KIND_NAME[workspace.kind], (el) => el.child(this.kindSetting(t, workspace)))
+          .when(!isThrowaway, (el) => el.child(this.kindSetting(t, workspace)))
           .child(
             h_flex()
               .pt(6)
@@ -551,7 +485,7 @@ export default class Panel extends View {
       .when(offerNew, (el) =>
         el.child(
           h_flex().child(
-            button(t, "new-workspace", "New workspace…", false, () => openOverlay({ mod: "hws-new", kind: "dialog", modal: true, ...FORM_SIZE, props: { step: "workspace" } })),
+            button(t, "new-workspace", "New workspace…", false, openWorkspaceForm),
           ),
         ),
       );
@@ -570,26 +504,20 @@ export default class Panel extends View {
     if (this.manifests === null) return this.renderMessage(t, "Loading…", false);
     const workspace = this.manifests.find((m) => m.id === spaceId);
     if (!workspace) return this.renderMessage(t, "This space is not a workspace.", true);
-    this.watch(workspace.id, cx);
+    this.watch(workspace.dir, cx);
     return this.renderWorkspace(t, workspace);
   }
 
   renderDecide(t) {
     const p = props() ?? {};
     const artifacts = p.artifacts ?? [];
-    return v_flex()
-      .id("hws-decide")
+    return dialogRoot(t, "hws-decide")
       .track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.key !== "escape") return;
         closeOverlay(props().overlay);
         cx.stop_propagation();
       })
-      .size_full()
-      .min_h(0)
-      .bg(t.popover)
-      .text_color(t.foreground)
-      .text_size(13)
       .child(
         v_flex()
           .flex_none()
@@ -619,11 +547,7 @@ export default class Panel extends View {
       )
       .when(Boolean(this.problem), (el) => el.child(div().flex_none().px(18).pt(8).child(problemLine(t, this.problem))))
       .child(
-        h_flex()
-          .flex_none()
-          .p(12)
-          .gap(8)
-          .justify_end()
+        dialogFooter()
           .child(button(t, "cancel", "Cancel", false, () => closeOverlay(props().overlay)))
           .child(button(t, "trash", this.busy === "trash" ? "Moving…" : "Trash", false, (_e, cx) => this.decide("trash", cx), !this.busy))
           .child(button(t, "keep", this.busy === "keep" ? "Keeping…" : "Keep", true, (_e, cx) => this.decide("keep", cx), !this.busy)),
@@ -631,20 +555,9 @@ export default class Panel extends View {
   }
 
   renderPromote(t) {
-    return v_flex()
-      .id("hws-promote")
+    return dialogRoot(t, "hws-promote")
       .track_focus(this.handle)
-      .on_key_down((e, cx) => {
-        if (e.key === "tab") moveFocus(this, e.modifiers?.shift);
-        else if (e.key === "escape") closeOverlay(props().overlay);
-        else return;
-        cx.stop_propagation();
-      })
-      .size_full()
-      .min_h(0)
-      .bg(t.popover)
-      .text_color(t.foreground)
-      .text_size(13)
+      .on_key_down(formKeys(this, () => closeOverlay(props().overlay)))
       .child(
         v_flex()
           .id("hws-promote-body")
@@ -654,16 +567,12 @@ export default class Panel extends View {
           .p(18)
           .gap(12)
           .child(div().text_size(15).font_semibold().child("Promote to a workspace"))
-          .child(v_flex().child(fieldLabel(t, "Name")).child(field(t, this, "name")))
-          .child(v_flex().child(fieldLabel(t, "Folder")).child(folderRow(t, this)))
+          .child(labeled(t, "Name", field(t, this, "name")))
+          .child(labeled(t, "Folder", folderRow(t, this)))
           .when(Boolean(this.problem), (el) => el.child(problemLine(t, this.problem))),
       )
       .child(
-        h_flex()
-          .flex_none()
-          .p(12)
-          .gap(8)
-          .justify_end()
+        dialogFooter()
           .child(button(t, "cancel", "Cancel", false, () => closeOverlay(props().overlay)))
           .child(button(t, "promote-yes", this.busy ? "Promoting…" : "Promote", true, (_e, cx) => this.promote(cx), !this.busy)),
       );

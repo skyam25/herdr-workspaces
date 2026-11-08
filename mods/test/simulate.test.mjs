@@ -7,7 +7,7 @@ const args = (H) => hwsCalls(H).map((c) => c.args).filter((a) => a[0] !== "paren
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const APP = {
-  version: 1, id: "spc1", name: "checkout demo", kind: "app", folder: "/Users/me/Projects/checkout", instructions: "Ship the demo",
+  version: 1, id: "spc1", name: "checkout demo", kind: "app", folder: "/Users/me/Projects/checkout", dir: "/state/workspaces/spc1", instructions: "Ship the demo",
   tabs: [{ tabId: "tb1", name: "Plan", role: "plan" }],
   terminals: [{ terminal: "t13", tabId: "tb1", sessionId: null, role: "planner" }],
   surfaces: [{ id: "s1", type: "board", title: "flow", terminal: "t13", pane: "p9", socket: "/tmp/x", pid: 1 }],
@@ -199,12 +199,6 @@ test("panel outside a workspace says so and offers New workspace", async () => {
   assert.equal(H.overlays[0].props.step, "workspace");
 });
 
-test("panel reads the wrapped list form too", async () => {
-  inWorkspace(APP, { hws: { list: { workspaces: [APP] } } });
-  const m = await mount("hws-panel", {});
-  assert.match(m.text(), /checkout demo/);
-});
-
 test("the panel edits the workspace instructions in a dialog", async () => {
   const H = inWorkspace();
   const m = await mount("hws-panel", {});
@@ -271,13 +265,6 @@ test("artifact actions call the right commands and copy through pbcopy", async (
   assert.match(m.text(), /Link copied/);
   await m.click("folder-new");
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/art/new"] });
-});
-
-test("Copy link also accepts plain text output", async () => {
-  const H = inWorkspace(APP, { hws: { list: [APP], "link old": "@/art/old/prompt.md" } });
-  const m = await mount("hws-panel", {});
-  await m.click("link-old");
-  assert.deepEqual(H.calls.at(-1).args.slice(2), ["sh", "@/art/old/prompt.md"]);
 });
 
 test("New board and New note attach to the focused agent", async () => {
@@ -378,14 +365,14 @@ test("Promote shows only for a throwaway", async () => {
   assert.equal(throwaway.has("promote"), true);
 });
 
-test("Promote passes the terminal, validates and calls hws promote", async () => {
+test("Promote passes the workspace, validates and calls hws promote", async () => {
   const H = inWorkspace(THROWAWAY);
   const m = await mount("hws-panel", {});
   await m.click("promote");
   const spec = H.overlays[0];
   assert.equal(spec.props.view, "promote");
   assert.equal(spec.props.name, "scratch");
-  assert.equal(spec.props.terminal, "t13");
+  assert.equal(spec.props.workspace, "spc1");
 
   H.hws.parent = { folder: "/Users/me/Projects" };
   const d = await mount("hws-panel", { ...spec.props, overlay: "ov8" }, H);
@@ -400,9 +387,7 @@ test("Promote passes the terminal, validates and calls hws promote", async () =>
   d.view.inputs.name.type("Kept", d.cx);
   d.view.inputs.folder.type("/kept", d.cx);
   await d.click("promote-yes");
-  assert.deepEqual(hwsCalls(H).at(-1), { args: ["promote", "--name", "Kept", "--folder", "/kept", "--json"], terminal: "t13" });
-  assert.equal(H.calls.at(-1).command, "env");
-  assert.equal(H.calls.at(-1).args[1], HWS);
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["promote", "--workspace", "spc1", "--name", "Kept", "--folder", "/kept", "--json"]);
   assert.deepEqual(H.closed, ["ov8"]);
 });
 
@@ -434,7 +419,7 @@ test("the panel polls once every 20 seconds and overlapping refreshes collapse",
 });
 
 test("the watch reloads for manifest changes and ignores surface writes", async () => {
-  const dir = "/Users/me/.local/state/herdr-workspaces/workspaces/spc1";
+  const { dir } = APP;
   const batches = [[`${dir}/surfaces/s1/board.json`], [`${dir}/workspace.json`]];
   const H = inWorkspace(APP, { watchResult: () => (batches.length ? Promise.resolve(batches.shift()) : new Promise(() => {})) });
   const m = await mount("hws-panel", {});

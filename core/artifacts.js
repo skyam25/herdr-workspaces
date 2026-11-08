@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
+import { HwsError } from './errors.js';
 import { updateManifest, listManifests } from './manifest.js';
 import { STANDALONE, keptArtifactDir, standaloneArtifactDir, throwawayArtifactDir } from './paths.js';
 
@@ -15,7 +16,7 @@ export function linkFor(promptPath) {
 }
 
 // Across volumes, the source goes only after the copy succeeds.
-export function moveDir(source, target) {
+function moveDir(source, target) {
   mkdirSync(dirname(target), { recursive: true });
   try {
     renameSync(source, target);
@@ -26,8 +27,8 @@ export function moveDir(source, target) {
   }
 }
 
-// Lists the spellings a prompt may use for a folder. Call before moving it.
-export function pathSpellings(dir) {
+// Lists the spellings a prompt may use for a folder.
+function pathSpellings(dir) {
   const absolute = resolve(dir);
   return [...new Set([absolute, existsSync(absolute) ? realpathSync(absolute) : absolute])];
 }
@@ -56,17 +57,23 @@ export function rewritePaths(text, oldDirs, newDir) {
   });
 }
 
-export function rewritePromptFile(promptPath, oldDirs, newDir) {
+function rewritePromptFile(promptPath, oldDirs, newDir) {
   if (!existsSync(promptPath)) return;
   writeFileSync(promptPath, rewritePaths(readFileSync(promptPath, 'utf8'), oldDirs, newDir));
 }
 
-// Moves an artifact, rewrites its prompt and updates its record.
-export function relocateArtifact(workspaceId, artifact, targetDir) {
-  const oldDirs = pathSpellings(artifact.path);
-  moveDir(artifact.path, targetDir);
+// Moves a bundle, points its prompt at the new folder and returns the prompt path.
+export function moveBundle(source, targetDir) {
+  const oldDirs = pathSpellings(source);
+  moveDir(source, targetDir);
   const prompt = join(targetDir, 'prompt.md');
   rewritePromptFile(prompt, oldDirs, targetDir);
+  return prompt;
+}
+
+// Moves an artifact and updates its record.
+export function relocateArtifact(workspaceId, artifact, targetDir) {
+  const prompt = moveBundle(artifact.path, targetDir);
   updateManifest(workspaceId, (manifest) => {
     const record = manifest.artifacts.find((item) => item.id === artifact.id);
     record.path = targetDir;
@@ -80,5 +87,5 @@ export function findArtifact(artifactId) {
     const artifact = manifest.artifacts.find((item) => item.id === artifactId);
     if (artifact) return { manifest, artifact };
   }
-  return null;
+  throw new HwsError(`no artifact ${artifactId}`);
 }

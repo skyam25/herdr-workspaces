@@ -1,21 +1,16 @@
-"""Pty driver for the spike. Runs a command in a pty, answers terminal probes, decodes Kitty frames.
+"""Pty driver for the surface tests. Runs a command in a pty, answers terminal probes, decodes Kitty frames.
 
 No real terminal and no Herdr are involved. Frames are decoded to RGBA and saved as PNG.
-`--fake-herdr` also serves a stand-in Herdr graphics socket so the full-frame path can be measured.
 """
 import base64
 import fcntl
-import json
 import os
 import pty
 import re
 import select
 import signal
-import socket
 import struct
-import subprocess
 import termios
-import threading
 import time
 import zlib
 
@@ -34,10 +29,8 @@ def png_bytes(rgba, w, h):
 
 
 class Frame:
-    def __init__(self, width, height, rgba, wire_bytes, compressed, kind, t):
+    def __init__(self, width, height, rgba):
         self.width, self.height, self.rgba = width, height, rgba
-        self.wire_bytes, self.compressed = wire_bytes, compressed
-        self.kind, self.t = kind, t
 
     def save(self, path):
         data = png_bytes(self.rgba, self.width, self.height)
@@ -46,71 +39,8 @@ class Frame:
         return len(data)
 
 
-class FakeHerdr:
-    """Serves the pane.graphics socket the Pixel engine expects from Herdr. Under /tmp, not the real one."""
-
-    def __init__(self, directory, cell=(10, 20)):
-        self.directory = directory
-        self.frames = []
-        self.cell = cell
-        os.makedirs(directory, exist_ok=True)
-        self.path = '/tmp/ab-fake-herdr-%d.sock' % os.getpid()
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.bind(self.path)
-        self.sock.listen(8)
-        self.stop = False
-        self.latest = None
-        threading.Thread(target=self.accept_loop, daemon=True).start()
-
-    def accept_loop(self):
-        while not self.stop:
-            try:
-                conn, _ = self.sock.accept()
-            except OSError:
-                return
-            threading.Thread(target=self.serve, args=(conn,), daemon=True).start()
-
-    def serve(self, conn):
-        f = conn.makefile('rwb', buffering=0)
-        line = f.readline()
-        if b'pane.graphics.info' in line:
-            info = {'id': 'info', 'result': {'type': 'pane_graphics_info', 'cell_width_px': self.cell[0],
-                    'cell_height_px': self.cell[1], 'pane_visible': True, 'file_frame_directory': self.directory,
-                    'file_frame_formats': ['rgba', 'bgra'], 'max_layers_per_pane': 16, 'pixel_mouse': True,
-                    'file_frame_transport': 'direct-kitty'}}
-            f.write((json.dumps(info) + '\n').encode())
-            return
-        f.write((json.dumps({'id': 'stream', 'result': {'type': 'ok'}}) + '\n').encode())
-        while True:
-            header = f.readline()
-            if not header:
-                return
-            frame = json.loads(header)
-            t = time.time()
-            path = frame['file']['path']
-            w, h = frame['image_width'], frame['image_height']
-            size = os.path.getsize(path)
-            self.frames.append({'t': t, 'w': w, 'h': h, 'file_bytes': size, 'header_bytes': len(header)})
-            self.latest = (path, w, h, frame.get('format'))
-            f.write(b'{"id":"stream","result":{"type":"pane_graphics_frame_ack"}}\n')
-
-    def snapshot_latest(self, out):
-        if not self.latest:
-            return None
-        path, w, h, fmt = self.latest
-        with open(path, 'rb') as fh:
-            data = fh.read(w * h * 4)
-        data = bytearray(data)
-        if fmt == 'bgra':
-            for i in range(0, len(data), 4):
-                data[i], data[i + 2] = data[i + 2], data[i]
-        with open(out, 'wb') as fh:
-            fh.write(png_bytes(bytes(data), w, h))
-        return out
-
-
 class Driver:
-    def __init__(self, argv, env=None, cols=240, rows=90, xpixel=2400, ypixel=1800, cwd=None):
+    def __init__(self, argv, env=None, cols=240, rows=90, xpixel=2400, ypixel=1800, cwd=None, stderr_log='/dev/null'):
         self.cols, self.rows, self.xpixel, self.ypixel = cols, rows, xpixel, ypixel
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, xpixel, ypixel))
@@ -124,7 +54,6 @@ class Driver:
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
             os.dup2(slave, 0)
             os.dup2(slave, 1)
-            stderr_log = os.environ.get('SPIKE_STDERR', '/dev/null')
             fd = os.open(stderr_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
             os.dup2(fd, 2)
             os.close(slave)
@@ -134,14 +63,9 @@ class Driver:
         os.close(slave)
         self.pid = pid
         self.buf = bytearray()
-        self.frames = []
-        self.frame_bytes_total = 0
-        self.total_wire = 0
-        self.sync_wire = []
-        self.sync_start = None
+        self.latest = None
         self.open_chunk = None
         self.exited = False
-        self.mouse_pixels = False
 
     def write(self, data):
         os.write(self.master, data)
@@ -165,7 +89,6 @@ class Driver:
                 if not data:
                     self.exited = True
                     return
-                self.total_wire += len(data)
                 self.buf += data
                 self.parse()
 
@@ -186,7 +109,7 @@ class Driver:
                 end = buf.find(b'\x1b\\', i + 2)
                 if end < 0:
                     break
-                self.graphics(bytes(buf[i + 2:end]), end + 2 - i)
+                self.graphics(bytes(buf[i + 2:end]))
                 i = end + 2
             elif kind == b'[':
                 j = i + 2
@@ -219,7 +142,6 @@ class Driver:
         if text == '?u':
             self.reply('\x1b[?1u')
         elif text == '?1016$p':
-            self.mouse_pixels = True
             self.reply('\x1b[?1016;1$y')
         elif text == '?5522$p':
             self.reply('\x1b[?5522;0$y')
@@ -231,11 +153,6 @@ class Driver:
             self.reply('\x1b[6;%d;%dt' % (self.ypixel // self.rows, self.xpixel // self.cols))
         elif text == 'c':
             self.reply('\x1b[?62;4c')
-        elif text == '?2026h':
-            self.sync_start = self.total_wire
-        elif text == '?2026l' and self.sync_start is not None:
-            self.sync_wire.append(self.total_wire - self.sync_start)
-            self.sync_start = None
 
     def osc(self, body):
         text = body.decode('latin1')
@@ -247,7 +164,7 @@ class Driver:
             idx = text.split(';')[1]
             self.reply('\x1b]4;%s;rgb:80/80/80\x1b\\' % idx)
 
-    def graphics(self, data, length):
+    def graphics(self, data):
         semi = data.find(b';')
         keys = dict(kv.split('=', 1) for kv in data[1:semi if semi >= 0 else None].decode('latin1').split(',') if '=' in kv)
         payload = data[semi + 1:] if semi >= 0 else b''
@@ -257,40 +174,31 @@ class Driver:
             return
         if keys.get('a') == 'd':
             return
-        chunk = self.open_chunk or {'data': bytearray(), 'keys': {}, 'wire': 0}
+        chunk = self.open_chunk or {'data': bytearray(), 'keys': {}}
         chunk['keys'].update(keys)
         chunk['data'] += payload
-        chunk['wire'] += length
         if keys.get('m') == '1':
             self.open_chunk = chunk
             return
         self.open_chunk = None
         self.finish_image(chunk)
 
+    # Keeps the newest full RGBA frame. Tests never read patches.
     def finish_image(self, chunk):
         keys = chunk['keys']
-        if os.environ.get('SPIKE_DEBUG'):
-            print('IMG', keys, len(chunk['data']), chunk['wire'], flush=True)
         if keys.get('a') not in ('T', 't', 'f', None):
             return
         if keys.get('f') != '32' or keys.get('t', 'd') != 'd':
-            self.frames.append(Frame(int(keys.get('s', 0)), int(keys.get('v', 0)), None, chunk['wire'], 0, 'non-inline:' + keys.get('t', '?'), time.time()))
+            return
+        if 'X' in keys or 'Y' in keys or keys.get('p') not in (None, '1'):
             return
         raw = base64.b64decode(bytes(chunk['data']))
-        compressed = len(raw)
         if keys.get('o') == 'z':
             raw = zlib.decompress(raw)
-        w, h = int(keys.get('s', 0)), int(keys.get('v', 0))
-        patched = 'X' in keys or 'Y' in keys or keys.get('p') not in (None, '1')
-        kind = 'patch' if patched else 'full'
-        self.frames.append(Frame(w, h, bytes(raw), chunk['wire'], compressed, kind, time.time()))
-
-    def full_frames(self):
-        return [f for f in self.frames if f.kind == 'full']
+        self.latest = Frame(int(keys.get('s', 0)), int(keys.get('v', 0)), bytes(raw))
 
     def latest_full(self):
-        fulls = self.full_frames()
-        return fulls[-1] if fulls else None
+        return self.latest
 
     def mouse(self, cb, x, y, release=False):
         # SGR pixel mode reports 1-based pixels.

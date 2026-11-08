@@ -96,26 +96,15 @@ export function setup(overrides = {}) {
 
   H.exec = async (command, args = []) => {
     H.calls.push({ command, args });
-    let bin = command;
-    let argv = args;
-    let terminal = null;
-    if (command === "env") {
-      terminal = args[0].split("=")[1];
-      bin = args[1];
-      argv = args.slice(2);
-    }
-    if (bin === HWS || bin === "hws") {
-      if (H.missingHwsPaths.has(bin)) {
-        if (command === "env") return { code: 127, stdout: "", stderr: "env: not found" };
-        throw new Error("spawn ENOENT");
-      }
-      const key = argv.filter((a) => a !== "--json").filter((a, i, all) => !a.startsWith("--") && !(all[i - 1]?.startsWith("--"))).join(" ");
+    if (command === HWS || command === "hws") {
+      if (H.missingHwsPaths.has(command)) throw new Error("spawn ENOENT");
+      const key = args.filter((a) => a !== "--json").filter((a, i, all) => !a.startsWith("--") && !(all[i - 1]?.startsWith("--"))).join(" ");
       const answer = H.hws[key];
-      const out = typeof answer === "function" ? answer(argv, terminal) : answer;
+      const out = typeof answer === "function" ? answer(args) : answer;
       if (out?.fail) return { code: 1, stdout: JSON.stringify({ error: out.fail }), stderr: "" };
       return { code: 0, stdout: out === undefined ? "{}" : typeof out === "string" ? out : JSON.stringify(out), stderr: "" };
     }
-    if (bin === "test") return { code: H.missingDirs.has(args[1]) ? 1 : 0, stdout: "", stderr: "" };
+    if (command === "test") return { code: H.missingDirs.has(args[1]) ? 1 : 0, stdout: "", stderr: "" };
     return H.other(command, args);
   };
 
@@ -123,11 +112,9 @@ export function setup(overrides = {}) {
   return H;
 }
 
-// Each hws call as its arguments, with the terminal from HC_TERMINAL_ID when set.
+// Each hws call as its arguments.
 export function hwsCalls(H) {
-  return H.calls
-    .filter((c) => c.command === HWS || c.command === "hws" || c.command === "env")
-    .map((c) => (c.command === "env" ? { args: c.args.slice(2), terminal: c.args[0].split("=")[1] } : { args: c.args }));
+  return H.calls.filter((c) => c.command === HWS || c.command === "hws").map((c) => ({ args: c.args }));
 }
 
 export const settle = async () => {

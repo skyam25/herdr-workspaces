@@ -1,6 +1,6 @@
-import { HwsError, UsageError } from '../errors.js';
 import { listManifests, updateManifest } from '../manifest.js';
-import { locateTerminal, requireFlag } from '../resolve.js';
+import { workspaceDir } from '../paths.js';
+import { callingTerminal, locateTerminal, requireCallingTerminal, requireFlag, workspaceOfTerminal } from '../resolve.js';
 import { parentFolder } from '../settings.js';
 
 function oneLine(manifest) {
@@ -17,11 +17,8 @@ function currentLine(terminal) {
 }
 
 export function current(flags) {
-  const terminal = flags.terminal ?? process.env.HC_TERMINAL_ID;
-  if (flags.line) return currentLine(terminal);
-  if (!terminal) throw new UsageError('pass --terminal or run inside a Herdr terminal');
-  const { manifest } = locateTerminal(terminal);
-  if (!manifest) throw new HwsError(`terminal ${terminal} is not in a workspace`);
+  if (flags.line) return currentLine(callingTerminal(flags));
+  const manifest = workspaceOfTerminal(requireCallingTerminal(flags));
   return { data: manifest, text: JSON.stringify(manifest, null, 2) };
 }
 
@@ -31,7 +28,7 @@ export function parent() {
 }
 
 export function list() {
-  const manifests = listManifests();
+  const manifests = listManifests().map((item) => ({ ...item, dir: workspaceDir(item.id) }));
   const text = manifests.map((item) => `${item.id}\t${item.kind}\t${item.name}\t${item.folder}`).join('\n');
   return { data: manifests, text };
 }

@@ -23,7 +23,7 @@ function live(source) {
     .replaceAll("focused()", "__focused()").replaceAll("agents()", "__agents()").replaceAll("panes()", "__panes()").replaceAll("spaces()", "__spaces()")
     .replace("this.manifests = null;", "this.manifests = [__MANIFEST];")
     .replace("refresh(cx) {", "refresh(cx) { return;")
-    .replace("watch(id, cx) {", "watch(id, cx) { return;");
+    .replace("watch(dir, cx) {", "watch(dir, cx) { return;");
 }
 
 const LIVE_HEADER = `
@@ -41,13 +41,13 @@ const VARIANTS = [
   { mod: "hws-panel", name: "toggle", props: { overlay: "o" }, patch: (s) => s.replace("cx.spawn(async () => this.toggle());", "") },
   { mod: "hws-panel", name: "decide", props: { view: "decide", name: "scratch", artifacts: MANIFEST.artifacts } },
   { mod: "hws-panel", name: "decide-problem", props: { view: "decide", artifacts: [] }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "Trash failed";') },
-  { mod: "hws-panel", name: "promote", props: { view: "promote", name: "scratch", terminal: "t13" } },
+  { mod: "hws-panel", name: "promote", props: { view: "promote", workspace: "spc1", name: "scratch" } },
   { mod: "hws-panel", name: "promote-problem", props: { view: "promote" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "Choose a folder.";') },
   { mod: "hws-panel", name: "panel", props: {}, header: LIVE_HEADER, patch: live },
   { mod: "hws-panel", name: "panel-confirm", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.isConfirmingClose = false;", "this.isConfirmingClose = true;").replace("this.note = null;", 'this.note = { text: "Link copied.", isError: false };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-problem", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.problem = null;", 'this.problem = "hws failed";') },
-  { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('.id("hws-new-form")', '.id("hws-new-form").no_such_builder()') },
+  { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('dialogRoot(t, "hws-new-form")', 'dialogRoot(t, "hws-new-form").no_such_builder()') },
 ];
 
 rmSync(forced, { recursive: true, force: true });

@@ -35,8 +35,8 @@ export function listManifests({ includeStandalone = false } = {}) {
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
-export function createManifest(fields) {
-  const manifest = {
+function blankManifest(fields) {
+  return {
     version: 1,
     instructions: '',
     createdAt: Date.now(),
@@ -46,6 +46,10 @@ export function createManifest(fields) {
     artifacts: [],
     ...fields,
   };
+}
+
+export function createManifest(fields) {
+  const manifest = blankManifest(fields);
   withLock(manifest.id, () => writeAtomic(manifest));
   return manifest;
 }
@@ -66,19 +70,7 @@ export function ensureStandaloneManifest() {
   return withLock(STANDALONE, () => {
     const existing = readManifest(STANDALONE);
     if (existing) return existing;
-    const manifest = {
-      version: 1,
-      id: STANDALONE,
-      name: 'Standalone',
-      kind: STANDALONE,
-      folder: home(),
-      instructions: '',
-      createdAt: Date.now(),
-      tabs: [],
-      terminals: [],
-      surfaces: [],
-      artifacts: [],
-    };
+    const manifest = blankManifest({ id: STANDALONE, name: 'Standalone', kind: STANDALONE, folder: home() });
     writeAtomic(manifest);
     return manifest;
   });

@@ -1,10 +1,8 @@
 """Starts surfaces under the pty driver, with isolated sockets and data folders."""
-import json
 import os
 import shutil
 import subprocess
 import sys
-import time
 
 SURFACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SURFACE)
@@ -55,8 +53,8 @@ class Surface:
             'FAKE_HWS_MODE': mode,
             'FAKE_HWS_CLOSE': '1' if close else '0',
         })
-        os.environ['SPIKE_STDERR'] = os.path.join(self.root, 'driver.stderr.log')
-        self.d = Driver(['/bin/zsh', RUN_SH], env=env, cols=cols, rows=rows, xpixel=cols * 10, ypixel=rows * 20)
+        self.d = Driver(['/bin/zsh', RUN_SH], env=env, cols=cols, rows=rows, xpixel=cols * 10, ypixel=rows * 20,
+                        stderr_log=os.path.join(self.root, 'driver.stderr.log'))
 
     def wait(self, seconds):
         self.d.pump(seconds)

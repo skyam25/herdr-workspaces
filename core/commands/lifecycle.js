@@ -1,22 +1,14 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { relocateArtifact } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, findTerminal, isIdleShell, listLive, sendText, terminalInfo } from '../herdr.js';
+import { act, findTerminal, isIdleShell, listLive, requireLive, sendText, terminalInfo } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
-import {
-  STANDALONE,
-  expandFolder,
-  keptArtifactDir,
-  keptThrowawayDir,
-  manifestPath,
-  workspaceDir,
-} from '../paths.js';
-import { requireFlag, resolveWorkspace } from '../resolve.js';
+import { STANDALONE, keptArtifactDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
+import { resolveWorkspace } from '../resolve.js';
 import { moveToTrash } from '../trash.js';
-import { requireFolder } from '../settings.js';
-import { KEPT_KINDS, keptKind } from './new.js';
+import { KEPT_KINDS, keptFields, keptKind } from './new.js';
 
 function containsFile(dir) {
   if (!existsSync(dir)) return false;
@@ -56,7 +48,7 @@ export function prune() {
   const liveIds = new Set(live.spaces.map((space) => space.id));
   const pruned = [];
   for (const manifest of manifests) {
-    if (manifest.id === STANDALONE || liveIds.has(manifest.id)) continue;
+    if (liveIds.has(manifest.id)) continue;
     try {
       retireWorkspace(manifest.id);
       pruned.push(manifest.id);
@@ -80,9 +72,7 @@ export function setWorkspace(flags) {
 }
 
 export function promote(flags) {
-  const name = requireFlag(flags, 'name');
-  const folder = requireFolder(expandFolder(requireFlag(flags, 'folder')));
-  const kind = keptKind(flags.kind);
+  const { name, folder, kind } = keptFields(flags);
   const manifest = resolveWorkspace(flags);
   if (manifest.kind !== 'throwaway') throw new HwsError(`${manifest.name} is not a throwaway`);
 
@@ -129,8 +119,7 @@ export function close(flags) {
   if (flags.keep && flags.trash) throw new UsageError('use --keep or --trash, not both');
   const manifest = resolveWorkspace(flags);
   if (manifest.id === STANDALONE) throw new HwsError('the standalone store is not a space');
-  const live = listLive();
-  if (!live) throw new HwsError('the Herdr window did not answer');
+  const live = requireLive();
 
   const fate = chooseArtifactFate(manifest, flags);
   if (fate.decision) return { data: fate };
@@ -144,8 +133,7 @@ export function close(flags) {
 
 export function resume(flags) {
   const manifest = resolveWorkspace(flags);
-  const live = listLive();
-  if (!live) throw new HwsError('the Herdr window did not answer');
+  const live = requireLive();
 
   const resumed = [];
   const failed = [];

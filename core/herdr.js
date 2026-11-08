@@ -39,11 +39,23 @@ function parseJson(text) {
   }
 }
 
-// Returns null when the window does not answer.
+let liveListing;
+
+// Returns null when the window does not answer. A process lists the window
+// once, and `act` clears that answer because it changes the window.
 export function listLive() {
-  const result = run(herdrBin(), ['ls'], READ_MS);
-  const live = result.ok ? parseJson(result.stdout) : null;
-  return Array.isArray(live?.spaces) ? live : null;
+  if (liveListing === undefined) {
+    const result = run(herdrBin(), ['ls'], READ_MS);
+    const live = result.ok ? parseJson(result.stdout) : null;
+    liveListing = Array.isArray(live?.spaces) ? live : null;
+  }
+  return liveListing;
+}
+
+export function requireLive() {
+  const live = listLive();
+  if (!live) throw new HwsError('the Herdr window did not answer');
+  return live;
 }
 
 // Returns null when the window does not answer.
@@ -53,6 +65,7 @@ export function windowStatus() {
 }
 
 export function act(command, args = {}) {
+  liveListing = undefined;
   const argv = ['do', command];
   for (const [name, value] of Object.entries(args)) {
     if (value === undefined || value === null) continue;
@@ -92,13 +105,16 @@ export function terminalInfo(terminal) {
   return info && !info.error ? info : null;
 }
 
-export function isTerminalAlive(terminal) {
-  const info = terminalInfo(terminal);
+function isLive(info) {
   return Boolean(info) && info.exit_code == null && (info.state ?? 'live') === 'live';
 }
 
+export function isTerminalAlive(terminal) {
+  return isLive(terminalInfo(terminal));
+}
+
 export function isIdleShell(info) {
-  if (!info || info.exit_code != null || (info.state ?? 'live') !== 'live') return false;
+  if (!isLive(info)) return false;
   const program = info.foreground?.name ?? info.foreground?.argv?.[0] ?? info.argv?.[0] ?? '';
   return SHELLS.test(program.split('/').pop());
 }

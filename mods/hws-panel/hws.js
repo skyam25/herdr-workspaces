@@ -3,16 +3,16 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
-import { exec, home, pickFolder } from "herdr";
+import { closeOverlay, exec, home, openOverlay, pickFolder, props } from "herdr";
 
 let found = null;
 
-async function start(args, terminal) {
+async function start(args) {
   for (const bin of found ? [found] : [`${home()}/.local/bin/hws`, "hws"]) {
     try {
-      const r = terminal ? await exec("env", [`HC_TERMINAL_ID=${terminal}`, bin, ...args]) : await exec(bin, args);
+      const r = await exec(bin, args);
 
-      // `env` exits 126 or 127 when it cannot start the program.
+      // The `hws` script starts through `env`, which exits 126 or 127 when node is missing.
       if (r.code !== 126 && r.code !== 127) {
         found = bin;
         return r;
@@ -26,9 +26,8 @@ async function start(args, terminal) {
 
 // Runs `hws <args> --json` and resolves with the parsed output, or plain text
 // when the output is not JSON. Throws with hws's own message on failure.
-// `terminal` sets HC_TERMINAL_ID for commands that act on the current terminal.
-export async function hws(args, { terminal } = {}) {
-  const r = await start([...args, "--json"], terminal);
+export async function hws(args) {
+  const r = await start([...args, "--json"]);
   const out = r.stdout.trim();
   let value = out;
   try {
@@ -42,6 +41,25 @@ export async function hws(args, { terminal } = {}) {
 
 export const message = (e) => String(e?.message ?? e);
 
+// Runs one dialog action. The dialog stays open until `work` finishes, so a
+// failure can show in it. The view must set `busy` and `problem`.
+export function submitDialog(view, key, work, cx) {
+  if (view.busy) return;
+  view.busy = key;
+  view.problem = null;
+  cx.notify();
+  cx.spawn(async (cx) => {
+    try {
+      await work();
+      closeOverlay(props()?.overlay);
+    } catch (e) {
+      view.problem = message(e);
+      view.busy = null;
+      cx.notify();
+    }
+  });
+}
+
 // The workspace setting that tells agents what kind of work this is.
 export const KINDS = [
   { id: "general", name: "General" },
@@ -50,7 +68,9 @@ export const KINDS = [
 ];
 
 // The new-workspace form, opened by the launcher and by the panel outside a workspace.
-export const FORM_SIZE = { width: 500, height: 540 };
+export function openWorkspaceForm() {
+  openOverlay({ mod: "hws-new", kind: "dialog", modal: true, width: 500, height: 540, props: { step: "workspace" } });
+}
 
 function expandFolder(text) {
   const typed = text.trim();
@@ -59,18 +79,18 @@ function expandFolder(text) {
   return path.startsWith("~/") ? home() + path.slice(1) : path;
 }
 
-// Resolves with { path } or { problem }. A failed `test` call counts as a pass,
-// so hws reports the folder itself.
+// Resolves with the full path, or throws the problem to show. A failed `test`
+// call counts as a pass, so hws reports the folder itself.
 export async function checkFolder(text) {
   const path = expandFolder(text);
-  if (!path) return { problem: "Choose a folder." };
-  if (!path.startsWith("/")) return { problem: "Use a full path, such as ~/Projects." };
+  if (!path) throw new Error("Choose a folder.");
+  if (!path.startsWith("/")) throw new Error("Use a full path, such as ~/Projects.");
   const r = await exec("test", ["-d", path]).catch(() => null);
-  if (r && r.code !== 0) return { problem: `${path} does not exist. Choose an existing folder.` };
-  return { path };
+  if (r && r.code !== 0) throw new Error(`${path} does not exist. Choose an existing folder.`);
+  return path;
 }
 
-const tilde = (path) => (path.startsWith(`${home()}/`) ? `~${path.slice(home().length)}` : path);
+export const tilde = (path) => (path?.startsWith(`${home()}/`) ? `~${path.slice(home().length)}` : (path ?? ""));
 
 // Starts the folder field at the parent folder new work goes in.
 export function fillParent(view, cx) {
@@ -106,6 +126,12 @@ export function makeInput(view, key, { value = "", placeholder = "", submit, row
   return state;
 }
 
+// Focuses a dialog's field now and again once the dialog has opened.
+export function focusField(view, key, cx) {
+  view.inputs[key].focus();
+  cx.timer.after(600, () => view.inputs[key].focus());
+}
+
 export function moveFocus(view, back) {
   const keys = Object.keys(view.inputs);
   if (keys.length === 0) return;
@@ -125,11 +151,26 @@ export function chooseFolder(view, cx) {
   });
 }
 
-export const fieldLabel = (t, text) => div().pb(5).text_size(11.5).text_color(t.dim).child(text);
+// Moves focus with Tab and dismisses with Escape.
+export function formKeys(view, dismiss) {
+  return (e, cx) => {
+    if (e.key === "tab") moveFocus(view, e.modifiers?.shift);
+    else if (e.key === "escape") dismiss();
+    else return;
+    cx.stop_propagation();
+  };
+}
 
-export function field(t, view, key) {
-  return Input.new(view.inputs[key])
-    .h(34)
+export const dialogRoot = (t, id) => v_flex().id(id).size_full().min_h(0).bg(t.popover).text_color(t.foreground).text_size(13);
+
+export const dialogFooter = () => h_flex().flex_none().p(12).gap(8).justify_end();
+
+const fieldLabel = (t, text) => div().pb(5).text_size(11.5).text_color(t.dim).child(text);
+
+export const labeled = (t, text, control) => v_flex().child(fieldLabel(t, text)).child(control);
+
+function styleField(el, t, view, key) {
+  return el
     .px(10)
     .rounded(8)
     .border_1()
@@ -139,17 +180,9 @@ export function field(t, view, key) {
     .text_color(t.foreground);
 }
 
-export function areaField(t, view, key) {
-  return Textarea.new(view.inputs[key])
-    .px(10)
-    .py(8)
-    .rounded(8)
-    .border_1()
-    .border_color(view.focusedField === key ? t.accent : t.input)
-    .bg(t.background)
-    .text_size(12.8)
-    .text_color(t.foreground);
-}
+export const field = (t, view, key) => styleField(Input.new(view.inputs[key]).h(34), t, view, key);
+
+export const areaField = (t, view, key) => styleField(Textarea.new(view.inputs[key]).py(8), t, view, key);
 
 export function button(t, id, text, primary, action, enabled = true) {
   return h_flex()

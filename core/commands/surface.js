@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
-import { artifactStoreDir, linkFor, moveDir, pathSpellings, rewritePromptFile } from '../artifacts.js';
+import { artifactStoreDir, linkFor, moveBundle } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import {
   act,
@@ -10,13 +10,14 @@ import {
   findTerminal,
   isTerminalAlive,
   listLive,
+  requireLive,
   sendText,
   terminalInfo,
   windowStatus,
 } from '../herdr.js';
 import { ensureStandaloneManifest, listManifests, readManifest, updateManifest } from '../manifest.js';
-import { HOST_SCRIPT, STANDALONE, home, socketPath, stateRoot, surfaceDataDir } from '../paths.js';
-import { requireFlag } from '../resolve.js';
+import { HOST_SCRIPT, socketPath, stateRoot, surfaceDataDir } from '../paths.js';
+import { callingTerminal, requireCallingTerminal, requireFlag } from '../resolve.js';
 
 const SURFACE_TYPES = ['board', 'note', 'page'];
 
@@ -45,25 +46,10 @@ function standalonePlacement() {
   return { workspace: space ? readManifest(space) : null, pane: null, space };
 }
 
-function hostEnvironment(fields) {
-  return {
-    HWS_HOME: stateRoot(),
-    HWS_SURFACE_ID: fields.surfaceId,
-    HWS_WORKSPACE_ID: fields.workspaceId,
-    HWS_TERMINAL: fields.terminal ?? '',
-    HWS_SURFACE_TYPE: fields.type,
-    HWS_SURFACE_TITLE: fields.title,
-    HWS_SURFACE_FILE: fields.file,
-    HWS_FOLDER: fields.folder,
-    COMPANION_SOCKET: fields.socket,
-    COMPANION_DATA_DIR: fields.dataDir,
-  };
-}
-
 function ownerTerminal(flags) {
   if (flags.terminal && flags.standalone) throw new UsageError('use --terminal or --standalone, not both');
   if (flags.standalone) return null;
-  const terminal = flags.terminal ?? process.env.HC_TERMINAL_ID;
+  const terminal = callingTerminal(flags);
   if (!terminal) throw new UsageError('pass --terminal or --standalone');
   return terminal;
 }
@@ -71,8 +57,7 @@ function ownerTerminal(flags) {
 export function surfaceOpen(flags) {
   if (!SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
   const terminal = ownerTerminal(flags);
-  const live = listLive();
-  if (!live) throw new HwsError('the Herdr window did not answer');
+  const live = requireLive();
 
   const placement = terminal ? gluedPlacement(live, terminal) : standalonePlacement();
   const workspace = placement.workspace ?? ensureStandaloneManifest();
@@ -81,25 +66,25 @@ export function surfaceOpen(flags) {
   const title = flags.title ?? (file ? basename(file) : flags.type);
   const socket = socketPath(surfaceId);
   const dataDir = surfaceDataDir(workspace.id, surfaceId);
-  const folder = workspace.id === STANDALONE ? home() : workspace.folder;
   mkdirSync(dataDir, { recursive: true });
 
-  const environment = hostEnvironment({
-    surfaceId,
-    workspaceId: workspace.id,
-    terminal,
-    type: flags.type,
-    title,
-    file,
-    folder,
-    socket,
-    dataDir,
-  });
+  const environment = {
+    HWS_HOME: stateRoot(),
+    HWS_SURFACE_ID: surfaceId,
+    HWS_WORKSPACE_ID: workspace.id,
+    HWS_TERMINAL: terminal ?? '',
+    HWS_SURFACE_TYPE: flags.type,
+    HWS_SURFACE_TITLE: title,
+    HWS_SURFACE_FILE: file,
+    HWS_FOLDER: workspace.folder,
+    COMPANION_SOCKET: socket,
+    COMPANION_DATA_DIR: dataDir,
+  };
   const argv = ['env', ...Object.entries(environment).map(([key, value]) => `${key}=${value}`), HOST_SCRIPT];
 
   const opened = terminal
     ? act('pane.split', { direction: 'right', pane: placement.pane, argv })
-    : act('tab.new', { name: title, space: placement.space, folder, argv });
+    : act('tab.new', { name: title, space: placement.space, folder: workspace.folder, argv });
   const pane = opened.pane ?? findTerminal(listLive() ?? { spaces: [] }, opened.terminal)?.pane ?? null;
   const pid = terminalInfo(opened.terminal)?.pid ?? null;
 
@@ -131,10 +116,7 @@ function promptToSend(promptPath) {
 function archiveBundle({ manifest, surface }, bundle) {
   const artifactId = newId('a');
   const artifactDir = artifactStoreDir(manifest, artifactId);
-  const oldDirs = pathSpellings(bundle);
-  moveDir(bundle, artifactDir);
-  const prompt = join(artifactDir, 'prompt.md');
-  rewritePromptFile(prompt, oldDirs, artifactDir);
+  const prompt = moveBundle(bundle, artifactDir);
   const artifact = {
     id: artifactId,
     type: surface.type,
@@ -181,8 +163,7 @@ export async function surfaceDone(flags) {
 }
 
 export function surfaceSocket(flags) {
-  const terminal = flags.terminal ?? process.env.HC_TERMINAL_ID;
-  if (!terminal) throw new UsageError('pass --terminal or run inside a Herdr terminal');
+  const terminal = requireCallingTerminal(flags);
   const matches = listManifests({ includeStandalone: true })
     .flatMap((manifest) => manifest.surfaces)
     .filter((surface) => surface.terminal === terminal && (!flags.title || surface.title === flags.title));
