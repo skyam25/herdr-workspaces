@@ -4,7 +4,7 @@ import { resolveFeedback } from './feedback-paths';
 import { FeedbackWorkspaces } from './feedback-workspace';
 import { captureSession, FeedbackSnaps, offscreenCapture } from './feedback-snap';
 import { OutlineStore } from './outline';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { appendFile, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -84,7 +84,8 @@ import { fileLog } from './update-log';
 import { Updater } from './updater';
 import { SurfaceHost, surfaceFromEnv } from './surface';
 import { BoardStore, cleanName, migrateData, StateFile } from './store';
-import { mainIpc } from './ipc';
+import { mainIpc, teeTransport } from './ipc';
+import { WebHost } from './web-host';
 import { transcribeClip } from '../voice/compose';
 import { Dictator, type Dictation } from '../voice/dictate';
 import { isWorkspaceNotes } from '../shared/feedback-workspace';
@@ -143,7 +144,8 @@ async function microphoneAccess(): Promise<MicrophoneAccess> {
 
 async function start(): Promise<void> {
   await app.whenReady();
-  const ipc = mainIpc(ipcMain);
+  const transport = teeTransport(ipcMain);
+  const ipc = mainIpc(transport);
   if (offscreen) app.dock?.hide();
   app.setAboutPanelOptions({ applicationName: 'Agent Brief', applicationVersion: app.getVersion() });
   store.create(state.state.currentBoard);
@@ -161,6 +163,19 @@ async function start(): Promise<void> {
     // The page stays "visible" to itself because background throttling is off, so main says when it shows.
     onVisibility: (visible) => panel.win.webContents.send(CH.visibility, visible),
   });
+  const webHost = surfaceConfig && process.env.HWS_SURFACE_WEB === '1'
+    ? new WebHost({ root: join(__dirname, '../renderer'), token: randomBytes(32).toString('hex'), ...transport })
+    : undefined;
+
+  // Everything main tells the renderer also goes to a web view.
+  if (webHost) {
+    const contents = panel.win.webContents;
+    const deliver = contents.send.bind(contents);
+    contents.send = (channel: string, ...args: unknown[]) => {
+      deliver(channel, ...args);
+      webHost.emit(channel, args);
+    };
+  }
   const send = (channel: string, ...args: unknown[]) => panel.win.webContents.send(channel, ...args);
   const bridge = new RendererBridge(() => panel.win.webContents);
   // Only the panel's own page load resets the bridge. A review's page loads in a frame, and the panel stays ready.
@@ -584,6 +599,7 @@ async function start(): Promise<void> {
   const surfaceHost = surfaceConfig && new SurfaceHost(surfaceConfig, {
     socket: socketPath,
     push: (s) => send(CH.surface, s),
+    ...(process.env.HWS_SURFACE_WINDOW === '1' ? { close: () => app.quit() } : {}),
     // Verification reads the link from a file, so it never touches the real clipboard.
     copy: (text) => (process.env.HWS_CLIPBOARD_FILE ? writeFileSync(process.env.HWS_CLIPBOARD_FILE, text) : clipboard.writeText(text)),
   });
@@ -658,7 +674,7 @@ async function start(): Promise<void> {
     void surfaceHost?.ready();
   });
   ipc.handle('surfaceWant', (action) => surfaceHost?.want(action));
-  ipcMain.on(CH.reply, (_e, reply: BoardReply) => bridge.handleReply(reply));
+  transport.on(CH.reply, (_e, reply) => bridge.handleReply(reply as BoardReply));
   // A surface has no place to hide to. Its pane is the window.
   ipc.on('hidePanel', () => {
     if (!surfaceConfig) panel.hide();
@@ -972,6 +988,12 @@ async function start(): Promise<void> {
   });
   app.on('activate', controls.openStandalone);
   app.on('second-instance', controls.openStandalone);
+
+
+  if (webHost && surfaceConfig) {
+    await webHost.listen();
+    writeFileSync(join(surfaceConfig.dataDir, 'web-url'), webHost.url(), { mode: 0o600 });
+  }
 
   if (testMode) {
     Object.assign(globalThis, {

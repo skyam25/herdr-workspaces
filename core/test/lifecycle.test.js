@@ -141,7 +141,7 @@ test('close finds the workspace from the calling terminal', (t) => {
 test('close moves unfinished surface data to the Trash', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
-  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', manifest.terminals[0].terminal]);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
   const draft = join(box.root, 'workspaces', manifest.id, 'surfaces', surface.id, 'board.json');
   writeFileSync(draft, '{}');
   box.json(['close', '--workspace', manifest.id]);
@@ -160,7 +160,7 @@ test('close fails and moves nothing when the window does not answer', (t) => {
 test('close refuses the standalone store and unknown workspaces', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
-  box.json(['surface', 'open', '--type', 'board', '--standalone']);
+  box.json(['surface', 'open', '--type', 'board', '--in-pane', '--standalone']);
   assert.equal(box.hws(['close', '--workspace', 'standalone']).code, 1);
   assert.equal(box.hws(['close', '--workspace', 'nope']).code, 1);
 });
@@ -194,7 +194,7 @@ test('prune does nothing when the window reports no spaces', (t) => {
 test('prune skips the standalone store', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
-  box.json(['surface', 'open', '--type', 'board', '--standalone']);
+  box.json(['surface', 'open', '--type', 'board', '--in-pane', '--standalone']);
   box.json(['prune']);
   assert.ok(box.manifest('standalone'));
 });

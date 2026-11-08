@@ -1,6 +1,6 @@
 import { CH, IPC_EVENT, IPC_INVOKE, IPC_SEND, type BoardReply, type BoardRequest, type CompanionApi, type NewNote, type OpenDraft } from '../shared/ipc';
 
-interface RendererTransport {
+export interface RendererTransport {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   send(channel: string, ...args: unknown[]): void;
   on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): unknown;

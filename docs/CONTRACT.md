@@ -95,7 +95,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list` | Every manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest |
 | `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal |
-| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T \| --standalone]` | Splits a pane beside T, starts the host, records the surface |
+| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T \| --standalone] [--in-pane]` | Starts the host and records the surface. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T |
+| `hws surface focus --id S` | Shows the surface's owning terminal and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface done --id S --bundle DIR` | Moves DIR to the artifact store, delivers, closes the pane |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
 | `hws artifact list [--workspace W]` | Artifacts |
@@ -132,6 +133,29 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `COMPANION_DATA_DIR` | The surface data folder |
 
 The host's start script is `surface/run.sh`.
+
+## Own window
+
+`hws surface open` shows a board in an ordinary floating window, unless `--in-pane` asks for Pixel. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The surface record has `pane: null` and `host`, that terminal's address.
+
+Closing the window quits the host, and the next prune drops the record. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host.
+
+## Web host
+
+Setting `HWS_SURFACE_WEB=1` shows a surface in any web view in place of Pixel. Without it the host opens no TCP port.
+
+| Item | Behaviour |
+|---|---|
+| Listener | `127.0.0.1` on a free port |
+| Address | Written to `$COMPANION_DATA_DIR/web-url`, mode 600, as `http://127.0.0.1:<port>/#t=<token>` |
+| Page and assets | Served without the token |
+| `/api/*` | Needs `Authorization: Bearer <token>` |
+| Every request | Must name this server in `Host`. `/api/*` also refuses a foreign `Origin` |
+| `POST /api/invoke`, `POST /api/send` | Body is `{channel, args}`. Only channels the main process registered are accepted |
+| `GET /api/events` | Server-sent events, each `{channel, args}` |
+| Encoding | `shared/web-wire.ts`, which keeps bytes and undefined arguments |
+
+Page surfaces do not work in this mode yet, because reviews load from an Electron-only scheme.
 
 ## External commands
 

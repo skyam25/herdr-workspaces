@@ -7,6 +7,14 @@ export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; onDo
   const blocked = !!surface.busy || !!surface.delivered;
   return (
     <div className="anchor send-to" data-testid="surface-bar">
+      {surface.owner && !surface.standalone && (
+        <>
+          <button className="ghost surface-owner" title={`Go to ${surface.owner}`} onClick={() => props.onAct('owner')} data-testid="surface-owner">
+            {surface.owner}
+          </button>
+          <span className="divider" aria-hidden="true" />
+        </>
+      )}
       {props.mic && (
         <>
           {props.mic}

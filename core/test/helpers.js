@@ -120,7 +120,7 @@ export function sandbox(t) {
     // Opens a glued surface, finishes it with a bundle and returns the record.
     finishGlued(manifest, bundlePrompt) {
       const terminal = manifest.terminals[0].terminal;
-      const surface = box.json(['surface', 'open', '--type', 'board', '--title', 'flow', '--terminal', terminal]);
+      const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'flow', '--terminal', terminal]);
       const bundle = box.bundle(`bundle-${surface.id}`, bundlePrompt?.(join(box.dir, `bundle-${surface.id}`)));
       const done = box.json(['surface', 'done', '--id', surface.id, '--bundle', bundle]);
       box.clearCalls();

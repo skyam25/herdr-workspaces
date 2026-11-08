@@ -583,6 +583,13 @@ button.stop-talk:hover {
   min-width: 0;
 }
 
+.send-to .surface-owner {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .send-to .divider {
   flex: none;
   width: 1px;

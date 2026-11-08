@@ -24,6 +24,13 @@ if (command === 'get') {
   process.exit(0);
 }
 
+if (command === 'run') {
+  process.stdout.write('{"address":"t90","state":"live"}\n');
+  process.exit(0);
+}
+
+if (command === 'kill') process.exit(0);
+
 if (command === 'send') {
   if (state.sendFails) {
     process.stderr.write('terminal is blocked\n');

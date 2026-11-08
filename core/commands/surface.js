@@ -8,9 +8,11 @@ import {
   act,
   closePaneThenFocus,
   findTerminal,
+  focusTerminal,
   isTerminalAlive,
   listLive,
   requireLive,
+  runDetached,
   sendText,
   terminalInfo,
   windowStatus,
@@ -46,6 +48,15 @@ function standalonePlacement() {
   return { workspace: space ? readManifest(space) : null, pane: null, space };
 }
 
+const AGENT_NAMES = { 'claude-code': 'Claude Code', codex: 'Codex', pi: 'Pi' };
+
+// Two agents in one tab can look alike, so the label ends with the terminal's address.
+function ownerLabel(found, terminal) {
+  const tab = /^\d+$/.test(found.tab.name ?? '') ? `tab ${found.tab.name}` : found.tab.name;
+  const program = AGENT_NAMES[found.record.app] ?? found.record.name ?? found.record.app;
+  return [found.space.name, tab, program, terminal].filter(Boolean).join(' · ');
+}
+
 function ownerTerminal(flags) {
   if (flags.terminal && flags.standalone) throw new UsageError('use --terminal or --standalone, not both');
   if (flags.standalone) return null;
@@ -61,6 +72,7 @@ export function surfaceOpen(flags) {
 
   const placement = terminal ? gluedPlacement(live, terminal) : standalonePlacement();
   const workspace = placement.workspace ?? ensureStandaloneManifest();
+  const windowed = flags.type === 'board' && !flags['in-pane'];
   const surfaceId = newId('s');
   const file = flags.type === 'board' ? '' : resolveFile(flags.file);
   const title = flags.title ?? (file ? basename(file) : flags.type);
@@ -79,8 +91,19 @@ export function surfaceOpen(flags) {
     HWS_FOLDER: workspace.folder,
     COMPANION_SOCKET: socket,
     COMPANION_DATA_DIR: dataDir,
+    ...(windowed ? {
+      HWS_SURFACE_WINDOW: '1',
+      HWS_SURFACE_OWNER: terminal ? ownerLabel(findTerminal(live, terminal), terminal) : '',
+    } : {}),
   };
   const argv = ['env', ...Object.entries(environment).map(([key, value]) => `${key}=${value}`), HOST_SCRIPT];
+
+  if (windowed) {
+    const host = runDetached(argv, workspace.folder);
+    const surface = { id: surfaceId, type: flags.type, title, terminal, pane: null, host, socket, pid: terminalInfo(host)?.pid ?? null };
+    updateManifest(workspace.id, (draft) => draft.surfaces.push(surface));
+    return { data: { ...surface, workspace: workspace.id, hostTerminal: host }, text: `opened ${flags.type} ${surfaceId}` };
+  }
 
   const opened = terminal
     ? act('pane.split', { direction: 'right', pane: placement.pane, argv })
@@ -137,6 +160,22 @@ function logDelivery(surface, reason) {
   appendFileSync(join(stateRoot(), 'delivery.log'), `${new Date().toISOString()} ${surface.id} ${reason}\n`);
 }
 
+// The text has been delivered, so a failure here only leaves the focus where it was.
+function focusAfterDone(surface) {
+  try {
+    focusTerminal(surface.terminal);
+  } catch (error) {
+    logDelivery(surface, error.message);
+  }
+}
+
+export function surfaceFocus(flags) {
+  const { surface } = findSurface(requireFlag(flags, 'id'));
+  if (!surface.terminal || !isTerminalAlive(surface.terminal)) throw new HwsError('that terminal has ended');
+  focusTerminal(surface.terminal);
+  return { data: { focused: surface.terminal }, text: `focused ${surface.terminal}` };
+}
+
 export async function surfaceDone(flags) {
   const surfaceId = requireFlag(flags, 'id');
   const bundle = resolve(requireFlag(flags, 'bundle'));
@@ -158,7 +197,8 @@ export async function surfaceDone(flags) {
     logDelivery(surface, error.message);
     return { data: { ...standalone, deliveryError: error.message } };
   }
-  await closePaneThenFocus(surface.pane, surface.terminal);
+  if (surface.pane) await closePaneThenFocus(surface.pane, surface.terminal);
+  else focusAfterDone(surface);
   return { data: { standalone: false, artifact: artifact.id, link, delivered: true } };
 }
 

@@ -4,7 +4,7 @@ import { artifactList, artifactTerminal, link } from './commands/artifact.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
-import { surfaceDone, surfaceOpen, surfaceSocket } from './commands/surface.js';
+import { surfaceDone, surfaceFocus, surfaceOpen, surfaceSocket } from './commands/surface.js';
 import { UsageError } from './errors.js';
 
 const text = { type: 'string' };
@@ -25,9 +25,10 @@ const ROUTES = [
   {
     path: ['surface', 'open'],
     run: surfaceOpen,
-    options: { type: text, title: text, file: text, terminal: text, standalone: flag },
+    options: { type: text, title: text, file: text, terminal: text, standalone: flag, 'in-pane': flag },
   },
   { path: ['surface', 'done'], run: surfaceDone, options: { id: text, bundle: text } },
+  { path: ['surface', 'focus'], run: surfaceFocus, options: { id: text } },
   { path: ['surface', 'socket'], run: surfaceSocket, options: { terminal: text, title: text } },
   { path: ['artifact', 'list'], run: artifactList, options: { workspace: text } },
   { path: ['artifact', 'terminal'], run: artifactTerminal, options: {}, positionals: 1 },

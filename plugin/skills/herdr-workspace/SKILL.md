@@ -31,7 +31,7 @@ Read the manifest before inferring anything from the folder or git state. If `$H
 
 ## Ask the user through a surface
 
-A surface is a board, note or page in its own pane beside this terminal. Open one only when the user asks for it. Never open a surface unasked.
+A surface is a board, note or page tied to this terminal. A board opens in its own floating window, and a note or page opens in a pane beside this terminal. Open one only when the user asks for it. Never open a surface unasked.
 
 ```bash
 hws surface open --type board|note|page --title X --terminal $HC_TERMINAL_ID
