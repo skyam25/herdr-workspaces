@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 
 import { artifactAdd, artifactList, artifactSet, artifactTerminal, link } from './commands/artifact.js';
+import { archive, unarchive } from './commands/archive.js';
 import { doctor } from './commands/doctor.js';
 import { update } from './commands/update.js';
 import { current, list, parent, register } from './commands/info.js';
@@ -50,7 +51,7 @@ const ROUTES = [
   { path: ['space', 'move'], run: spaceMove, options: { space: text, workspace: text } },
   { path: ['space', 'remove'], run: spaceRemove, options: { space: text } },
   { path: ['current'], run: current, prunes: true, options: { terminal: text, line: flag } },
-  { path: ['list'], run: list, prunes: true, options: {} },
+  { path: ['list'], run: list, prunes: true, options: { archived: flag } },
   { path: ['register'], run: register, options: { terminal: text, session: text, role: text } },
   {
     path: ['surface', 'open'],
@@ -118,7 +119,7 @@ const ROUTES = [
   {
     path: ['set'],
     run: setWorkspace,
-    options: { workspace: text, kind: text, instructions: text, stage: text, place: repeated, writer: repeated },
+    options: { workspace: text, name: text, kind: text, instructions: text, stage: text, place: repeated, writer: repeated },
   },
   { path: ['place'], run: place, options: { workspace: text }, positionals: 1 },
   { path: ['tidy', 'status'], run: tidyStatus, options: { workspace: text, line: flag } },
@@ -127,6 +128,8 @@ const ROUTES = [
   { path: ['tidy', 'stop'], run: tidyStop, options: { workspace: text } },
   { path: ['parent'], run: parent, options: {} },
   { path: ['close'], run: close, prunes: true, options: { workspace: text, keep: flag, trash: flag } },
+  { path: ['archive'], run: archive, options: { workspace: text } },
+  { path: ['unarchive'], run: unarchive, options: { workspace: text } },
   { path: ['resume'], run: resume, options: { workspace: text } },
   { path: ['find'], run: find, options: {}, positionals: 'any' },
   { path: ['reopen'], run: reopen, options: {}, positionals: 1 },

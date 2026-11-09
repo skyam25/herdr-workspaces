@@ -27,8 +27,10 @@ export function parent() {
   return { data: { folder }, text: folder };
 }
 
-export function list() {
-  const manifests = listManifests().map((item) => ({ ...item, dir: workspaceDir(item.id) }));
+export function list(flags) {
+  const manifests = listManifests()
+    .filter((item) => Boolean(item.archived) === Boolean(flags.archived))
+    .map((item) => ({ ...item, dir: workspaceDir(item.id) }));
   const text = manifests.map((item) => `${item.id}\t${item.kind}\t${item.name}\t${item.folder}`).join('\n');
   return { data: manifests, text };
 }

@@ -312,6 +312,60 @@ test("Tab moves between fields", async () => {
   assert.equal(H.focusCalls.at(-1), "Optional. How agents should work and organize context here.");
 });
 
+// Row menu
+
+const ROW = { view: "row-menu", workspace: "spc1", name: "demo", kind: "app", archived: false };
+
+test("a kept row's menu offers Rename, Archive and Close", async () => {
+  const H = setup({ hws: { list: [] } });
+  const m = await mount("hws-panel", { ...ROW, overlay: "ov1" }, H);
+  assert.match(m.text(), /Rename.*Archive.*Close/);
+  await m.click("row-menu-archive");
+  assert.deepEqual(H.closed, ["ov1"]);
+  assert.deepEqual(H.overlays.at(-1).props, { view: "confirm", action: "archive", workspace: "spc1", name: "demo", kind: "app", archived: false });
+});
+
+test("a throwaway's menu has no Archive and an archived row offers Restore", async () => {
+  const H = setup({ hws: { list: [] } });
+  const scrap = await mount("hws-panel", { ...ROW, kind: "throwaway", overlay: "ov1" }, H);
+  assert.doesNotMatch(scrap.text(), /Archive/);
+  const archived = await mount("hws-panel", { ...ROW, archived: true, overlay: "ov2" }, H);
+  assert.match(archived.text(), /Restore.*Rename.*Remove/);
+});
+
+test("the rename dialog saves a trimmed name and refuses an empty one", async () => {
+  const H = setup({ hws: { list: [] } });
+  const d = await mount("hws-panel", { view: "rename", workspace: "spc1", name: "demo", overlay: "ov3" }, H);
+  d.view.inputs.name.type("   ", d.cx);
+  await d.click("rename-yes");
+  assert.match(d.text(), /Enter a name/);
+  assert.equal(hwsCalls(H).length, 0);
+  d.view.inputs.name.type("  better  ", d.cx);
+  await d.click("rename-yes");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["set", "--workspace", "spc1", "--name", "better", "--json"]);
+  assert.deepEqual(H.closed, ["ov3"]);
+});
+
+test("the confirm dialog runs archive, restore and remove", async () => {
+  for (const [action, expected] of [["archive", ["archive", "--workspace", "spc1", "--json"]], ["restore", ["unarchive", "--workspace", "spc1", "--json"]], ["remove", ["close", "--workspace", "spc1", "--json"]]]) {
+    const H = setup({ hws: { list: [] } });
+    const d = await mount("hws-panel", { view: "confirm", action, workspace: "spc1", name: "demo", kind: "app", overlay: "ov4" }, H);
+    await d.click("confirm-yes");
+    await d.settle();
+    assert.deepEqual(hwsCalls(H).at(-1).args, expected);
+    assert.deepEqual(H.closed, ["ov4"]);
+  }
+});
+
+test("closing a throwaway with work opens the Keep or Trash dialog", async () => {
+  const H = setup({ hws: { list: [], close: { decision: "needed", artifacts: [{ id: "a1" }], scratch: null } } });
+  const d = await mount("hws-panel", { view: "confirm", action: "close", workspace: "spc1", name: "scrap", kind: "throwaway", overlay: "ov5" }, H);
+  await d.click("confirm-yes");
+  await d.settle();
+  assert.equal(H.overlays.at(-1).props.view, "decide");
+  assert.deepEqual(H.overlays.at(-1).props.artifacts, [{ id: "a1" }]);
+});
+
 // Panel
 
 test("panel outside a workspace says so and offers New workspace", async () => {
@@ -1066,6 +1120,29 @@ test("sidebar rows switch spaces, and only the current workspace toggles the pan
   await m.click("sidebar-panel");
   assert.deepEqual(H.runs.at(-1), { name: "mod.open", args: { name: "hws-panel" } });
   assert.equal(H.runs.filter((r) => r.name === "mod.open").length, 1);
+});
+
+test("right-clicking a sidebar row opens its menu beside the pointer", async () => {
+  const H = setup({ hws: { list: [APP] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  await m.rightClick("sidebar-workspace-spc1");
+  const spec = H.overlays.at(-1);
+  assert.deepEqual([spec.kind, spec.props], ["popup", { workspace: "spc1", name: "checkout demo", kind: "app", archived: false, view: "row-menu" }]);
+});
+
+test("the sidebar folds archived workspaces under one row and restores on click", async () => {
+  const archived = { ...APP, id: "spa", name: "old work", spaces: [], archived: { at: 1, spaces: [] } };
+  const H = setup({ hws: { list: [APP], "list --archived": [archived] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 147 } });
+  assert.equal(m.has("sidebar-archived-spa"), false);
+  H.layout.children[0].children[0].size.px = 147;
+  await m.click("sidebar-archived-toggle");
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 173 } });
+  await m.click("sidebar-archived-spa");
+  assert.deepEqual([H.overlays.at(-1).props.view, H.overlays.at(-1).props.action, H.overlays.at(-1).props.workspace], ["confirm", "restore", "spa"]);
+  await m.rightClick("sidebar-archived-spa");
+  assert.equal(H.overlays.at(-1).props.archived, true);
 });
 
 test("the sidebar section sizes its block to its rows and hides them when narrow", async () => {

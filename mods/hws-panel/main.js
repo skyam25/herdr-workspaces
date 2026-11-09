@@ -1,13 +1,15 @@
 // The current workspace: what it is, who is working, what is open and what it made.
 // One copy runs per use. A pane shows the panel, a dialog copy shows the close
-// decision or Promote, a `mod.open` copy toggles the pane and closes itself, and
-// a layout block with `view: "sidebar"` shows the Workspaces section.
+// decision or Promote, a `mod.open` copy toggles the pane and closes itself, a
+// layout block with `view: "sidebar"` shows the Workspaces section, and a popup
+// copy shows a workspace row's right-click menu.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, panes, spaces, focused, props, exec, hc, theme, run, openOverlay, closeOverlay, readTextFile, shared, watchFolder } from "herdr";
 import { hws, message, submitDialog, openWorkspaceForm, KINDS, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 import { startSidebar, drawSidebar } from "./sidebar.js";
+import { initRename, renderConfirm, renderRename, renderRowMenu } from "./rowmenu.js";
 import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, noteLines, placeRows, resolvePath, validStatus } from "./context.js";
 import { copy, openCite, openPath } from "./cites.js";
 import { artifactsSection, currentSection, headerSection, placesSection, recordSection, sectionTitle, sinceSection } from "./sections.js";
@@ -47,7 +49,11 @@ export default class Panel extends View {
     } else if (this.view === "instructions") {
       makeInput(this, "instructions", { rows: 9, value: p.instructions ?? "", placeholder: INSTRUCTIONS_HINT });
       focusField(this, "instructions", cx);
-    } else if (this.view === "decide") {
+    } else if (this.view === "rename") {
+      initRename(this, cx);
+    } else if (this.view === "row-menu") {
+      // The menu draws from its props.
+    } else if (this.view === "decide" || this.view === "confirm") {
       this.handle.focus();
     } else {
       this.manifests = null;
@@ -202,7 +208,7 @@ export default class Panel extends View {
   }
 
   citeAction(cite, workspace, cx) {
-    this.act(`cite-${cite.kind}-${cite.value}`, () => openCite(cite, { workspace, target: this.trackAgent(workspace.id), space: this.spaceId }), cx);
+    this.act(`cite-${cite.kind}-${cite.value}`, () => openCite(cite, { workspace, target: this.trackAgent(this.spaceId), space: this.spaceId }), cx);
   }
 
   openCurrent(target, cx) {
@@ -494,8 +500,8 @@ export default class Panel extends View {
   // A kept workspace shows Current, Since last tidy, Artifacts and Places.
   // A throwaway shows its Record in their place.
   renderWorkspace(t, workspace) {
-    const space = spaces().find((s) => s.id === workspace.id);
-    const view = { t, host: this, workspace, target: this.trackAgent(workspace.id), now: Date.now() };
+    const space = spaces().find((s) => s.id === this.spaceId);
+    const view = { t, host: this, workspace, target: this.trackAgent(this.spaceId), now: Date.now() };
     const isThrowaway = workspace.kind === "throwaway";
     return v_flex()
       .id("hws-panel")
@@ -689,6 +695,9 @@ export default class Panel extends View {
     if (this.view === "promote") return this.renderPromote(t);
     if (this.view === "add-space") return this.renderAddSpace(t);
     if (this.view === "instructions") return this.renderInstructions(t);
+    if (this.view === "row-menu") return renderRowMenu(t);
+    if (this.view === "rename") return renderRename(t, this);
+    if (this.view === "confirm") return renderConfirm(t, this);
     return this.renderPanel(t, cx);
   }
 }

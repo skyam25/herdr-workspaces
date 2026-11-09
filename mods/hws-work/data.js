@@ -230,9 +230,9 @@ export function locateTerminal({ panes, terminals }, address) {
 }
 
 // Dialog heights in px. The forms draw with these and the board adds them up.
-export const FORM = { pad: 18, gap: 12, heading: 20, label: 15, labelGap: 5, input: 34, notes: 96, lines: 170, chip: 26, sendRow: 28, sendGap: 4, note: 48, story: 360, side: 300, columnGap: 24, problem: 16, footerTop: 4, button: 30, frame: 4 };
+export const FORM = { pad: 18, gap: 12, heading: 20, label: 15, labelGap: 5, input: 34, notes: 96, lines: 170, chip: 26, sendRow: 28, sendGap: 4, note: 48, story: 360, side: 300, columnGap: 24, problem: 16, footerTop: 4, button: 30, frame: 4, sectionName: 18, rowGap: 8 };
 
-export const MODELS_DIALOG = { width: 520, height: 500 };
+export const MODELS_DIALOG = { width: 520 };
 const TODO_DIALOG = { width: 920, height: 820, margin: 40, leastWidth: 560, leastHeight: 480 };
 const STORY_CHARS = 90;
 const STORY_LINE = 18;
@@ -255,6 +255,10 @@ export function todoLayout({ height, waiting, story }) {
 }
 
 export const severalDialogHeight = () => shellHeight() + labeled(FORM.lines);
+
+// The recommended line, then a section per role: name, hint and one row per choice.
+const roleSectionHeight = (rows) => FORM.gap + FORM.sectionName + 2 + FORM.label + 2 + rows * FORM.chip + (rows - 1) * FORM.rowGap;
+export const modelsDialogHeight = () => shellHeight() + FORM.label + roleSectionHeight(2) + roleSectionHeight(3);
 
 // True when a session reports tracking on or already has an items file.
 export const isTracked = (session, doc) => Boolean(session.trackItems || session.itemsPath || (doc && doc.items !== null));

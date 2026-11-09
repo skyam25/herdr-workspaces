@@ -7,6 +7,7 @@ import { exec, layout, openOverlay, run, setShared, shared, spaces, theme, watch
 import { hws, message, openWorkspaceForm } from "./hws.js";
 import { freshness } from "./context.js";
 import { freshnessDot } from "./sections.js";
+import { openConfirm, openRowMenu } from "./rowmenu.js";
 
 const NODE = "workspaces";
 const HEADING_PX = 31;
@@ -19,6 +20,7 @@ const CHECK_MS = 1000;
 const REFRESH_MS = 60000;
 const GIT_TIMEOUT_MS = 5000;
 const FOLDED_KEY = "sidebar.folded";
+const ARCHIVED_OPEN_KEY = "sidebar.archived.open";
 const STATUS_ORDER = ["blocked", "done", "working", "idle"];
 
 // hws-tabs reads this key.
@@ -81,7 +83,7 @@ function publishBoardTabs(workspaces) {
 
 // An agent or the CLI can change who is in a workspace with no change to the spaces.
 function watchManifests(state, cx) {
-  const dir = state.workspaces[0]?.dir;
+  const dir = [...state.workspaces, ...(state.archived ?? [])][0]?.dir;
   if (state.watching || !dir) return;
   state.watching = true;
   const root = dir.slice(0, dir.lastIndexOf("/"));
@@ -107,6 +109,7 @@ function load(state, cx, { listOnly = false } = {}) {
   cx.spawn(async (cx) => {
     try {
       state.workspaces = await hws(["list"]);
+      state.archived = await hws(["list", "--archived"]);
       state.problem = null;
       publishBoardTabs(state.workspaces);
       watchManifests(state, cx);
@@ -140,7 +143,7 @@ function listPx(state) {
     const rows = (showsSpaces(state, w, members) ? members.length : 0) + addRowSpecs(state, w, members).length;
     return sum + ROW_PX + rows * SPACE_ROW_PX;
   }, 0);
-  return Math.min(Math.max(px, ROW_PX), MAX_LIST_PX);
+  return Math.min(Math.max(px, ROW_PX) + archivedRowCount(state) * SPACE_ROW_PX, MAX_LIST_PX);
 }
 
 // Sizes the block to its rows, so an empty section leaves no gap above Spaces.
@@ -170,6 +173,8 @@ function check(state, cx) {
 export function startSidebar(cx) {
   const state = {
     workspaces: null,
+    archived: [],
+    showArchived: localStorage.getItem(ARCHIVED_OPEN_KEY) === "1",
     problem: null,
     fetching: false,
     fetchAgain: false,
@@ -331,6 +336,15 @@ function addRowSpecs(state, workspace, members) {
   return [addSpace, { id: `sidebar-add-board-${workspace.id}`, label: "Add board", onClick: (cx) => addBoard(state, workspace, cx) }];
 }
 
+const menuTarget = (workspace, archived) => ({ workspace: workspace.id, name: workspace.name, kind: workspace.kind, archived });
+
+function rightClick(workspace, archived) {
+  return (_e, cx) => {
+    cx.stop_propagation();
+    openRowMenu(menuTarget(workspace, archived));
+  };
+}
+
 function workspaceRow(t, state, workspace, members) {
   const isActive = isCurrent(members);
   const status = mostUrgent(members);
@@ -349,6 +363,7 @@ function workspaceRow(t, state, workspace, members) {
     .when(isActive, (el) => el.bg(t.raised))
     .when(!isActive, (el) => el.hover((s) => s.bg(t.hover)))
     .on_click(() => target && run("space.select", { id: target.id }))
+    .on_mouse_down("right", rightClick(workspace, false))
     .when(members.length > 1, (el) => el.child(foldButton(t, state, workspace.id)))
     .child(svg(icon("layers")).size(14).flex_none().text_color(isActive ? t.foreground : t.dim))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(workspace.name))
@@ -359,12 +374,69 @@ function workspaceRow(t, state, workspace, members) {
     .when(isActive, (el) => el.child(iconButton(t, "sidebar-panel", "panel-right", 22, () => run("mod.open", { name: "hws-panel" }))));
 }
 
+function archivedRowCount(state) {
+  const count = state.archived?.length ?? 0;
+  if (count === 0) return 0;
+  return state.showArchived ? count + 1 : 1;
+}
+
+function toggleArchived(state, cx) {
+  state.showArchived = !state.showArchived;
+  localStorage.setItem(ARCHIVED_OPEN_KEY, state.showArchived ? "1" : "0");
+  fit(state);
+  cx.notify();
+}
+
+function archivedHeading(t, state) {
+  return h_flex()
+    .id("sidebar-archived-toggle")
+    .h(SPACE_ROW_PX)
+    .flex_none()
+    .px(8)
+    .gap(8)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .text_size(12.5)
+    .text_color(t.dim)
+    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .on_click((_e, cx) => toggleArchived(state, cx))
+    .child(svg(icon(state.showArchived ? "chevron-down" : "chevron-right")).size(12).flex_none())
+    .child(div().flex_1().min_w(0).truncate().child("Archived"))
+    .child(div().flex_none().text_size(11.5).child(String(state.archived.length)));
+}
+
+function archivedRow(t, workspace) {
+  return h_flex()
+    .id(`sidebar-archived-${workspace.id}`)
+    .h(SPACE_ROW_PX)
+    .flex_none()
+    .pl(32)
+    .pr(8)
+    .gap(8)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .text_size(12.5)
+    .text_color(t.muted)
+    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .on_click(() => openConfirm("restore", menuTarget(workspace, true)))
+    .on_mouse_down("right", rightClick(workspace, true))
+    .child(svg(icon("layers")).size(12).flex_none())
+    .child(div().flex_1().min_w(0).truncate().child(workspace.name));
+}
+
+function archivedRows(t, state) {
+  if (archivedRowCount(state) === 0) return [];
+  return [archivedHeading(t, state), ...(state.showArchived ? state.archived.map((w) => archivedRow(t, w)) : [])];
+}
+
 function rows(t, state) {
   if (state.problem) return [div().h(ROW_PX).flex_none().px(8).flex().items_center().text_size(11.5).text_color(t.blocked).child(div().truncate().child(state.problem))];
   if (!state.workspaces) return [];
-  if (state.workspaces.length === 0) return [newRow(t)];
+  if (state.workspaces.length === 0) return [newRow(t), ...archivedRows(t, state)];
   const shown = spaces();
-  return state.workspaces.flatMap((w) => {
+  const open = state.workspaces.flatMap((w) => {
     const members = membersOf(w, shown);
     return [
       workspaceRow(t, state, w, members),
@@ -372,6 +444,7 @@ function rows(t, state) {
       ...addRowSpecs(state, w, members).map(({ id, label, onClick }) => addRow(t, id, label, onClick)),
     ];
   });
+  return [...open, ...archivedRows(t, state)];
 }
 
 export function drawSidebar(state) {

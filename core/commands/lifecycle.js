@@ -7,7 +7,7 @@ import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isIdleShell, killTerminal, listLive, requireLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
 import { STANDALONE, captureDir, terminalSessionDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
-import { applyPlaces, assertRole, assertStage, ensurePlace, parseAssignment, placeOf, writablePlace } from '../places.js';
+import { applyPlaces, assertRole, assertStage, ensurePlace, isKept, parseAssignment, placeOf, writablePlace } from '../places.js';
 import { resolveWorkspace } from '../resolve.js';
 import { containsFile, isStored, lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
@@ -88,7 +88,7 @@ function isQuietUnlisted(terminal) {
   return !info?.labels?.['herdr.chat'] || QUIET_STATUSES.has(info.status?.state);
 }
 
-function liveSpaces(manifest, live) {
+export function liveSpaces(manifest, live) {
   return live.spaces.filter((space) => manifest.spaces.includes(space.id));
 }
 
@@ -167,9 +167,13 @@ export function prune() {
   const pruned = [];
   const open = [];
   for (const manifest of manifests) {
+    if (manifest.archived) continue;
     const gone = manifest.spaces.filter((id) => !liveIds.has(id));
     try {
       if (gone.length === manifest.spaces.length) {
+
+        // An archive that landed after the read above owns these closed spaces.
+        if (readManifest(manifest.id)?.archived) continue;
         retireWorkspace(manifest.id);
         pruned.push(manifest.id);
         continue;
@@ -185,26 +189,42 @@ export function prune() {
   return { data: { pruned, expired, skipped: false }, text: `pruned ${pruned.length}, expired ${expired.length}` };
 }
 
+// A space named for its workspace follows the rename. A space with its own name keeps it.
+function renameMatchingSpaces(manifest, name) {
+  for (const space of liveSpaces(manifest, listLive() ?? { spaces: [] })) {
+    if (space.name === manifest.name) act('space.rename', { id: space.id, name });
+  }
+}
+
 // Changing a place moves no files. It changes where new things land.
 export function setWorkspace(flags) {
   const paths = (flags.place ?? []).map((text) => parseAssignment(text, 'place'));
   const writers = (flags.writer ?? []).map((text) => parseAssignment(text, 'writer'));
   const changesPlaces = paths.length > 0 || writers.length > 0;
-  if (flags.kind === undefined && flags.instructions === undefined && flags.stage === undefined && !changesPlaces) {
-    throw new UsageError('pass --kind, --instructions, --stage, --place or --writer');
+  if (flags.name === undefined && flags.kind === undefined && flags.instructions === undefined && flags.stage === undefined && !changesPlaces) {
+    throw new UsageError('pass --name, --kind, --instructions, --stage, --place or --writer');
   }
+  const name = flags.name?.trim();
+  if (flags.name !== undefined && !name) throw new UsageError('--name cannot be empty');
   const kind = flags.kind === undefined ? undefined : keptKind(flags.kind);
   if (flags.stage !== undefined) assertStage(flags.stage);
   const manifest = resolveWorkspace(flags);
+  if (name && manifest.id === STANDALONE) throw new HwsError('the standalone store has a fixed name');
   if (kind && !KEPT_KINDS.includes(manifest.kind)) throw new HwsError(`${manifest.name} is a ${manifest.kind}, which has a fixed kind`);
   if (changesPlaces && !KEPT_KINDS.includes(manifest.kind)) throw new HwsError(`${manifest.name} is a ${manifest.kind}, which has fixed places`);
+  const isRename = Boolean(name) && name !== manifest.name;
   const updated = updateManifest(manifest.id, (draft) => {
+    if (isRename) {
+      if (isKept(draft)) draft.storeName ??= draft.name;
+      draft.name = name;
+    }
     if (kind) draft.kind = kind;
     if (flags.instructions !== undefined) draft.instructions = flags.instructions;
     if (flags.stage !== undefined) draft.stage = flags.stage;
     if (changesPlaces) applyPlaces(draft, paths, writers);
   });
-  return { data: updated, text: `updated ${manifest.name}` };
+  if (isRename) renameMatchingSpaces(manifest, name);
+  return { data: updated, text: `updated ${updated.name}` };
 }
 
 // Prints nothing when the role is unset.
@@ -292,7 +312,7 @@ function chooseWorkFate(manifest, flags) {
 }
 
 // The caller's own space closes last, because the caller dies with it.
-function inClosingOrder(spaces) {
+export function inClosingOrder(spaces) {
   const terminal = process.env.HC_TERMINAL_ID;
   const own = terminal ? spaceOfTerminal(terminal) : null;
   return [...spaces.filter((space) => space.id !== own), ...spaces.filter((space) => space.id === own)];

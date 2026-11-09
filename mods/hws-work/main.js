@@ -5,7 +5,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, exec, home, layout, openOverlay, panes, props, readTextFile, run, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
-import { COLUMNS, DONE_SHOWN, POLL_MS, ago, agentName, board, cardSessions, cardSummary, cleanPath, describeSession, feedbackDir, fileName, findNode, isTracked, lastTouched, locateTerminal, mergeBoard, orchestratorFolder, outputGroups, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoDialogSize, todoItems, MODELS_DIALOG, modelsLine } from "./data.js";
+import { COLUMNS, DONE_SHOWN, POLL_MS, ago, agentName, board, cardSessions, cardSummary, cleanPath, describeSession, feedbackDir, fileName, findNode, isTracked, lastTouched, locateTerminal, mergeBoard, orchestratorFolder, outputGroups, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
 import { focusAgent, hws, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
@@ -191,7 +191,7 @@ export default class Work extends View {
   }
 
   openModels() {
-    this.openDialog(MODELS_DIALOG, { view: "models" });
+    this.openDialog({ width: MODELS_DIALOG.width, height: modelsDialogHeight() }, { view: "models" });
   }
 
   openSeveral() {

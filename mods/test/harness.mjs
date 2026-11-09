@@ -101,7 +101,7 @@ export function setup(overrides = {}) {
     if (command === HWS || command === "hws") {
       if (H.missingHwsPaths.has(command)) throw new Error("spawn ENOENT");
       const key = args.filter((a) => a !== "--json").filter((a, i, all) => !a.startsWith("--") && !(all[i - 1]?.startsWith("--"))).join(" ");
-      const answer = H.hws[key];
+      const answer = args[0] === "list" && args.includes("--archived") ? (H.hws["list --archived"] ?? []) : H.hws[key];
       const out = typeof answer === "function" ? answer(args) : answer;
       if (out?.fail) return { code: 1, stdout: JSON.stringify({ error: out.fail }), stderr: "" };
       return { code: 0, stdout: out === undefined ? "{}" : typeof out === "string" ? out : JSON.stringify(out), stderr: "" };
@@ -157,6 +157,12 @@ export async function mount(mod, props, H = globalThis.__herdr) {
       if (!n) throw new Error(`no element ${id}`);
       if (!n.handlers.on_click) throw new Error(`${id} is not clickable`);
       n.handlers.on_click({}, cx);
+      await settle();
+    },
+    async rightClick(id) {
+      const n = find(render(), id);
+      if (!n) throw new Error(`no element ${id}`);
+      n.handlers.on_mouse_down_right({}, cx);
       await settle();
     },
     async key(key, modifiers = {}) {

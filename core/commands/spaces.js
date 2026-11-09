@@ -34,8 +34,13 @@ function takeSpace(manifest, space) {
   return taken;
 }
 
+function requireNotArchived(manifest) {
+  if (manifest.archived) throw new HwsError(`${manifest.name} is archived, so restore it first`);
+  return manifest;
+}
+
 export function spaceAdd(flags) {
-  const manifest = workspaceByRef(requireFlag(flags, 'workspace'));
+  const manifest = requireNotArchived(workspaceByRef(requireFlag(flags, 'workspace')));
   const folder = flags.folder ? requireFolder(expandFolder(flags.folder)) : manifest.folder;
   const opened = act('space.new', { name: flags.name, folder });
   updateManifest(manifest.id, (draft) => {
@@ -47,7 +52,7 @@ export function spaceAdd(flags) {
 
 // A plain space brings its cards. Cards on another workspace's board stay with that workspace.
 export function spaceMove(flags) {
-  const target = workspaceByRef(requireFlag(flags, 'workspace'));
+  const target = requireNotArchived(workspaceByRef(requireFlag(flags, 'workspace')));
   const space = liveSpace(requireFlag(flags, 'space'));
   const source = manifestOfSpace(space.id);
   const data = { workspace: target.id, space: space.id };
@@ -99,10 +104,12 @@ function ensureBoard(id) {
   return board;
 }
 
+export const addBoard = (id) => withLock(`board-${encodeURIComponent(id)}`, () => ensureBoard(id));
+
 // Adds the workspace's one Board space, or finds the one it has.
 export function boardAdd(flags) {
-  const manifest = resolveWorkspace(flags);
-  const board = withLock(`board-${encodeURIComponent(manifest.id)}`, () => ensureBoard(manifest.id));
+  const manifest = requireNotArchived(resolveWorkspace(flags));
+  const board = addBoard(manifest.id);
   return { data: { workspace: manifest.id, ...board }, text: `Board is space ${board.space}` };
 }
 

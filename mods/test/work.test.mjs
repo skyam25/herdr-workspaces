@@ -789,6 +789,21 @@ test("the Models dialog saves both roles and switching a worker's tool picks its
   assert.deepEqual(H.closed, ["ov9"]);
 });
 
+test("the Models dialog labels each row and swaps Use recommended for a note once the setup matches", async () => {
+  const H = world();
+  H.hws["models"] = { ...JSON.parse(JSON.stringify(MODEL_SETTINGS)), worker: { tool: "claude", model: "sonnet", effort: "low" } };
+  const m = await mount("hws-work", { view: "models", space: "spc1", overlay: "ov9" });
+  await settle();
+  m.render();
+  assert.match(textOf(findNode(m, "models-body")), /Recommended: Opus on high orchestrates, Sonnet on medium does the cards/);
+  assert.match(textOf(findNode(m, "models-body")), /Tool.*Claude Code.*Codex.*Model.*Opus.*Sonnet.*Effort.*low/s);
+  assert.equal(m.has("models-recommended-note"), false);
+  await m.click("models-recommended");
+  m.render();
+  assert.equal(m.has("models-recommended"), false);
+  assert.equal(textOf(findNode(m, "models-recommended-note")), "Using the recommended setup");
+});
+
 test("a worker silent since it was claimed counts as blocked", async () => {
   const H = orchWorld(null, { terminals: [{ address: "t20", state: "live", status: null, labels: { "hws.todo": "a" } }] });
   H.hws["todo list"].items = [todo("a", "A", { column: "doing", terminal: "t20", updatedAt: 1 })];

@@ -49,8 +49,9 @@ export function phoneSocket(root = stateRoot()) {
 const slug = (name) => name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
 
 // One folder per workspace, because workspaces can share a parent folder.
+// `storeName` keeps the folder in place after a rename.
 export function keptWorkspaceDir(folder, workspace) {
-  return join(folder, '.herdr-workspace', `${slug(workspace.name)}-${workspace.id.slice(-6)}`);
+  return join(folder, '.herdr-workspace', `${slug(workspace.storeName ?? workspace.name)}-${workspace.id.slice(-6)}`);
 }
 
 export function keptThrowawayDir(name, artifactId) {

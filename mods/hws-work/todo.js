@@ -497,8 +497,11 @@ export class AddSeveralForm extends DialogForm {
   }
 }
 
-const ROLES = [{ key: "orchestrator", name: "Orchestrator", line: "Reads the board and decides how to run the cards. It runs on Claude Code." }, { key: "worker", name: "Workers", line: "Do the cards." }];
-const RECOMMENDED = "Recommended: a stronger model orchestrates and Sonnet-level workers do the cards.";
+const ROLES = [
+  { key: "orchestrator", name: "Orchestrator", line: "Reads the board and decides how to run the cards. Always Claude Code." },
+  { key: "worker", name: "Workers", line: "Do the cards." },
+];
+const MODEL_LABEL = 52;
 
 export class ModelsForm extends DialogForm {
   constructor(cx) {
@@ -532,6 +535,19 @@ export class ModelsForm extends DialogForm {
     cx.notify();
   }
 
+  recommendedInUse() {
+    return ROLES.every(({ key }) => ["tool", "model", "effort"].every((f) => this.settings[key][f] === this.settings.recommended[key][f]));
+  }
+
+  modelName(role, id) {
+    return this.settings.catalog[this.settings[role].tool].models.find((x) => x.id === id)?.name ?? id;
+  }
+
+  recommendedLine() {
+    const { orchestrator, worker } = this.settings.recommended;
+    return `Recommended: ${this.modelName("orchestrator", orchestrator.model)} on ${orchestrator.effort} orchestrates, ${this.modelName("worker", worker.model)} on ${worker.effort} does the cards.`;
+  }
+
   // A model set through hws stays selectable even when the list does not name it.
   modelChoices(role) {
     const { tool, model } = this.settings[role];
@@ -539,23 +555,63 @@ export class ModelsForm extends DialogForm {
     return models.some((x) => x.id === model) ? models : [...models, { id: model, name: model }];
   }
 
-  chips(ids) {
-    return h_flex().flex_wrap().gap(4).children(ids);
+  // One joined control, so the row reads as a single choice.
+  segments(t, options) {
+    return h_flex()
+      .flex_none()
+      .rounded(7)
+      .border_1()
+      .border_color(t.input)
+      .overflow_hidden()
+      .children(
+        options.map(({ id, text, on, action }, i) =>
+          h_flex()
+            .id(id)
+            .flex_none()
+            .h(FORM.chip)
+            .px(10)
+            .items_center()
+            .when(i > 0, (el) => el.border_l_1().border_color(t.input))
+            .when(on, (el) => el.bg(t.selected).font_medium())
+            .text_size(12)
+            .text_color(on ? t.foreground : t.muted)
+            .cursor_pointer()
+            .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
+            .on_click(action)
+            .child(text),
+        ),
+      );
+  }
+
+  row(t, label, options) {
+    return h_flex()
+      .flex_none()
+      .gap(10)
+      .items_center()
+      .child(div().w(MODEL_LABEL).flex_none().text_size(11.5).text_color(t.dim).child(label))
+      .child(this.segments(t, options));
   }
 
   roleFields(t, { key, name, line }) {
     const current = this.settings[key];
-    const tools = Object.entries(this.settings.catalog).map(([id, tool]) => this.chip(t, `${key}-tool-${id}`, tool.name, id === current.tool, this.pick(key, { tool: id, model: tool.recommendedWorker })));
-    const models = this.modelChoices(key).map((x) => this.chip(t, `${key}-model-${x.id}`, x.name, x.id === current.model, this.pick(key, { model: x.id })));
-    const efforts = this.settings.catalog[current.tool].efforts.map((x) => this.chip(t, `${key}-effort-${x}`, x, x === current.effort, this.pick(key, { effort: x })));
+    const option = (id, text, on, action) => ({ id, text, on, action });
+    const tools = Object.entries(this.settings.catalog).map(([id, tool]) => option(`${key}-tool-${id}`, tool.name, id === current.tool, this.pick(key, { tool: id, model: tool.recommendedWorker })));
+    const models = this.modelChoices(key).map((x) => option(`${key}-model-${x.id}`, x.name, x.id === current.model, this.pick(key, { model: x.id })));
+    const efforts = this.settings.catalog[current.tool].efforts.map((x) => option(`${key}-effort-${x}`, x, x === current.effort, this.pick(key, { effort: x })));
     return v_flex()
       .flex_none()
-      .gap(6)
-      .child(div().text_size(13).font_semibold().child(name))
-      .child(div().text_size(11.5).text_color(t.dim).child(line))
-      .when(key === "worker", (el) => el.child(this.chips(tools)))
-      .child(this.chips(models))
-      .child(this.chips(efforts));
+      .gap(FORM.rowGap)
+      .child(
+        v_flex()
+          .flex_none()
+          .gap(2)
+          .pb(2)
+          .child(div().line_height(lineHeight(FORM.sectionName)).text_size(13).font_semibold().child(name))
+          .child(div().line_height(lineHeight(FORM.label)).text_size(11.5).text_color(t.dim).child(line)),
+      )
+      .when(key === "worker", (el) => el.child(this.row(t, "Tool", tools)))
+      .child(this.row(t, "Model", models))
+      .child(this.row(t, "Effort", efforts));
   }
 
   save(cx) {
@@ -570,9 +626,13 @@ export class ModelsForm extends DialogForm {
   render() {
     const t = theme();
     const enabled = this.ready();
-    const fields = this.settings ? [div().flex_none().text_size(11.5).text_color(t.muted).child(RECOMMENDED), ...ROLES.map((role) => this.roleFields(t, role))] : [];
+    const fields = this.settings
+      ? [div().flex_none().line_height(lineHeight(FORM.label)).text_size(11.5).text_color(t.muted).child(this.recommendedLine()), ...ROLES.map((role) => this.roleFields(t, role))]
+      : [];
+    const inUse = Boolean(this.settings) && this.recommendedInUse();
     const footer = this.footer()
-      .child(this.button(t, "models-recommended", "Use recommended", false, (_e, cx) => this.useRecommended(cx), enabled))
+      .when(inUse, (el) => el.child(div().id("models-recommended-note").flex_none().text_size(11.5).text_color(t.dim).child("Using the recommended setup")))
+      .when(!inUse, (el) => el.child(this.button(t, "models-recommended", "Use recommended", false, (_e, cx) => this.useRecommended(cx), enabled)))
       .child(div().flex_1())
       .child(this.button(t, "cancel-todo", "Cancel", false, () => this.close(), true))
       .child(this.button(t, "models-save", this.busy === "save" ? "Saving…" : "Save", true, (_e, cx) => this.save(cx), enabled));

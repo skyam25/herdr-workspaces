@@ -3,7 +3,7 @@
 
 export const ROLES = ["current", "artifacts", "scratch", "decisions", "history", "meetings"];
 
-// What a role means when the manifest leaves it out. See docs/context-lifecycle.md, Places.
+// What a role means when the manifest leaves it out. See docs/CONTRACT.md, Places.
 export const ROLE_DEFAULTS = {
   current: "CURRENT.md",
   artifacts: "Default, under .herdr-workspace/",

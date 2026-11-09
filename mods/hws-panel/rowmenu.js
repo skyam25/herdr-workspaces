@@ -1,0 +1,153 @@
+// The right-click menu on a sidebar workspace row, and the dialogs it opens.
+
+import { div } from "gpui-kit";
+import { v_flex, h_flex } from "gpui-base";
+import { closeOverlay, openOverlay, props } from "herdr";
+import { hws, submitDialog, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, button, problemLine } from "./hws.js";
+
+const MOD = "hws-panel";
+const MENU_WIDTH = 176;
+const MENU_ROW_PX = 28;
+const MENU_PADDING_PX = 4;
+
+const RENAME_DIALOG = { width: 420, height: 170 };
+const CONFIRM_DIALOG = { width: 440, height: 176 };
+
+const openDialog = ({ width, height }, dialogProps) => openOverlay({ mod: MOD, kind: "dialog", modal: true, width, height, props: dialogProps });
+
+const CLOSE_BODY = {
+  kept: "Its spaces and terminals close and it leaves this list for good. Its files stay in its folder.",
+  throwaway: "Its spaces and terminals close. Find throwaway can bring it back for 30 days.",
+};
+
+function confirmCopy({ action, name, kind }) {
+  return {
+    archive: { title: `Archive ${name}?`, body: "Its spaces and terminals close. Restore reopens them and resumes their agent sessions.", yes: "Archive", busy: "Archiving…" },
+    restore: { title: `Restore ${name}?`, body: "This reopens its spaces and resumes their agent sessions.", yes: "Restore", busy: "Restoring…" },
+    close: { title: `Close ${name}?`, body: CLOSE_BODY[kind === "throwaway" ? "throwaway" : "kept"], yes: "Close", busy: "Closing…" },
+    remove: { title: `Remove ${name}?`, body: "It leaves the Archived list and cannot be restored. Its files stay in its folder.", yes: "Remove", busy: "Removing…" },
+  }[action];
+}
+
+export const openConfirm = (action, target) => openDialog(CONFIRM_DIALOG, { ...target, view: "confirm", action });
+
+const openRename = (target) => openDialog(RENAME_DIALOG, { ...target, view: "rename" });
+
+function menuItems(target) {
+  const rename = { id: "rename", label: "Rename…", open: () => openRename(target) };
+  const confirm = (id, label) => ({ id, label, open: () => openConfirm(id, target) });
+  if (target.archived) return [confirm("restore", "Restore…"), rename, confirm("remove", "Remove…")];
+  if (target.kind === "throwaway") return [rename, confirm("close", "Close…")];
+  return [rename, confirm("archive", "Archive…"), confirm("close", "Close…")];
+}
+
+// `target` is `{ workspace, name, kind, archived }`.
+export function openRowMenu(target) {
+  const height = menuItems(target).length * MENU_ROW_PX + MENU_PADDING_PX * 2;
+  openOverlay({ mod: MOD, kind: "popup", width: MENU_WIDTH, height, props: { ...target, view: "row-menu" } });
+}
+
+export function renderRowMenu(t) {
+  const { view: _view, overlay, ...target } = props();
+  return v_flex()
+    .id("hws-row-menu")
+    .size_full()
+    .p(MENU_PADDING_PX)
+    .bg(t.popover)
+    .text_color(t.foreground)
+    .text_size(13)
+    .children(
+      menuItems(target).map((item) =>
+        h_flex()
+          .id(`row-menu-${item.id}`)
+          .h(MENU_ROW_PX)
+          .flex_none()
+          .px(8)
+          .items_center()
+          .rounded(5)
+          .cursor_pointer()
+          .hover((s) => s.bg(t.hover))
+          .on_click(() => {
+            closeOverlay(overlay);
+            item.open();
+          })
+          .child(item.label),
+      ),
+    );
+}
+
+export function initRename(view, cx) {
+  makeInput(view, "name", { value: props().name ?? "", placeholder: "Workspace name", submit: (cx) => saveName(view, cx) });
+  focusField(view, "name", cx);
+}
+
+function saveName(view, cx) {
+  const name = view.values.name.trim();
+  if (!name) {
+    view.problem = "Enter a name.";
+    cx.notify();
+    return;
+  }
+  submitDialog(view, "rename", () => hws(["set", "--workspace", props().workspace, "--name", name]), cx);
+}
+
+export function renderRename(t, view) {
+  return dialogRoot(t, "hws-rename")
+    .track_focus(view.handle)
+    .on_key_down(formKeys(view, () => closeOverlay(props().overlay)))
+    .child(
+      v_flex()
+        .flex_1()
+        .min_h(0)
+        .p(18)
+        .gap(12)
+        .child(div().text_size(15).font_semibold().child("Rename workspace"))
+        .child(labeled(t, "Name", field(t, view, "name")))
+        .when(Boolean(view.problem), (el) => el.child(problemLine(t, view.problem))),
+    )
+    .child(
+      dialogFooter()
+        .child(button(t, "cancel", "Cancel", false, () => closeOverlay(props().overlay)))
+        .child(button(t, "rename-yes", view.busy ? "Saving…" : "Save", true, (_e, cx) => saveName(view, cx), !view.busy)),
+    );
+}
+
+// A throwaway with work left asks what to keep, in the Keep or Trash dialog.
+async function closeForGood(p) {
+  const answer = await hws(["close", "--workspace", p.workspace]);
+  if (answer?.decision !== "needed") return;
+  openDialog({ width: 460, height: 400 }, { view: "decide", workspace: p.workspace, name: p.name, artifacts: answer.artifacts ?? [], scratch: answer.scratch ?? null });
+}
+
+function runConfirmed(p) {
+  if (p.action === "archive") return hws(["archive", "--workspace", p.workspace]);
+  if (p.action === "restore") return hws(["unarchive", "--workspace", p.workspace]);
+  return closeForGood(p);
+}
+
+export function renderConfirm(t, view) {
+  const p = props();
+  const copy = confirmCopy(p);
+  return dialogRoot(t, "hws-confirm")
+    .track_focus(view.handle)
+    .on_key_down((e, cx) => {
+      if (e.key !== "escape") return;
+      closeOverlay(p.overlay);
+      cx.stop_propagation();
+    })
+    .child(
+      v_flex()
+        .flex_1()
+        .min_h(0)
+        .p(18)
+        .gap(6)
+        .child(div().text_size(15).font_semibold().truncate().child(copy.title))
+        .child(div().text_color(t.muted).whitespace_normal().child(copy.body))
+        .when(Boolean(view.problem), (el) => el.child(problemLine(t, view.problem))),
+    )
+    .child(
+      dialogFooter()
+        .child(button(t, "cancel", "Cancel", false, () => closeOverlay(p.overlay)))
+        .child(button(t, "confirm-yes", view.busy ? copy.busy : copy.yes, true, (_e, cx) => submitDialog(view, p.action, () => runConfirmed(p), cx), !view.busy)),
+    );
+}

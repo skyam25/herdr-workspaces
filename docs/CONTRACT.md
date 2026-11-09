@@ -104,6 +104,8 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | Field | Meaning |
 |---|---|
 | `stage` | `discovery`, `deciding`, `building` or `settled`. Optional. Set with `hws set --stage` |
+| `storeName` | The name the default place folders were built from. Set by the first rename of a kept workspace, because `.herdr-workspace/<name>-<id tail>/` holds the name |
+| `archived` | `{ at, spaces: [{ name, folder, board, tabs: [{ name, folder, session: { tool, id } or null }] }] }`. Set by `hws archive`, removed by `hws unarchive`. `spaces` at the top level is empty while it is set |
 | `places` | Role to place map. Optional. Holds only roles set with `hws set --place` |
 | `current.tidiedAt` | When the last tidy pass was applied. Absent until the first |
 | `current.covers` | The newest stream item each source had absorbed at that pass. Any key may be null |
@@ -151,7 +153,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws space add --workspace W [--name N] [--folder F]` | Opens a new space in W. F defaults to W's folder |
 | `hws space move --space S --workspace W` | Moves an open local space into W. A plain space's cards join W's Board. A space leaving another workspace leaves its cards there. Fails when S is that workspace's last space or its Board space |
 | `hws space remove --space S` | Takes S out of its workspace and leaves it open as a plain space. Its cards stay on the Board. Fails on the workspace's last space or its Board space |
-| `hws set [--workspace W] [--kind K] [--instructions X] [--stage S] [--place ROLE=PATH ...] [--writer ROLE=NAME ...]` | Changes a workspace's instructions and stage, or a kept workspace's kind and places. An unknown role or stage exits 2. `--place ROLE=` drops the role from the manifest. A new path keeps the role's writer. `--writer` needs the role to have a manifest path, and `--writer ROLE=hws` clears it |
+| `hws set [--workspace W] [--name N] [--kind K] [--instructions X] [--stage S] [--place ROLE=PATH ...] [--writer ROLE=NAME ...]` | Changes a workspace's name, instructions and stage, or a kept workspace's kind and places. `--name` also renames any space that carries the old name, moves no files and keeps the default place folders where they were. An empty name exits 2. An unknown role or stage exits 2. `--place ROLE=` drops the role from the manifest. A new path keeps the role's writer. `--writer` needs the role to have a manifest path, and `--writer ROLE=hws` clears it |
 | `hws tidy status [--workspace W] [--line]` | Prints how far the current note is behind the stream. See [Tidy](#tidy) |
 | `hws tidy start [--workspace W]` | Writes the packet and opens a Tidy tab, or asks the live pass to read the packet again. See [Tidy](#tidy) |
 | `hws tidy apply --file PROPOSAL [--skip current,demote,artifacts,cards] [--workspace W]` | Applies an accepted proposal, stamps `current` and clears `tidy`. See [Tidy](#tidy) |
@@ -160,7 +162,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws parent` | Prints the folder new work starts in: the last used, else `~/Projects`, else home |
 | `hws new throwaway [--name N]` | Creates a throwaway with one tab running `claude` in its scratch folder. The space opens on a shell in the parent folder, which closes once the tab is open |
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
-| `hws list` | Every manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest |
+| `hws list [--archived]` | Every open manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest. `--archived` lists only archived workspaces |
 | `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane]` | Starts the host and records the surface. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T. For an agent flipped to Chat, `--beside-pane` and `--space` name its chat pane P and space S, and fail unless T's `herdr.chat` label equals P |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
@@ -183,8 +185,10 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws artifact terminal ARTIFACT` | Opens a new tab running `claude` with that artifact's prompt |
 | `hws promote [--workspace W] --name N --folder F [--kind K]` | Makes a throwaway a kept workspace. Artifacts move into the kept `artifacts` place and scratch contents into the kept `scratch` place, both resolved as for any kept workspace. It refuses before moving anything when a place has another writer or the scratch place already holds a name. The emptied scratch folder stays for live shells. W defaults to the current workspace |
 | `hws close [--workspace W] [--keep\|--trash]` | Closes every space in W, the caller's own last. A throwaway with artifacts or scratch files and no flag returns `{"decision":"needed","artifacts":[...],"scratch":PATH\|null}` and closes nothing. `--keep` moves artifacts and the scratch folder under `~/Documents/Herdr Workspaces/<name>/`. `--trash` sends both to the Trash and leaves no retired record |
+| `hws archive [--workspace W]` | Closes every space in a kept workspace and keeps its manifest, with its to-dos, artifacts and places. Saves each space's name and folder, and each tab's name, folder and agent session, in `archived`. Ends window hosts and flipped agents. Refuses a throwaway and an archived workspace |
+| `hws unarchive --workspace W` | Reopens the saved spaces with new space ids, resumes each saved agent session, makes a new Board if the workspace had one and selects the first space. `id` stays. A tab whose folder is gone falls back to its space's folder and then the workspace's. Fails and changes nothing when the workspace folder is gone |
 | `hws resume [--workspace W]` | Runs `claude --resume` in shell panes whose recorded session lost its process |
-| `hws prune` | Drops closed spaces from manifests, removes manifests with no open space, expires idle throwaways and purges old retired records. Prints `{pruned,expired,skipped}`. Does nothing when the Herdr window does not answer |
+| `hws prune` | Drops closed spaces from manifests, removes manifests with no open space unless `archived` is set, expires idle throwaways and purges old retired records. Prints `{pruned,expired,skipped}`. Does nothing when the Herdr window does not answer |
 | `hws find [TEXT...]` | Retired throwaways, newest close first. TEXT must match every word in the name, a session title, a last prompt or an artifact title |
 | `hws reopen ID` | Opens a retired throwaway in a new space, with one tab per session running `claude --resume`, and removes its record. The tabs start in the record's `folder`, which `hws` makes again when it sits under the state root. The record's `scratch` becomes the manifest's `scratch` place |
 
@@ -239,7 +243,26 @@ The launcher's Find throwaway dialog calls `hws find -- TEXT` as you type and `h
 
 ## Tidy
 
-A tidy pass rewrites a kept workspace's current note from the stream gathered since the last pass. `hws` gathers and applies. A Claude session with the `herdr-workspaces:tidy` skill reads and proposes. `docs/context-lifecycle.md` holds the design.
+A tidy pass rewrites a kept workspace's current note from the stream gathered since the last pass. `hws` gathers and applies. A Claude session with the `herdr-workspaces:tidy` skill reads and proposes.
+
+### Current note
+
+Three fixed headings, short lines, a cite at the end of each line. The pass rewrites the whole note. An agent may add one dated line under Decisions in force when it lands a decision mid-session.
+
+```markdown
+# Current
+
+## Now
+- Boards open in their own window and notes stay in a pane [commit:ba7d965]
+
+## Decisions in force
+- 2026-11-04 Studio is removed, board and note cover it [card:17]
+
+## Next
+- Pick a panel treatment [file:docs/panel-options.md]
+```
+
+Cite tokens are `[card:ID]`, `[session:ID]`, `[commit:SHA]`, `[artifact:ID]` and `[file:PATH]`. The panel turns each into an action.
 
 ### Freshness
 
@@ -520,7 +543,7 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | Add board, shown under the current workspace when it has no Board | `hws board add`, then shows the Board |
 | Panel button on the current workspace | `mod.open` for `hws-panel` |
 
-The section reloads with `hws list` when the spaces change and every 60 seconds. Each reload also runs `hws tidy status --workspace W` for every kept workspace. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A throwaway, or a failed status, shows no ring. Space rows show each space's status. Tabs appear only in the top bar. The section sizes its block with `layout.resize`, up to 300px of rows and then scrolling, and shows only the + when the sidebar is narrower than 160px.
+The section reloads with `hws list` when the spaces change and every 60 seconds. Each reload also runs `hws tidy status --workspace W` for every kept workspace. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A throwaway, or a failed status, shows no ring. Space rows show each space's status. Tabs appear only in the top bar. Right-clicking a workspace row opens a menu with Rename, Archive and Close, or Rename and Close for a throwaway. Archive, Close, Restore and Remove each ask first in a dialog. `hws list --archived` fills a folded Archived row at the end of the list. Clicking an archived workspace offers Restore, and its right-click menu has Restore, Rename and Remove, which runs `hws close`. The section sizes its block with `layout.resize`, up to 300px of rows and then scrolling, and shows only the + when the sidebar is narrower than 160px.
 
 ## Chat and Terminal flip
 
@@ -580,7 +603,7 @@ Each region of the `hws` layout has one job.
 | Own window, or a pane beside the agent | Do the work | Boards in their own window, notes and pages in a pane |
 | Board | Plan and dispatch work | Full-width kanban, `hws-work` with `{"view":"tasks"}`. One Board space per workspace. A plain space has none |
 | Right panel | See what the work produced | Files, Changes, Outputs |
-| Workspace panel | Read and keep the workspace's context | `hws-panel`, toggled by `mod.open:hws-panel`. A pane beside the terminal until a treatment is chosen in `docs/panel-options.md` |
+| Workspace panel | Read and keep the workspace's context | `hws-panel`, toggled by `mod.open:hws-panel`. A pane beside the terminal |
 
 ### Workspace panel: `hws-panel`
 
@@ -705,7 +728,7 @@ Adding has three routes:
 
 The to-do dialog fills the Board up to 920 by 820 px, and is never smaller than 560 by 480. Its left column holds the update, title and notes, and the notes box takes the remaining height. Its right column holds the controls. The dialog has title, notes, a column choice, an owner choice of Unassigned, Agent or Mine (`owner`), Use a worktree (`worktree`), Send to, Archive and Save. Its heading line shows the card id and when it was added and updated. The dialog opens with What happened on a Done card and Latest update on any other. A Done or Waiting on you card shows `report` and then `note`, and other cards show `note` and then `report`. The text renders as markdown and scrolls when long. A card with a linked session lists Run by and Added by under Session, and Open saves the card's edits, closes the dialog and opens that session. Each Send to row has its own Send button, and pressing it moves the card to In progress. A card in Waiting on you has a Reply box, and a Done card with a session has a Feedback box. Both run `hws todo reply`, which sends to a live session or reopens a closed one with the text as its next message, in a new tab, without moving the window.
 
-The header shows `<orchestrator model> → <worker model>`, which opens the Models dialog. It has Orchestrator and Workers rows with model and effort, a tool choice for Workers, and Use recommended. The default is Opus at high effort for the orchestrator and Sonnet at medium for workers. For Codex workers the recommended model is `gpt-6.1-sol`. The header always shows what is running, what waits on you and, when nothing is ready, how many cards need Allow. **Run N ready** appears when a To do card is assigned to an agent. It runs `hws orchestrator start --space S --folder F`, which starts an orchestrator or tells the live one to read the board. Orchestration also starts from the `+` menu or the launcher. **Allow all N** appears on To do when more than one card is unassigned, and assigns each to an agent. A card or Session row whose session has ended and whose `session` is saved shows Resume, which runs `hws todo resume --id I --space S`.
+The header shows `<orchestrator model> → <worker model>`, which opens the Models dialog. It opens at the height of its content. A line under the heading names the recommended setup. Each role is a section with labeled rows, Model and Effort for the Orchestrator and Tool, Model and Effort for Workers, and each row is one joined control. The footer shows Use recommended, or the note `Using the recommended setup` once the choices match. The default is Opus at high effort for the orchestrator and Sonnet at medium for workers. For Codex workers the recommended model is `gpt-6.1-sol`. The header always shows what is running, what waits on you and, when nothing is ready, how many cards need Allow. **Run N ready** appears when a To do card is assigned to an agent. It runs `hws orchestrator start --space S --folder F`, which starts an orchestrator or tells the live one to read the board. Orchestration also starts from the `+` menu or the launcher. **Allow all N** appears on To do when more than one card is unassigned, and assigns each to an agent. A card or Session row whose session has ended and whose `session` is saved shows Resume, which runs `hws todo resume --id I --space S`.
 
 | While an orchestrator is live, the header shows | Action |
 |---|---|

@@ -6,12 +6,14 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
 ## Status
 
-| Part | State | Tests |
-|---|---|---|
-| `hws` CLI | Built | 317 pass |
-| Herdr mods | Built and installed | 149 simulated pass, 39 forced states |
-| Claude plugin | Built, enabled for every session | 84 pass |
-| Surface | Built | 1,209 unit tests pass, pty checks pass |
+| Part | State |
+|---|---|
+| `hws` CLI | Built |
+| Herdr mods | Built and installed |
+| Claude plugin | Built, enabled for every session |
+| Surface | Built, pty checks pass |
+
+`CLAUDE.md` lists the test commands.
 
 ## Proven in the real Herdr window
 
@@ -36,7 +38,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Throwaway | Asks Keep or Trash on close only if something was made. Closes itself after 24 idle hours and stays findable for 30 days |
 | Studio | Removed. New board and New note cover the need |
 | Rendering | Boards open in their own window, which stays as a resumable draft when closed. Notes and pages stay on Pixel in a pane. A native GPUI board was rejected as too costly |
-| Context lifecycle | Working context stays messy in the stream. A tidy pass the person triggers rewrites one current note and demotes the rest. `docs/context-lifecycle.md` holds the design |
+| Context lifecycle | Working context stays messy in the stream. A tidy pass the person triggers rewrites one current note and demotes the rest. `docs/CONTRACT.md` holds the Tidy section |
 | Places | `hws` speaks in roles (`current`, `artifacts`, `scratch`, `decisions`, `history`, `meetings`). Folder names belong to the user and live in the manifest `places` map |
 | Tidy | `hws tidy start` opens a Claude tab on a packet. The agent writes a proposal and opens it in a page. Done delivers feedback to the agent, which runs `hws tidy apply`. Only `hws` writes the note |
 | Freshness | Counted from the stream against `current.covers`, never from the clock. Sessions, artifacts, commits and Done cards |
@@ -159,19 +161,3 @@ Built 2026-11-09 by six Opus workers against fakes. Nothing has run in the real 
 - [ ] Judge how Current lines wrap and where the cite chips sit in a narrow pane.
 - [ ] Decide whether the stage pill should change the stage.
 
-## State outside this repo
-
-| Thing | Where | Note |
-|---|---|---|
-| `hws` command | `~/.local/bin/hws` | Symlink into this repo |
-| Mods | `~/.config/herdr-app/mods/hws-*` | Reinstall with `sh mods/install.sh --force` |
-| Earlier Brief mod | `~/.config/herdr-app/mods/agent-brief` | Superseded by `hws-brief`, safe to delete |
-| terminal-browser | Homebrew cask | Installed for testing |
-| Spike pane | Terminal `t17` | Test copy of Agent Brief. Ctrl+Q closes it |
-
-## Agent Brief repo
-
-- The Herdr app detection fix is committed as `a71d5a5` and installed. Open sessions need `/reload-plugins` or a restart to report `hcTerminal`.
-- Branch `worktree-agent-af9944c917614d5bf` holds the Pixel spike.
-- Branch `worktree-agent-a16a8fa756df58c45` holds the first Brief mod.
-- Neither branch needs merging, because this repo now carries that work.

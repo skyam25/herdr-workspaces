@@ -127,6 +127,11 @@ const VARIANTS = [
   { mod: "hws-panel", name: "sidebar-fresh", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify(KEPT)}, __MANIFEST], problem: null, folded: new Set(), ahead: {}, fresh: { spc1: { level: "stale", title: "Current is 9 sessions behind" } } };`) },
   { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null, folded: new Set(), ahead: {}, fresh: {} };") },
   { mod: "hws-panel", name: "add-space", props: { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1"] }, header: LIVE_HEADER },
+  { mod: "hws-panel", name: "sidebar-archived", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [__MANIFEST], archived: [${JSON.stringify(KEPT)}], showArchived: true, problem: null, folded: new Set(), ahead: {}, fresh: {} };`) },
+  { mod: "hws-panel", name: "row-menu-kept", props: { view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: false, overlay: "o" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: false, overlay: "o" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
+  { mod: "hws-panel", name: "row-menu-archived", props: { view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: true, overlay: "o" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: true, overlay: "o" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
+  { mod: "hws-panel", name: "rename", props: { view: "rename", workspace: "spc1", name: "checkout" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "rename", workspace: "spc1", name: "checkout" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
+  { mod: "hws-panel", name: "confirm-archive", props: { view: "confirm", action: "archive", workspace: "spc1", name: "checkout", kind: "app" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "confirm", action: "archive", workspace: "spc1", name: "checkout", kind: "app" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
   { mod: "hws-panel", name: "sidebar-empty", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [], problem: null };") },
   { mod: "hws-panel", name: "sidebar-problem", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", 'this.sidebar = { workspaces: null, problem: "hws failed" };') },
   { mod: "hws-tabs", name: "tabs-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace('shared("hws.tasks.waiting")', "3") },
@@ -142,7 +147,7 @@ for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  for (const file of ["hws.js", "sidebar.js", "context.js", "sections.js", "cites.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
+  for (const file of ["hws.js", "sidebar.js", "rowmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
     if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
   }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");

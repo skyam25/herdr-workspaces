@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -10,13 +10,15 @@ import { phoneSocket } from '../paths.js';
 import { sandbox } from './helpers.js';
 
 const FAKE_HOST = fileURLToPath(new URL('./fakes/fake-phone-host.cjs', import.meta.url));
+const HWS = fileURLToPath(new URL('../../bin/hws', import.meta.url));
+const AS_TTY = 'data:text/javascript,process.stdout.isTTY=true';
 const PHONE = { id: 'd1', name: 'iPhone' };
 
-async function withHost(t, box, devices = [PHONE]) {
+async function withHost(t, box, devices = [PHONE], pairing = 'pairs') {
   const log = join(box.dir, 'phone-log.jsonl');
   writeFileSync(log, '');
   const socket = phoneSocket(box.root);
-  const host = spawn(process.execPath, [FAKE_HOST, socket, log, JSON.stringify(devices)], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const host = spawn(process.execPath, [FAKE_HOST, socket, log, JSON.stringify(devices), pairing], { stdio: ['ignore', 'pipe', 'inherit'] });
   t.after(() => {
     host.kill();
     rmSync(socket, { force: true });
@@ -187,4 +189,153 @@ test('phone forget needs a name that matches one phone', async (t) => {
   box.json(['phone', 'forget', 'iPhone']);
 
   assert.deepEqual(host.requests().find((item) => item.key === 'POST /forget').body, { id: 'd1' });
+});
+
+test('phone send takes index.html from a folder of pages', async (t) => {
+  const box = sandbox(t);
+  const host = await withHost(t, box);
+  const { manifest, file, terminal } = appWith(box, 'site/index.html', '<p>hi</p>');
+  writeFileSync(join(manifest.folder, 'site', 'other.html'), '<p>other</p>');
+
+  send(box, join(manifest.folder, 'site'), terminal);
+
+  assert.equal(handoffOf(host).page, file);
+});
+
+test('phone send takes the only page in a folder', async (t) => {
+  const box = sandbox(t);
+  const host = await withHost(t, box);
+  const { manifest, file, terminal } = appWith(box, 'site/report.htm', '<p>hi</p>');
+
+  send(box, join(manifest.folder, 'site'), terminal);
+
+  assert.equal(handoffOf(host).page, file);
+});
+
+test('phone send refuses a folder with several pages and no index', async (t) => {
+  const box = sandbox(t);
+  await withHost(t, box);
+  const { manifest, terminal } = appWith(box, 'site/a.html', '<p>a</p>');
+  writeFileSync(join(manifest.folder, 'site', 'b.html'), '<p>b</p>');
+
+  const result = box.hws(['phone', 'send', join(manifest.folder, 'site'), '--terminal', terminal]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /no drawing and no single page/);
+});
+
+for (const [name, content, message] of [
+  ['broken JSON', 'not json', /is not valid JSON/],
+  ['a file with no elements', '{"elements":1}', /is not an Excalidraw scene/],
+]) {
+  test(`phone send refuses a drawing with ${name}`, async (t) => {
+    const box = sandbox(t);
+    await withHost(t, box);
+    const { file, terminal } = appWith(box, 'flow.excalidraw', content);
+
+    const result = box.hws(['phone', 'send', file, '--terminal', terminal]);
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, message);
+  });
+}
+
+test('phone send clears records older than 90 days and keeps newer ones', async (t) => {
+  const box = sandbox(t);
+  await withHost(t, box);
+  const { file, terminal } = appWith(box, 'index.html', '<p>hi</p>');
+  const folder = join(box.root, 'phone', 'sends');
+  mkdirSync(folder, { recursive: true });
+  const [old, recent] = [join(folder, 'old.json'), join(folder, 'recent.json')];
+  writeFileSync(old, '{}');
+  writeFileSync(recent, '{}');
+  const longAgo = new Date(Date.now() - 91 * 24 * 3600_000);
+  utimesSync(old, longAgo, longAgo);
+
+  send(box, file, terminal);
+
+  assert.equal(existsSync(old), false);
+  assert.equal(existsSync(recent), true);
+});
+
+test('an answer the terminal will not take stays as an artifact', async (t) => {
+  const box = sandbox(t);
+  box.setState({ sendFails: true });
+
+  const { result, manifest } = await delivered(box, t, { foreground: { name: 'claude', argv: ['claude'] } })();
+
+  assert.equal(result.delivered, false);
+  assert.match(result.message, /did not take it \(terminal is blocked\)/);
+  assert.equal(box.manifest(manifest.id).artifacts.at(-1).id, result.artifact);
+});
+
+test('phone status lists paired phones and waiting handoffs', async (t) => {
+  const box = sandbox(t);
+  await withHost(t, box);
+
+  assert.equal(box.hws(['phone', 'status']).stdout, 'Paired: iPhone\nWaiting on the phone: 0\n');
+});
+
+test('phone status with a listener and no phone says so', async (t) => {
+  const box = sandbox(t);
+  await withHost(t, box, []);
+
+  assert.match(box.hws(['phone', 'status']).stdout, /^No phone is paired\. Run hws phone pair\.\n/);
+});
+
+test('phone stop asks a running listener to stop', async (t) => {
+  const box = sandbox(t);
+  const host = await withHost(t, box);
+
+  assert.equal(box.json(['phone', 'stop']).stopped, true);
+  assert.ok(host.requests().some((item) => item.key === 'POST /stop'));
+});
+
+test('phone stop with no listener reports that', (t) => {
+  const box = sandbox(t);
+
+  assert.equal(box.json(['phone', 'stop']).stopped, false);
+});
+
+// Pairing shows the code only when stdout is a terminal.
+function pairAtTerminal(box, flags = [], env = {}) {
+  const result = spawnSync(process.execPath, ['--import', AS_TTY, HWS, 'phone', 'pair', ...flags], { env: { ...box.environment, ...env }, encoding: 'utf8' });
+  return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+test('phone pair shows the code, waits for a new device and closes the code', async (t) => {
+  const box = sandbox(t);
+  const host = await withHost(t, box);
+
+  const result = pairAtTerminal(box);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /QR-CODE/);
+  assert.match(result.stdout, /same network \(Home\)/);
+  assert.match(result.stdout, /agentbrief:\/\/pair\/abc/);
+  assert.match(result.stdout, /Paired New iPad\./);
+  assert.equal(host.requests().at(-1).key, 'DELETE /pair');
+});
+
+test('a replaced pairing code fails and closes its own tab', async (t) => {
+  const box = sandbox(t);
+  await withHost(t, box, [PHONE], 'replaced');
+  const manifest = box.app();
+  const terminal = manifest.terminals[0].terminal;
+
+  const result = pairAtTerminal(box, ['--tab'], { HC_TERMINAL_ID: terminal });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stdout, /This pairing code was replaced or closed\./);
+  assert.equal(box.actions().filter((call) => call.includes('tab.close')).length, 1);
+});
+
+test('phone pair reports the reason the listener gives no code', async (t) => {
+  const box = sandbox(t);
+  await withHost(t, box, [PHONE], 'refused');
+
+  const result = pairAtTerminal(box);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /pairing is busy/);
 });
