@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setup, mount, settle, hwsCalls, usedMethods } from "./harness.mjs";
-import { ago, awaitsUser, board, locateTerminal, mergeBoard, notesLine, orchestratorFolder, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoDialogHeight } from "../hws-work/data.js";
+import { modelsLine, ago, awaitsUser, board, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, mergeBoard, orchestratorFolder, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, storyHeight, todoDialogSize, todoLayout } from "../hws-work/data.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -168,7 +168,7 @@ test("the lanes share the width when they fit and take 200px each when they do n
   widen(m, 839);
   for (const key of ["todo", "doing", "waiting", "done"]) assert.equal(findNode(m, `lane-${key}`).w, 200);
   widen(m, 840);
-  for (const key of ["todo", "doing", "waiting", "done"]) assert.equal(findNode(m, `lane-${key}`).w, undefined);
+  for (const key of ["todo", "doing", "waiting", "done"]) assert.equal(findNode(m, `lane-${key}`).w, 199);
 });
 
 test("the header has no Expand or Collapse control", async () => {
@@ -332,10 +332,29 @@ test("mergeBoard puts to-dos first in every column", () => {
   assert.deepEqual(merged.done.map((c) => c.id ?? c.n), ["c", 3]);
 });
 
-test("notesLine takes the first line with text", () => {
-  assert.equal(notesLine("\n  first \nsecond"), "first");
-  assert.equal(notesLine(""), "");
-  assert.equal(notesLine(undefined), "");
+test("cardSummary shows the result, and otherwise the brief's first line", () => {
+  assert.equal(cardSummary({ note: " done \n\nchecked", notes: "brief" }), "done checked");
+  assert.equal(cardSummary({ column: "done", report: "**Shipped** it\n\n- `a.js`", notes: "brief" }), "Shipped it - a.js");
+  assert.equal(cardSummary({ column: "doing", report: "old run", notes: "\n  first \nsecond" }), "first");
+  assert.equal(cardSummary({}), "");
+});
+
+test("cardStory leads with the report once a card has ended", () => {
+  assert.deepEqual(cardStory({ column: "done", note: "short", report: "long" }), { label: "What happened", text: "long" });
+  assert.deepEqual(cardStory({ column: "waiting", note: "Which?", report: "" }), { label: "Latest update", text: "Which?" });
+  assert.deepEqual(cardStory({ column: "doing", note: "now", report: "old run" }), { label: "Latest update", text: "now" });
+  assert.equal(cardStory({ column: "done", note: "", report: "" }), null);
+});
+
+test("cardStory keeps the person's replies after the update", () => {
+  const story = cardStory({ column: "done", report: "Renamed it", replies: [{ question: "Which name?", answer: "Small Tools" }] });
+  assert.match(story.text, /^Renamed it\n\n\*\*Your replies\*\*\n\n- Which name\? \*\*You:\*\* Small Tools$/);
+});
+
+test("storyHeight fits short text and caps long text", () => {
+  assert.equal(storyHeight("one line"), 48);
+  assert.equal(storyHeight("x\n".repeat(6)), 126);
+  assert.equal(storyHeight("x\n".repeat(50)), 360);
 });
 
 test("sendTargets lists every agent in the space, flipped ones included", () => {
@@ -356,6 +375,28 @@ test("sendTargets lists every agent in the space, flipped ones included", () => 
   assert.deepEqual(sendTargets(lists, "gone"), []);
 });
 
+test("a workspace's agents are all send targets and name their space", () => {
+  const lists = {
+    agents: [{ address: "t1", space: "a", tab: "ta", program: { name: "Claude Code" } }, { address: "t2", space: "b", tab: "tb", program: { name: "Codex" } }, { address: "t3", space: "c", tab: "tc", program: { name: "Codex" } }],
+    panes: [],
+    terminals: [],
+    spaces: [{ id: "a", name: "api", tabs: [{ id: "ta", name: "1" }] }, { id: "b", name: "web", tabs: [{ id: "tb", name: "2" }] }, { id: "c", name: "other", tabs: [{ id: "tc", name: "3" }] }],
+  };
+  assert.deepEqual(sendTargets(lists, "a", ["a", "b"]).map((x) => [x.address, x.tab]), [["t1", "api · 1"], ["t2", "web · 2"]]);
+});
+
+test("the roster covers every space in the active workspace", () => {
+  const claude = { key: "claude", name: "Claude Code" };
+  const lists = {
+    agents: [{ address: "t1", space: "a", tab: "ta", app: "claude-code", program: claude }, { address: "t2", space: "b", tab: "tb", app: "claude-code", program: claude }, { address: "t3", space: "c", tab: "tc", app: "claude-code", program: claude }],
+    panes: [],
+    terminals: [],
+    spaces: [{ id: "a", active: true, tabs: [{ id: "ta" }] }, { id: "b", tabs: [{ id: "tb" }] }, { id: "c", tabs: [{ id: "tc" }] }],
+  };
+  assert.deepEqual(roster(lists, ["a", "b"]).map((x) => x.address), ["t1", "t2"]);
+  assert.deepEqual(roster(lists).map((x) => x.address), ["t1"]);
+});
+
 test("the board shows to-dos and agent items together", async () => {
   const H = world({
     agents: [{ ...agent("t1"), program: { key: "claude", name: "Claude Code" } }],
@@ -366,11 +407,10 @@ test("the board shows to-dos and agent items together", async () => {
   widen(m, 860);
   assert.match(m.text(), /Board \| 4/);
   assert.match(m.text(), /To do \| 1 \| Fix login \| Check the token/);
-  assert.match(m.text(), /In progress \| 2 \| Ship \| Sent to Claude Code/);
+  assert.match(m.text(), /In progress \| 2 \| Ship \| Run by Claude Code/);
   assert.match(m.text(), /Waiting on you \| 1/);
-  assert.match(m.text(), /Done \| 2 \| Old \| Sent to t8/);
-  assert.equal(/more/.test(m.text()), false);
-  assert.deepEqual(hwsCalls(H)[0].args, ["todo", "list", "--space", "spc1", "--json"]);
+  assert.match(m.text(), /Done \| 2 \| Old \| Run by t8/);
+  assert.deepEqual(hwsCalls(H).find((c) => c.args[0] === "todo").args, ["todo", "list", "--space", "spc1", "--json"]);
 });
 
 test("to-dos reload on the poll and when a dialog reports a change", async () => {
@@ -419,7 +459,7 @@ test("+ Add opens a new to-do for the active space", async () => {
   H.hws["todo list"] = todoList();
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("add");
-  assert.deepEqual(H.overlays.map((o) => o.props), [{ space: "spc1", view: "todo" }]);
+  assert.deepEqual(H.overlays.map((o) => o.props), [{ space: "spc1", members: [], view: "todo", height: 480 }]);
   assert.equal(H.overlays[0].mod, "hws-work");
   assert.equal(H.overlays[0].kind, "dialog");
 });
@@ -429,28 +469,39 @@ test("Add several opens its own dialog for the active space", async () => {
   H.hws["todo list"] = todoList();
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("add-several");
-  assert.deepEqual(H.overlays[0].props, { space: "spc1", view: "add-several" });
+  assert.deepEqual(H.overlays[0].props, { space: "spc1", members: [], view: "add-several" });
   assert.equal(H.overlays[0].height, 342);
 });
 
-test("each dialog is as tall as its controls and one error line", async () => {
-  assert.equal(todoDialogHeight({ editing: false, waiting: false, targets: 0 }), 430);
-  assert.equal(todoDialogHeight({ editing: true, waiting: false, targets: 0 }), 490);
-  assert.equal(todoDialogHeight({ editing: true, waiting: false, targets: 2 }), 522);
-  assert.equal(todoDialogHeight({ editing: true, waiting: false, targets: 9 }), 586);
-  assert.equal(todoDialogHeight({ editing: true, waiting: true, targets: 2 }), 668);
+test("the to-do dialog fills the Board up to its limit and never below its floor", () => {
+  assert.deepEqual(todoDialogSize({ width: 2000, height: 1200 }), { width: 920, height: 820 });
+  assert.deepEqual(todoDialogSize({ width: 800, height: 600 }), { width: 760, height: 560 });
+  assert.deepEqual(todoDialogSize({ width: 300, height: 200 }), { width: 560, height: 480 });
   assert.equal(severalDialogHeight(), 342);
+});
 
-  const H = world({ agents: [agent("t1"), agent("t2")] });
-  H.hws["todo list"] = todoList(todo("a1", "One"), todo("a2", "Two", { column: "waiting", terminal: "t1" }));
+test("the notes box takes the height a report leaves", () => {
+  const empty = todoLayout({ height: 820, waiting: false, story: null });
+  assert.equal(empty.story, 0);
+  assert.ok(empty.notes > 500);
+
+  const short = todoLayout({ height: 820, waiting: false, story: { text: "One line" } });
+  assert.equal(short.story, 48);
+  assert.ok(short.notes > 400);
+
+  const long = todoLayout({ height: 820, waiting: false, story: { text: "x\n".repeat(50) } });
+  assert.ok(long.story <= long.notes);
+  assert.equal(todoLayout({ height: 200, waiting: true, story: null }).notes, 96);
+});
+
+test("opening a card passes the dialog its size", async () => {
+  const H = world({ agents: [agent("t1")] });
+  H.hws["todo list"] = todoList(todo("a1", "One"));
   const m = await mount("hws-work", { view: "tasks" });
-  m.render();
-  await m.click("add");
+  m.render().node.handlers.on_size_change({ width: 1600, height: 1000 }, m.cx);
   press(m, "todo-a1");
   await release(m, "todo-a1", "lane-todo", "root");
-  press(m, "todo-a2");
-  await release(m, "todo-a2", "lane-waiting", "root");
-  assert.deepEqual(H.overlays.map((o) => o.height), [430, 522, 668]);
+  assert.deepEqual([H.overlays[0].width, H.overlays[0].height, H.overlays[0].props.height], [920, 820, 820]);
 });
 
 // Adding from the board
@@ -513,7 +564,7 @@ test("an empty board says what it is for", async () => {
   const H = world({ files: { "/w/s1/i.md": "" } });
   H.hws["todo list"] = todoList();
   const m = await mount("hws-work", { view: "tasks" });
-  assert.equal(textOf(findNode(m, "board-hint")), "Add what needs doing, then send a card to an agent.");
+  assert.equal(textOf(findNode(m, "board-hint")), "Add a card, press Allow on it, then press Run.");
   H.hws["todo list"] = todoList(todo("a1", "Fix login"));
   await m.fireTimer(10000);
   assert.equal(m.has("board-hint"), false);
@@ -526,13 +577,13 @@ test("a board that has not listed its to-dos shows no hint", async () => {
   assert.equal(m.has("board-hint"), false);
 });
 
-test("a card shows note in place of notes, with Hold and Worktree tags", async () => {
+test("a card shows note in place of notes, with owner and Worktree tags", async () => {
   const H = world();
-  H.hws["todo list"] = todoList(todo("a1", "With note", { notes: "Plain notes", note: "Blocked on review\nmore" }), todo("a2", "Without", { notes: "Plain notes", hold: true, worktree: true }));
+  H.hws["todo list"] = todoList(todo("a1", "With note", { notes: "Plain notes", note: "Blocked on review\nmore" }), todo("a2", "Without", { notes: "Plain notes", owner: "mine", worktree: true }));
   const m = await mount("hws-work", { view: "tasks" });
-  assert.match(textOf(findNode(m, "todo-a1")), /With note \| Blocked on review$/);
+  assert.match(textOf(findNode(m, "todo-a1")), /With note \| Blocked on review more/);
   assert.equal(m.has("tags-a1"), false);
-  assert.equal(textOf(findNode(m, "tags-a2")), "Hold | Worktree");
+  assert.equal(textOf(findNode(m, "tags-a2")), "Mine | Worktree");
   assert.match(textOf(findNode(m, "todo-a2")), /Without \| Plain notes/);
 });
 
@@ -583,7 +634,7 @@ test("locateTerminal finds a pane, then a flipped agent's chat pane, then nothin
   assert.equal(locateTerminal({ panes, terminals }, "t7"), null);
 });
 
-const CONTROLS = ["orchestrating", "orchestrator", "orchestrator-go", "orchestrator-stop"];
+const CONTROLS = ["orchestrating", "run-board", "orchestrator-go", "orchestrator-stop"];
 const headerHasNoOrchestrator = (m) => CONTROLS.forEach((id) => assert.equal(m.has(id), false, id));
 
 test("with none running the header says nothing about orchestration", async () => {
@@ -607,52 +658,179 @@ test("the header waits for the first list before showing the mode", async () => 
   headerHasNoOrchestrator(m);
 });
 
-test("while one runs the header labels the mode, sends new cards and offers Go to and Stop", async () => {
+test("while one runs the header labels the mode, offers Run and Go to and Stop", async () => {
   const H = orchWorld({ terminal: "t1", live: true });
+  H.hws["todo list"].items = [todo("r1", "Ready", { owner: "agent" })];
   const m = await mount("hws-work", { view: "tasks" });
   const label = findNode(m, "orchestrating");
   assert.equal(textOf(label), "Orchestrating");
   assert.equal(label.text_color, "color:accent");
   assert.equal(label.handlers.on_click, undefined);
-  assert.match(textOf(findNode(m, "orchestrator")), /Send new cards/);
+  assert.match(textOf(findNode(m, "run-board")), /Run 1 ready/);
   assert.equal(textOf(findNode(m, "orchestrator-stop")), "Stop");
   const lists = todoLists(H);
-  await m.click("orchestrator");
+  await m.click("run-board");
   assert.deepEqual(orchCalls(H).at(-1).args, ORCH_ARGS);
   assert.equal(todoLists(H), lists + 1);
   await m.click("orchestrator-go");
   assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { terminal: "t1" } });
 });
 
-test("Send new cards uses the space's folder when no agent reports one", async () => {
+test("Run uses the space's folder when no agent reports one", async () => {
   const H = orchWorld({ terminal: "t9", live: true }, { agents: [], spaces: [{ ...SPACES[0], folder: "/space/dir" }] });
+  H.hws["todo list"].items = [todo("r1", "Ready", { owner: "agent" })];
   const m = await mount("hws-work", { view: "tasks" });
-  await m.click("orchestrator");
+  await m.click("run-board");
   assert.deepEqual(orchCalls(H).at(-1).args, ["orchestrator", "start", "--space", "spc1", "--folder", "/space/dir", "--json"]);
 });
 
-test("Send new cards cannot run twice at once", async () => {
+test("Run cannot run twice at once", async () => {
   let finish;
   const H = orchWorld({ terminal: "t1", live: true });
+  H.hws["todo list"].items = [todo("r1", "Ready", { owner: "agent" })];
   const realExec = H.exec;
   H.exec = (command, args) => (args?.[0] === "orchestrator" ? new Promise((resolve) => { finish = () => resolve({ code: 0, stdout: "{}", stderr: "" }); }) : realExec(command, args));
   const m = await mount("hws-work", { view: "tasks" });
-  await m.click("orchestrator");
-  assert.equal(m.clickable("orchestrator"), false);
+  await m.click("run-board");
+  assert.equal(m.clickable("run-board"), false);
   assert.equal(m.clickable("orchestrator-stop"), false);
   finish();
   await settle();
-  assert.equal(m.clickable("orchestrator"), true);
+  assert.equal(m.clickable("run-board"), true);
   assert.equal(m.clickable("orchestrator-stop"), true);
 });
 
-test("a Send new cards failure goes on the quiet line", async () => {
+test("a Run failure goes on the quiet line", async () => {
   const H = orchWorld({ terminal: "t1", live: true });
+  H.hws["todo list"].items = [todo("r1", "Ready", { owner: "agent" })];
   H.hws["orchestrator start"] = { fail: "claude is not installed" };
   const m = await mount("hws-work", { view: "tasks" });
-  await m.click("orchestrator");
+  await m.click("run-board");
   assert.match(quietText(m), /claude is not installed/);
-  assert.equal(m.clickable("orchestrator"), true);
+  assert.equal(m.clickable("run-board"), true);
+});
+
+test("Run starts an orchestrator when none is running, and hides with nothing ready", async () => {
+  const H = orchWorld(null);
+  H.hws["todo list"].items = [todo("r1", "Ready", { owner: "agent" }), todo("r2", "Not yet", { owner: "unassigned" })];
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("run-board");
+  assert.deepEqual(orchCalls(H).at(-1).args, ORCH_ARGS);
+
+  const quiet = orchWorld(null);
+  quiet.hws["todo list"].items = [todo("r2", "Not yet", { owner: "unassigned" })];
+  const n = await mount("hws-work", { view: "tasks" });
+  assert.equal(n.has("run-board"), false);
+  assert.equal(textOf(findNode(n, "run-status")), "1 to Allow");
+});
+
+test("the header says when the orchestrator needs you or the run is finished", async () => {
+  const silent = orchWorld({ terminal: "t9", live: true, startedAt: 1 }, { terminals: [{ address: "t9", state: "live", status: null }] });
+  silent.hws["todo list"].items = [todo("a", "A", { column: "done" })];
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(m, "orchestrating")), "Orchestrator needs you, press Go to");
+
+  const done = orchWorld({ terminal: "t9", live: true, startedAt: 1 }, { terminals: [{ address: "t9", state: "live", status: "done" }] });
+  done.hws["todo list"].items = [todo("a", "A", { column: "done" })];
+  const n = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(n, "orchestrating")), "Run finished");
+});
+
+test("a blocked worker shows in the header's status", async () => {
+  const H = orchWorld(null, { terminals: [{ address: "t20", state: "live", status: "blocked", labels: { "hws.todo": "a" } }] });
+  H.hws["todo list"].items = [todo("a", "A", { column: "doing", terminal: "t20" })];
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "run-status")), /^1 blocked, press Open · 1 running/);
+});
+
+const MODEL_SETTINGS = {
+  orchestrator: { tool: "claude", model: "opus", effort: "high" },
+  worker: { tool: "claude", model: "sonnet", effort: "medium" },
+  catalog: {
+    claude: { name: "Claude Code", models: [{ id: "opus", name: "Opus" }, { id: "sonnet", name: "Sonnet" }], recommendedWorker: "sonnet", efforts: ["low", "medium", "high"] },
+    codex: { name: "Codex", models: [{ id: "gpt-6.1-sol", name: "GPT-6.1 Sol" }], recommendedWorker: "gpt-6.1-sol", efforts: ["low", "medium"] },
+  },
+};
+
+test("modelsLine names the orchestrator and workers", () => {
+  assert.equal(modelsLine(MODEL_SETTINGS), "Opus → Sonnet");
+  assert.equal(modelsLine({ ...MODEL_SETTINGS, worker: { tool: "codex", model: "custom", effort: "low" } }), "Opus → custom");
+});
+
+test("the header shows the models and opens their dialog", async () => {
+  const H = orchWorld(null);
+  H.hws["models"] = MODEL_SETTINGS;
+  const m = await mount("hws-work", { view: "tasks" });
+  await settle();
+  m.render();
+  assert.equal(textOf(findNode(m, "models")), "Opus → Sonnet");
+  await m.click("models");
+  assert.equal(H.overlays.at(-1).props.view, "models");
+});
+
+test("the Models dialog saves both roles and switching a worker's tool picks its recommended model", async () => {
+  const H = world();
+  H.hws["models"] = JSON.parse(JSON.stringify(MODEL_SETTINGS));
+  H.hws["models set"] = {};
+  const m = await mount("hws-work", { view: "models", space: "spc1", overlay: "ov9" });
+  await settle();
+  m.render();
+  assert.equal(m.has("orchestrator-tool-codex"), false);
+  await m.click("worker-tool-codex");
+  m.render();
+  await m.click("models-save");
+  await settle();
+  const saved = hwsCalls(H).filter((c) => c.args[0] === "models" && c.args[1] === "set").map((c) => c.args.slice(2, -1));
+  assert.deepEqual(saved[1], ["--role", "worker", "--tool", "codex", "--model=gpt-6.1-sol", "--effort", "medium"]);
+  assert.deepEqual(H.closed, ["ov9"]);
+});
+
+test("a worker silent since it was claimed counts as blocked", async () => {
+  const H = orchWorld(null, { terminals: [{ address: "t20", state: "live", status: null, labels: { "hws.todo": "a" } }] });
+  H.hws["todo list"].items = [todo("a", "A", { column: "doing", terminal: "t20", updatedAt: 1 })];
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "run-status")), /^1 blocked, press Open/);
+});
+
+test("the header counts what is running and what waits on you", async () => {
+  const H = orchWorld(null);
+  H.hws["todo list"].items = [todo("a", "A", { column: "doing" }), todo("b", "B", { column: "doing" }), todo("c", "C", { column: "waiting" })];
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(m, "run-status")), "2 running · 1 waiting on you");
+});
+
+test("Allow all assigns every unassigned To do card and appears only for two or more", async () => {
+  const H = orchWorld(null);
+  H.hws["todo list"].items = [todo("a", "A", { owner: "unassigned" }), todo("b", "B", { owner: "unassigned" }), todo("c", "C", { owner: "mine" }), todo("d", "D", { owner: "unassigned", column: "done" })];
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("allow-all");
+  await settle();
+  const assigned = hwsCalls(H).filter((c) => c.args[1] === "edit").map((c) => c.args[3]);
+  assert.deepEqual(assigned, ["a", "b"]);
+
+  const one = orchWorld(null);
+  one.hws["todo list"].items = [todo("a", "A", { owner: "unassigned" })];
+  const n = await mount("hws-work", { view: "tasks" });
+  assert.equal(n.has("allow-all"), false);
+});
+
+test("a card whose session ended offers Resume only when its session was saved", async () => {
+  const H = world({ terminals: [{ address: "t8", state: "exited" }] });
+  H.hws["todo list"] = todoList(todo("a1", "Saved", { column: "done", terminal: "t8", session: { tool: "codex", id: "c1", folder: "/w" } }), todo("a2", "Unsaved", { column: "done", terminal: "t8" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(m.has("resume-a2"), false);
+  await m.click("resume-a1");
+  await settle();
+  assert.deepEqual(hwsCalls(H).find((c) => c.args[1] === "resume").args, ["todo", "resume", "--id", "a1", "--space", "spc1", "--json"]);
+});
+
+test("the dialog offers Resume for an ended session and runs it", async () => {
+  const H = dialogWorld(todo("a1", "Old", { column: "done", terminal: "t8", session: { tool: "claude", id: "c1", folder: "/w" } }));
+  H.terminals = [{ address: "t8", state: "exited" }];
+  const m = await form(H, "a1");
+  await m.click("session-resume-t8");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "resume", "--id", "a1", "--space", "spc1", "--json"]);
+  assert.deepEqual(H.closed, ["ov9"]);
 });
 
 test("Stop asks first and runs nothing until confirmed", async () => {
@@ -745,6 +923,90 @@ test("a question left open ends when the orchestrator does", async () => {
   assert.equal(m.has("orchestrator-stop"), true);
 });
 
+// Run by and Open
+
+const worker = { address: "t20", name: "todo-a1", parent: "t9", state: "live", labels: { "hws.todo": "a1" } };
+
+test("a card names its runner as Orchestrator, Worker or the terminal", async () => {
+  const H = world({ terminals: [worker] });
+  H.hws["todo list"] = {
+    ...todoList(
+      todo("a1", "By worker", { column: "doing", terminal: "t20" }),
+      todo("a2", "By orchestrator", { column: "doing", terminal: "t9" }),
+      todo("a3", "By hand", { column: "doing", terminal: "t8" }),
+    ),
+    orchestrator: { terminal: "t9", live: true },
+  };
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "session-a1")), /^Run by Worker todo-a1/);
+  assert.match(textOf(findNode(m, "session-a2")), /^Run by Orchestrator/);
+  assert.match(textOf(findNode(m, "session-a3")), /^Run by t8/);
+});
+
+test("Open shows only for a live session and peeks a worker with no pane", async () => {
+  const H = world({ terminals: [worker, { address: "t8", state: "exited" }] });
+  H.hws["todo list"] = todoList(todo("a1", "Live", { column: "doing", terminal: "t20" }), todo("a2", "Gone", { column: "done", terminal: "t8" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  widen(m, 860);
+  assert.equal(m.has("open-a2"), false);
+  assert.match(textOf(findNode(m, "session-a2")), /· Ended$/);
+  await m.click("open-a1");
+  assert.deepEqual(H.runs, [{ name: "terminal.peek", args: { terminal: "t20" } }]);
+  assert.deepEqual(H.overlays, []);
+});
+
+test("Open focuses a session that has a pane", async () => {
+  const H = world({ terminals: [{ address: "t1", state: "live" }], panes: [{ pane: "p1", terminal: "t1", tab: "tb1" }] });
+  H.hws["todo list"] = todoList(todo("a1", "Live", { column: "doing", terminal: "t1" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  await m.click("open-a1");
+  assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { terminal: "t1" } });
+});
+
+test("a card nobody has run keeps its face short and tags who added it", async () => {
+  const H = world({ agents: [named], terminals: [{ address: "t1", state: "live", status: "working" }] });
+  H.hws["todo list"] = todoList(todo("a1", "Added", { addedBy: "t1", column: "done", note: "Shipped" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(m.has("session-a1"), false);
+  assert.equal(textOf(findNode(m, "tags-a1")), "From Claude Code");
+});
+
+test("a long report leaves every lane the same width", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "Long", { column: "done", report: "word ".repeat(400) }));
+  const m = await mount("hws-work", { view: "tasks" });
+  widen(m, 1000);
+  for (const key of ["todo", "doing", "waiting", "done"]) assert.equal(findNode(m, `lane-${key}`).w, 239);
+});
+
+test("a session that only added the card stays as a From tag", async () => {
+  const H = world({ agents: [named] });
+  H.hws["todo list"] = todoList(todo("a1", "Split", { addedBy: "t1", terminal: "t20", column: "doing" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.match(textOf(findNode(m, "session-a1")), /^Run by t20/);
+  assert.equal(textOf(findNode(m, "tags-a1")), "From Claude Code");
+});
+
+test("cardSessions lists the runner first and one row for a single session", () => {
+  assert.deepEqual(cardSessions({ terminal: "t2", addedBy: "t1" }), [{ role: "Run by", address: "t2" }, { role: "Added by", address: "t1" }]);
+  assert.deepEqual(cardSessions({ terminal: "t1", addedBy: "t1" }), [{ role: "Run by", address: "t1" }]);
+  assert.deepEqual(cardSessions({ terminal: null, addedBy: null }), []);
+});
+
+test("describeSession names the runner and reports its status", () => {
+  const lists = { terminals: [{ address: "t1", state: "live", status: "blocked" }, { address: "t2", state: "exited" }, { address: "t3", state: "live" }], targets: [{ address: "t1", name: "Claude Code" }], orchestrator: "t3" };
+  assert.deepEqual(describeSession(lists, "t1"), { name: "Claude Code", status: "Needs you", live: true });
+  assert.deepEqual(describeSession(lists, "t2"), { name: "t2", status: "Ended", live: false });
+  assert.deepEqual(describeSession(lists, "t3"), { name: "Orchestrator", status: "", live: true });
+});
+
+test("cardTimes leaves out an update that matches the add", () => {
+  const now = 3 * 3600000;
+  assert.deepEqual(cardTimes({ createdAt: 3600000, updatedAt: 3600000 }, now), ["Added 2h ago"]);
+  assert.deepEqual(cardTimes({ createdAt: 3600000, updatedAt: 2 * 3600000 }, now), ["Added 2h ago", "Updated 1h ago"]);
+  assert.deepEqual(cardTimes({}, now), []);
+});
+
 // From and Allow
 
 const named = { ...agent("t1"), program: { key: "claude", name: "Claude Code" } };
@@ -770,33 +1032,37 @@ test("a card an agent added shows who added it, by name when the agent is known"
   assert.equal(m.has("tags-a3"), false);
 });
 
-test("Allow appears only on a held card an agent added", async () => {
+test("Allow appears only on an unassigned To do card", async () => {
   const H = world();
   H.hws["todo list"] = todoList(
-    todo("a1", "Held by agent", { hold: true, addedBy: "t1" }),
-    todo("a2", "Held by me", { hold: true, addedBy: null }),
-    todo("a3", "Released", { hold: false, addedBy: "t1" }),
+    todo("a1", "From an agent", { owner: "unassigned", addedBy: "t1" }),
+    todo("a2", "Kept", { owner: "mine", addedBy: null }),
+    todo("a3", "Assigned", { owner: "agent", addedBy: "t1" }),
+    todo("a4", "Typed on the Board", { owner: "unassigned", addedBy: null }),
+    todo("a5", "Moved along", { owner: "unassigned", column: "doing" }),
   );
   const m = await mount("hws-work", { view: "tasks" });
-  assert.match(textOf(findNode(m, "tags-a1")), /^Hold \| From .* \| Allow$/);
+  assert.match(textOf(findNode(m, "tags-a1")), /^Unassigned \| From .* \| Allow$/);
   assert.equal(m.has("allow-a2"), false);
   assert.equal(m.has("allow-a3"), false);
+  assert.equal(m.has("allow-a4"), true);
+  assert.equal(m.has("allow-a5"), false);
 });
 
-test("Allow clears the hold and reloads without opening the card", async () => {
+test("Allow assigns the card to an agent and reloads without opening the card", async () => {
   const H = world();
-  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  H.hws["todo list"] = todoList(todo("a1", "Held", { owner: "unassigned", addedBy: "t1" }));
   const m = await mount("hws-work", { view: "tasks" });
   const lists = todoLists(H);
   await m.click("allow-a1");
-  assert.deepEqual(edits(H), [{ args: ["todo", "edit", "--id", "a1", "--hold=false", "--space", "spc1", "--json"] }]);
+  assert.deepEqual(edits(H), [{ args: ["todo", "edit", "--id", "a1", "--owner=agent", "--space", "spc1", "--json"] }]);
   assert.equal(todoLists(H), lists + 1);
   assert.deepEqual(H.overlays, []);
 });
 
 test("pressing Allow starts no drag and never reaches the card", async () => {
   const H = world();
-  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  H.hws["todo list"] = todoList(todo("a1", "Held", { owner: "unassigned", addedBy: "t1" }));
   const m = await mount("hws-work", { view: "tasks" });
   assert.equal(pressThrough(m, "allow-a1", "todo-a1"), true);
   assert.equal(m.view.drag, null);
@@ -807,7 +1073,7 @@ test("pressing Allow starts no drag and never reaches the card", async () => {
 
 test("Allow's click stops at the button", async () => {
   const H = world();
-  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  H.hws["todo list"] = todoList(todo("a1", "Held", { owner: "unassigned", addedBy: "t1" }));
   const m = await mount("hws-work", { view: "tasks" });
   let stopped = 0;
   m.cx.stop_propagation = () => { stopped += 1; };
@@ -818,7 +1084,7 @@ test("Allow's click stops at the button", async () => {
 
 test("a card still drags and opens from its own body", async () => {
   const H = world();
-  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  H.hws["todo list"] = todoList(todo("a1", "Held", { owner: "unassigned", addedBy: "t1" }));
   const m = await mount("hws-work", { view: "tasks" });
   assert.equal(pressThrough(m, "todo-a1"), false);
   assert.equal(m.view.drag.id, "a1");
@@ -828,7 +1094,7 @@ test("a card still drags and opens from its own body", async () => {
 
 test("an Allow failure goes on the quiet line", async () => {
   const H = world();
-  H.hws["todo list"] = todoList(todo("a1", "Held", { hold: true, addedBy: "t1" }));
+  H.hws["todo list"] = todoList(todo("a1", "Held", { owner: "unassigned", addedBy: "t1" }));
   H.hws["todo edit"] = { fail: "That to-do no longer exists." };
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("allow-a1");
@@ -936,7 +1202,7 @@ test("a press and release on the same card opens the to-do without a visible dra
   assert.equal(findNode(m, "lane-todo").bg, "color:chrome");
   assert.equal(findNode(m, "todo-a1").opacity, undefined);
   await release(m, "todo-a1", "lane-todo", "root");
-  assert.deepEqual(H.overlays.map((o) => o.props), [{ view: "todo", space: "spc1", id: "a1" }]);
+  assert.deepEqual(H.overlays.map((o) => o.props), [{ view: "todo", height: 480, space: "spc1", members: [], id: "a1" }]);
   assert.equal(moves(H).length, 0);
   assert.equal(m.view.drag, null);
 });
@@ -1130,37 +1396,36 @@ test("Esc closes the dialog and Tab moves between fields", async () => {
   assert.deepEqual(H.closed, ["ov9"]);
 });
 
-test("the toggles send --hold and --worktree on a new to-do", async () => {
+test("the owner choice and worktree toggle send their flags on a new to-do", async () => {
   const H = dialogWorld();
   const m = await form(H);
   m.view.form.title.type("Buy milk", m.cx);
-  await m.click("toggle-hold");
+  await m.click("owner-mine");
   await m.click("toggle-worktree");
-  assert.match(m.text(), /✓ Keep for me \| ✓ Use a worktree/);
+  assert.match(m.text(), /Unassigned \| Agent \| Mine \| ✓ Use a worktree/);
   await m.click("save-todo");
-  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "add", "--title=Buy milk", "--hold", "--worktree", "--space", "spc1", "--json"]);
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "add", "--title=Buy milk", "--owner=mine", "--worktree", "--space", "spc1", "--json"]);
 });
 
-test("a new to-do with the toggles off sends neither flag", async () => {
+test("a new unassigned to-do with worktree off sends neither flag", async () => {
   const H = dialogWorld();
   const m = await form(H);
   m.view.form.title.type("Buy milk", m.cx);
-  await m.click("toggle-hold");
-  await m.click("toggle-hold");
+  await m.click("owner-mine");
+  await m.click("owner-unassigned");
   await m.click("save-todo");
   assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "add", "--title=Buy milk", "--space", "spc1", "--json"]);
 });
 
-test("editing sends only the toggles that changed, as true or false", async () => {
-  const H = dialogWorld(todo("a1", "Fix login", { hold: true, worktree: false }));
+test("editing sends only the owner and toggle that changed", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { owner: "mine", worktree: false }));
   const m = await form(H, "a1");
-  assert.match(m.text(), /✓ Keep for me \| Use a worktree/);
-  await m.click("toggle-hold");
+  await m.click("owner-agent");
   await m.click("toggle-worktree");
   await m.click("save-todo");
-  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "edit", "--id", "a1", "--hold=false", "--worktree=true", "--space", "spc1", "--json"]);
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "edit", "--id", "a1", "--owner=agent", "--worktree=true", "--space", "spc1", "--json"]);
 
-  const H2 = dialogWorld(todo("a1", "Fix login", { hold: true }));
+  const H2 = dialogWorld(todo("a1", "Fix login", { owner: "mine" }));
   const m2 = await form(H2, "a1");
   await m2.click("toggle-worktree");
   await m2.click("save-todo");
@@ -1168,20 +1433,20 @@ test("editing sends only the toggles that changed, as true or false", async () =
 });
 
 test("toggled flags are saved before Send to", async () => {
-  const H = dialogWorld(todo("a1", "Fix login"));
+  const H = dialogWorld(todo("a1", "Fix login", { owner: "unassigned" }));
   const m = await form(H, "a1");
-  await m.click("toggle-hold");
+  await m.click("owner-mine");
   await m.click("send-t1");
   assert.deepEqual(hwsCalls(H).slice(1).map((c) => c.args[1]), ["edit", "send"]);
 });
 
 const WAITING_CARD = { column: "waiting", note: "Which host?", terminal: "t1" };
-const REPLY_PLACEHOLDER = "Answer the worker";
+const REPLY_PLACEHOLDER = "Reply to this session";
 
 test("a waiting card shows its note and Reply above the fields and focuses the reply", async () => {
   const H = dialogWorld(todo("a1", "Pick a host", WAITING_CARD));
   const m = await form(H, "a1");
-  assert.match(m.text(), /Latest from the worker \| Which host\? \| Reply .*Title .*Notes .*Column .*Keep for me .*Send to/);
+  assert.match(m.text(), /Latest update \| Which host\? \| Reply .*Title .*Notes .*Column .*Unassigned .*Send to/);
   assert.equal(H.focusCalls.at(-1), REPLY_PLACEHOLDER);
 });
 
@@ -1203,11 +1468,51 @@ test("a waiting card with no note still offers Reply", async () => {
   assert.equal(m.has("todo-note"), false);
 });
 
-test("a card in another column has no Reply", async () => {
+test("a Done card with a session takes feedback, and one without does not", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { column: "done", terminal: "t8", session: { tool: "claude", id: "c1", folder: "/w" } }));
+  H.terminals = [{ address: "t8", state: "exited" }];
+  const m = await form(H, "a1");
+  assert.match(m.text(), /Feedback/);
+  m.view.form.replyBox.type("Use the other name", m.cx);
+  await m.click("reply-todo");
+  assert.deepEqual(hwsCalls(H).at(-1).args.slice(0, 3), ["todo", "reply", "--id"]);
+
+  const typed = dialogWorld(todo("a2", "Mine", { column: "done" }));
+  const n = await form(typed, "a2");
+  assert.equal(n.has("reply-todo"), false);
+});
+
+test("clicking a Done card shows what happened", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { column: "done", note: "Fixed", report: "Changed the token check" }));
+  const m = await form(H, "a1");
+  assert.match(m.text(), /What happened \| Changed the token check/);
+});
+
+test("a card in another column shows its update but has no Reply", async () => {
   const H = dialogWorld(todo("a1", "Fix login", { note: "Working" }));
   const m = await form(H, "a1");
   assert.equal(m.has("reply-todo"), false);
-  assert.equal(/Latest from the worker/.test(m.text()), false);
+  assert.match(m.text(), /Latest update \| Working/);
+});
+
+test("Open saves edits, closes the dialog and only then opens the session", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { column: "done", terminal: "t1", addedBy: "t2" }));
+  H.terminals = [{ address: "t1", state: "live", status: "idle" }, { address: "t2", state: "exited" }];
+  H.panes = [{ pane: "p1", terminal: "t1", tab: "tb1" }];
+  const m = await form(H, "a1");
+  assert.match(m.text(), /Session \| Run by .*Idle · t1 .*Open .*Added by .*Ended · t2/);
+  assert.equal(m.has("session-open-t2"), false);
+  m.view.form.title.type("Fix sign in", m.cx);
+  await m.click("session-open-t1");
+  assert.deepEqual(hwsCalls(H).slice(1).map((c) => c.args[1]), ["edit"]);
+  assert.deepEqual(H.closed, ["ov9"]);
+  assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { terminal: "t1" } });
+});
+
+test("the dialog's heading line shows the card id and its times", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { createdAt: Date.now() - 7200000, updatedAt: Date.now() - 60000 }));
+  const m = await form(H, "a1");
+  assert.equal(textOf(findNode(m, "todo-details")), "a1 · Added 2h ago · Updated 1m ago");
 });
 
 test("Reply runs hws todo reply, keeps a leading dash and closes", async () => {
@@ -1379,7 +1684,7 @@ test("anything other than a local page goes to macOS open", async () => {
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/w/s1/data.csv"] });
   await m.click("output-t1-http://localhost:3000/a.html");
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["http://localhost:3000/a.html"] });
-  assert.equal(hwsCalls(H).length, 0);
+  assert.equal(hwsCalls(H).filter((c) => c.args[0] !== "todo").length, 0);
 });
 
 test("an open failure shows in the panel", async () => {

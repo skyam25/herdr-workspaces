@@ -8,7 +8,7 @@ import { liveFixtures, sandbox } from './helpers.js';
 const { space, tab, terminal } = liveFixtures;
 
 const PROMPT = 'Use the herdr-workspaces:orchestrate skill. Your board is space sp1.';
-const NOTE = 'The board changed. Read it and dispatch anything new.';
+const NOTE = 'The board changed. Run hws todo status and start whatever is ready.';
 
 function todoFile(box) {
   return join(box.root, 'todos', 'sp1.json');
@@ -17,6 +17,8 @@ function todoFile(box) {
 function readTodos(box) {
   return JSON.parse(readFileSync(todoFile(box), 'utf8'));
 }
+
+const pickState = ({ terminal, live }) => ({ terminal, live });
 
 function board(t) {
   const box = sandbox(t);
@@ -44,7 +46,8 @@ test('start opens an Orchestrator tab with the first prompt and records it', (t)
   const result = start(box, folder);
 
   assert.deepEqual(box.actions(), [
-    ['herdr-app', 'do', 'tab.new', '--name', 'Orchestrator', '--space', 'sp1', '--folder', folder, '--argv', '["claude"]', '--task', PROMPT],
+    ['herdr-app', 'do', 'tab.new', '--name', 'Orchestrator', '--space', 'sp1', '--folder', folder, '--argv', '["claude","--model","opus","--effort","high"]', '--task', PROMPT],
+    ['herdr-app', 'do', 'space.select', '--id', 'sp1'],
   ]);
   assert.deepEqual(result, { terminal: 't101', started: true });
   const { orchestrator } = readTodos(box);
@@ -151,16 +154,16 @@ test('status prints null, then the terminal with its liveness', (t) => {
   assert.equal(status(), null);
 
   const { terminal: address } = start(box, folder);
-  assert.deepEqual(status(), { terminal: address, live: true });
+  assert.deepEqual(pickState(status()), { terminal: address, live: true });
 
   box.setState({ hc: { [address]: 'missing' } });
-  assert.deepEqual(status(), { terminal: address, live: false });
+  assert.deepEqual(pickState(status()), { terminal: address, live: false });
 });
 
 test('status defaults to the selected space', (t) => {
   const { box } = board(t);
   record(box, 't9');
-  assert.deepEqual(box.json(['orchestrator', 'status']), { terminal: 't9', live: true });
+  assert.deepEqual(pickState(box.json(['orchestrator', 'status'])), { terminal: 't9', live: true });
 });
 
 test('hws --help lists the orchestrator commands', (t) => {
@@ -170,7 +173,7 @@ test('hws --help lists the orchestrator commands', (t) => {
 });
 
 function card(id, column, address) {
-  return { id, title: id, notes: '', column, terminal: address, hold: false, worktree: false, note: 'working', addedBy: null, archived: false, createdAt: 1, updatedAt: 1 };
+  return { id, title: id, notes: '', column, terminal: address, owner: 'agent', worktree: false, note: 'working', addedBy: null, report: '', reportFrom: null, session: null, replies: [], archived: false, createdAt: 1, updatedAt: 1 };
 }
 
 function boardWith(box, items, address = 't9') {
@@ -202,8 +205,8 @@ test('stop ends the orchestrator first, then its live workers, and returns their
   assert.deepEqual(result, { stopped: true, terminal: 't9', workers: ['t20', 't21'], returned: ['a', 'b'] });
   const returned = cardNamed(box, 'a');
   assert.deepEqual(
-    [returned.column, returned.terminal, returned.hold, returned.note],
-    ['todo', null, true, 'Stopped before finishing'],
+    [returned.column, returned.terminal, returned.owner, returned.note],
+    ['todo', null, 'unassigned', 'Stopped before finishing'],
   );
   assert.ok(returned.updatedAt >= before);
   assert.equal(readTodos(box).orchestrator, undefined);
@@ -232,7 +235,7 @@ test('stop leaves a card alone when its live terminal is not a child', (t) => {
   assert.deepEqual(kills(box), ['t9']);
   assert.deepEqual(result.returned, []);
   const left = cardNamed(box, 'mine');
-  assert.deepEqual([left.column, left.terminal, left.hold, left.note], ['doing', 't30', false, 'working']);
+  assert.deepEqual([left.column, left.terminal, left.owner, left.note], ['doing', 't30', 'agent', 'working']);
 });
 
 test('stop returns a doing card whose worker already ended', (t) => {

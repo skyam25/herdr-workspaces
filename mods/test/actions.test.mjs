@@ -463,3 +463,38 @@ test("an attach request for another pane or an old time is ignored", async () =>
 
   assert.equal(osascriptCalls(H).length, 0);
 });
+
+// Boards left open or saved as drafts
+
+const BOARD_LIST = "hws-pane.boards";
+const boardsWorld = (boards) => world({ panes: [AGENT], sharedValues: { [BOARD_LIST]: boards } });
+const draft = { id: "s1", title: "Plan", terminal: "t1", open: false };
+
+test("a draft shows Resume board in its agent's header and resumes on click", async () => {
+  const H = boardsWorld([draft]);
+  const m = await mount("hws-pane", { pane: "p1" });
+  assert.match(m.text(), /Resume board/);
+  await m.click("ph-board-p1");
+  await settle();
+  assert.ok(openArgs(H).some((args) => args.join(" ") === "surface resume --id s1 --json"));
+});
+
+test("an open board shows Show board, and extra boards are counted", async () => {
+  boardsWorld([draft, { ...draft, id: "s2", open: true }]);
+  const m = await mount("hws-pane", { pane: "p1" });
+  assert.match(m.text(), /Show board \+1/);
+});
+
+test("another agent's board stays out of this header", async () => {
+  boardsWorld([{ ...draft, terminal: "t9" }]);
+  const m = await mount("hws-pane", { pane: "p1" });
+  assert.equal(m.has("ph-board-p1"), false);
+});
+
+test("the + menu resumes and discards a draft and has no discard for an open board", async () => {
+  world({});
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [draft, { ...draft, id: "s2", title: "Flow", open: true }] });
+  const list = rows(m);
+  assert.ok(list.includes("Resume Plan") && list.includes("Discard Plan") && list.includes("Show Flow"));
+  assert.equal(list.includes("Discard Flow"), false);
+});

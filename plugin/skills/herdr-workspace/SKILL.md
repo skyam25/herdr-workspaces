@@ -5,7 +5,7 @@ description: This skill should be used when the user mentions a workspace, a Her
 
 # Herdr workspace
 
-A workspace is a Herdr space with a manifest. The manifest is the source of truth for its tabs, terminals, surfaces and artifacts. Only `hws` writes the manifest, so never edit `workspace.json` by hand.
+A workspace is one or more separate Herdr spaces with one manifest. The manifest is the source of truth for its spaces, tabs, terminals, surfaces and artifacts. Only `hws` writes the manifest, so never edit `workspace.json` by hand.
 
 Run `~/.local/bin/hws` if `hws` is not on PATH.
 
@@ -31,20 +31,67 @@ Read the manifest before inferring anything from the folder or git state. If `$H
 
 ## Task list
 
-Each Herdr space has a shared task list, and the person sees it on the Board. These commands act on this terminal's own space. They fail and ask for `--space` when Herdr cannot place the terminal.
+All the spaces in a workspace share one task list, and a space outside a workspace has its own. The person sees it on the Board. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
 
 | Command | Does |
 |---|---|
 | `hws todo list --json` | Prints the cards and any orchestrator |
+| `hws todo status --json` | Prints what is ready, in flight and waiting, without the text of finished cards |
 | `hws todo add --title="..."` | Adds a card for follow-up work the person should see |
 
-A card you add lands held. It stays held until the person presses Allow, so no orchestrator takes it first.
+A workspace starts with no Board, and cards still save without one. Run `hws board add` when the person asks for a Board or the work needs a place for agents to run from. It adds one Board space to this workspace, and running it again finds the same one.
+
+Every card has an owner.
+
+| Owner | Agents may |
+|---|---|
+| `unassigned` | Read it, and shape it when the person asks. Every card you add lands here until the person presses Allow |
+| `agent` | Run it, when a person or orchestrator gives it to them |
+| `mine` | Only read it. It is the person's, and `hws` refuses changes from an agent |
 
 Do not take or move cards unless the person asks.
 
+### Add and run cards
+
+| Step | The person does | An agent does, when asked |
+|---|---|---|
+| Add | Types in the To do box, or + Add | `hws todo add --title="..."` |
+| Make it ready | Presses Allow, or Allow all on the To do column | Nothing. Only the person assigns a card |
+| Start | Presses Run N ready in the Board header | `hws orchestrator start --space S --folder F` when told to |
+| Add more during a run | Adds and allows cards, then presses Run again | The orchestrator starts only what is new |
+
+Run starts one orchestrator for the board, or tells the live one to read it again. Cards in flight, waiting or done are not restarted.
+
+### Finish a card
+
+The person reviews results on the Board, so a finished card must say what happened.
+
+1. Move the card with a `--note` of up to two sentences that says what changed, where, and how you checked it.
+2. End the turn with your usual closing summary. A hook copies that message to every card you moved to Done or Waiting on you in that turn, so do not write it out twice.
+3. If you finish several cards in one turn, pass `--report="<this card's part>"` on each move, so each card keeps its own story.
+
+`hws todo list --json` leaves reports out to save tokens. Add `--reports` when you need them.
+
+### Write a card
+
+A title alone is enough to capture something. Shape a card before the person assigns it. A card is ready when a fresh session could finish it without this chat, and it says how to check the result.
+
+| Kind | The card carries | It ends with |
+|---|---|---|
+| Known change | Files and a check | The change, verified |
+| Discovery | The problem, evidence and questions | Options, then new cards after the person picks |
+| Build from a decision | A link to the decision, or the decision itself | The change, verified |
+| Bug | Steps to reproduce and evidence | A fix and a check |
+
+Sort the context by where it lives.
+
+- Put in the card what exists only in this chat, such as reasoning, decisions and constraints.
+- Point to what has a stable home, such as artifacts, docs and screenshots.
+- Leave out what a worker can find in the repo.
+
 ## Ask the user through a surface
 
-A surface is a board, note or page tied to this terminal. A board opens in its own floating window, and a note or page opens in a pane beside this terminal. Open one only when the user asks for it. Never open a surface unasked.
+A surface is a board, note or page tied to this terminal. A board opens in its own window, and a note or page opens in a pane beside this terminal. Open one only when the user asks for it. Never open a surface unasked.
 
 ```bash
 hws surface open --type board|note|page --title X --terminal $HC_TERMINAL_ID
@@ -52,7 +99,7 @@ hws surface open --type board|note|page --title X --terminal $HC_TERMINAL_ID
 
 Pass `--file F` to open an existing file in a note or page.
 
-After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it.
+After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it. A user who closes a board early keeps it as a draft and resumes it from the pane header.
 
 ## Draw on a surface
 

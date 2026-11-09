@@ -3,13 +3,15 @@ import { dirname, join, sep } from 'node:path';
 
 import { relocateArtifact } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, findTerminal, isIdleShell, isTerminalAlive, killTerminal, listLive, requireLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
+import { act, findTerminal, isIdleShell, killTerminal, listLive, requireLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
 import { STANDALONE, keptArtifactDir, keptThrowawayDir, manifestPath, stateRoot, workspaceDir } from '../paths.js';
 import { resolveWorkspace } from '../resolve.js';
 import { lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
+import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
 import { KEPT_KINDS, keptFields, keptKind } from './new.js';
+import { spaceOfTerminal } from './todo.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 const THROWAWAY_IDLE_MS = 24 * HOUR_MS;
@@ -47,10 +49,12 @@ function retireWorkspace(id) {
   removeIfEmpty(workspaceDir(id));
 }
 
-// A surface in its own window has no pane, so its host terminal says whether it is open.
-function dropClosedWindows() {
+// A closed window with work stays listed as a draft. One with nothing on it goes.
+function dropEmptyClosedWindows() {
   for (const manifest of listManifests({ includeStandalone: true })) {
-    const closed = manifest.surfaces.filter((surface) => surface.host && !isTerminalAlive(surface.host)).map((surface) => surface.id);
+    const closed = manifest.surfaces
+      .filter((surface) => surface.host && !isWindowOpen(surface) && !hasDraftWork(manifest.id, surface.id))
+      .map((surface) => surface.id);
     if (closed.length === 0) continue;
     updateManifest(manifest.id, (draft) => {
       draft.surfaces = draft.surfaces.filter((surface) => !closed.includes(surface.id));
@@ -69,9 +73,13 @@ function isQuietUnlisted(terminal) {
   return !info?.labels?.['herdr.chat'] || QUIET_STATUSES.has(info.status?.state);
 }
 
-function isInUse(manifest, space, live) {
-  if (manifest.surfaces.some((surface) => surface.host)) return true;
-  const listed = (space.tabs ?? []).flatMap((tab) => tab.terminals ?? []);
+function liveSpaces(manifest, live) {
+  return live.spaces.filter((space) => manifest.spaces.includes(space.id));
+}
+
+function isInUse(manifest, spaces, live) {
+  if (manifest.surfaces.some((surface) => surface.host && isWindowOpen(surface))) return true;
+  const listed = spaces.flatMap((space) => space.tabs ?? []).flatMap((tab) => tab.terminals ?? []);
   if (!listed.every(isQuietTerminal)) return true;
   const unlisted = manifest.terminals.map((item) => item.terminal).filter((terminal) => !findTerminal(live, terminal));
   return !unlisted.every(isQuietUnlisted);
@@ -85,10 +93,10 @@ function expireIdleThrowaways(manifests, live) {
   if (!selected) return [];
   const expired = [];
   for (const manifest of idle) {
-    const space = live.spaces.find((item) => item.id === manifest.id);
-    if (!space || space.id === selected || isInUse(manifest, space, live)) continue;
+    const spaces = liveSpaces(manifest, live);
+    if (spaces.length === 0 || manifest.spaces.includes(selected) || isInUse(manifest, spaces, live)) continue;
     try {
-      act('space.close', { id: manifest.id, confirmed: true });
+      for (const space of spaces) act('space.close', { id: space.id, confirmed: true });
       retireWorkspace(manifest.id);
       expired.push(manifest.id);
     } catch {
@@ -122,6 +130,12 @@ function purgeOldRetired() {
   }
 }
 
+function dropSpaces(id, gone) {
+  updateManifest(id, (draft) => {
+    draft.spaces = draft.spaces.filter((space) => !gone.includes(space));
+  });
+}
+
 // Manifests are read before the window, so a workspace created during the
 // listing is never pruned. An empty window counts as no answer.
 export function prune() {
@@ -130,19 +144,25 @@ export function prune() {
   if (!live || live.spaces.length === 0) {
     return { data: { pruned: [], expired: [], skipped: true }, text: 'the Herdr window did not answer, so nothing changed' };
   }
-  dropClosedWindows();
+  dropEmptyClosedWindows();
   const liveIds = new Set(live.spaces.map((space) => space.id));
   const pruned = [];
+  const open = [];
   for (const manifest of manifests) {
-    if (liveIds.has(manifest.id)) continue;
+    const gone = manifest.spaces.filter((id) => !liveIds.has(id));
     try {
-      retireWorkspace(manifest.id);
-      pruned.push(manifest.id);
+      if (gone.length === manifest.spaces.length) {
+        retireWorkspace(manifest.id);
+        pruned.push(manifest.id);
+        continue;
+      }
+      if (gone.length > 0) dropSpaces(manifest.id, gone);
     } catch {
       // The manifest stays and the next prune retries it.
     }
+    open.push(manifest);
   }
-  const expired = expireIdleThrowaways(manifests.filter((manifest) => liveIds.has(manifest.id)), live);
+  const expired = expireIdleThrowaways(open, live);
   purgeOldRetired();
   return { data: { pruned, expired, skipped: false }, text: `pruned ${pruned.length}, expired ${expired.length}` };
 }
@@ -172,7 +192,7 @@ export function promote(flags) {
     draft.kind = kind;
     draft.folder = folder;
   });
-  act('space.rename', { id: manifest.id, name });
+  if (manifest.spaces.includes(manifest.id)) act('space.rename', { id: manifest.id, name });
   return { data: updated, text: `promoted to ${kind} workspace ${name}` };
 }
 
@@ -201,7 +221,14 @@ function chooseArtifactFate(manifest, flags) {
   return { decision: 'needed', artifacts: manifest.artifacts };
 }
 
-// Closes the space last. A caller inside the space dies with it, and the next
+// The caller's own space closes last, because the caller dies with it.
+function inClosingOrder(spaces) {
+  const terminal = process.env.HC_TERMINAL_ID;
+  const own = terminal ? spaceOfTerminal(terminal) : null;
+  return [...spaces.filter((space) => space.id !== own), ...spaces.filter((space) => space.id === own)];
+}
+
+// Closes the spaces last. A caller inside one dies with it, and the next
 // prune then removes the manifest.
 export function close(flags) {
   if (flags.keep && flags.trash) throw new UsageError('use --keep or --trash, not both');
@@ -223,8 +250,8 @@ export function close(flags) {
   for (const surface of manifest.surfaces) {
     if (surface.host) killTerminal(surface.host);
   }
-  if (live.spaces.some((space) => space.id === manifest.id)) {
-    act('space.close', { id: manifest.id, confirmed: true });
+  for (const space of inClosingOrder(liveSpaces(manifest, live))) {
+    act('space.close', { id: space.id, confirmed: true });
   }
   if (readManifest(manifest.id)) retireWorkspace(manifest.id);
   return { data: { closed: true, workspace: manifest.id, kept: fate.kept }, text: `closed ${manifest.name}` };

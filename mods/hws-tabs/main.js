@@ -2,7 +2,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, panes, terminals, focused, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
 import { Flipped } from "./flipped.js";
-import { boardTab, openBoard } from "./board.js";
+import { WORKSPACE_BOARD_TAB, boardTab, openBoard } from "./board.js";
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 
@@ -57,7 +57,18 @@ export default class Tabs extends View {
     if (current && current.id !== board?.id) this.beforeBoard[space.id] = current.id;
   }
 
+  toBoard(space, cx) {
+    this.spaceBeforeBoard = space?.id ?? null;
+    cx.spawn(() => openBoard());
+  }
+
   leaveBoard(space, board) {
+    const from = this.spaceBeforeBoard;
+    if (from && from !== space.id && spaces().some((s) => s.id === from)) {
+      this.spaceBeforeBoard = null;
+      run("space.select", { id: from });
+      return;
+    }
     const others = space.tabs.filter(c => c.id !== board.id);
     const back = others.find(c => c.id === this.beforeBoard[space.id]) ?? others[0];
     if (back) run("tab.select", { id: back.id });
@@ -66,7 +77,7 @@ export default class Tabs extends View {
   render() {
     const t = theme();
     const space = spaces().find(p => p.active);
-    const shown = space?.tabs ?? [];
+    const shown = (space?.tabs ?? []).filter((c) => c.name !== WORKSPACE_BOARD_TAB);
     const stop = (_e, cx) => cx.stop_propagation();
     const paneList = panes();
     const board = boardTab(space, paneList);
@@ -124,10 +135,10 @@ export default class Tabs extends View {
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
-      .child(barButton("tasks", "Tasks", "mods/hws-tabs/tasks.svg", onBoard, () => (onBoard ? this.leaveBoard(space, board) : openBoard()), waiting))
+      .child(barButton("tasks", "Tasks", "mods/hws-tabs/tasks.svg", onBoard, (_e, cx) => (onBoard ? this.leaveBoard(space, board) : this.toBoard(space, cx)), waiting))
+      .when(enabled.includes("outputs"), el => el.child(panelButton("outputs", "Outputs", "mods/hws-tabs/outputs.svg")))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))
-      .when(enabled.includes("outputs"), el => el.child(panelButton("outputs", "Outputs", "mods/hws-tabs/outputs.svg")))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/hws-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/hws-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
         .child(button("close-window", w.platform === "windows" ? svg("mods/hws-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));

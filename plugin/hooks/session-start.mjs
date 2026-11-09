@@ -1,28 +1,16 @@
 import { spawnSync } from "node:child_process";
 
-// These limits sum to 5s, which stays under the 6s timeout in hooks.json.
-const STDIN_MS = 1000;
+import { readStdin } from "./stdin.mjs";
+
+// With the 1s stdin limit, two calls stay under the 6s timeout in hooks.json.
 const HWS_MS = 2000;
 
 const TASK_LIST = [
-  "This Herdr space has a shared task list that the person sees on the Board.",
+  "This Herdr workspace or space has a shared task list that the person sees on the Board.",
   'Read it with `hws todo list --json`, and add follow-up work the person should see with `hws todo add --title="..."`.',
-  "A card you add lands held for the person to allow, and you do not take or move cards unless asked.",
+  "A card you add lands unassigned until the person presses Allow. A card marked mine is the person's, so you only read it. You do not take or move cards unless asked.",
   "Run `~/.local/bin/hws` if `hws` is not on PATH.",
 ].join(" ");
-
-async function readStdin() {
-  const chunks = [];
-  const finished = (async () => {
-    for await (const chunk of process.stdin) chunks.push(chunk);
-  })();
-
-  let timer;
-  await Promise.race([finished, new Promise((resolve) => (timer = setTimeout(resolve, STDIN_MS)))]);
-  clearTimeout(timer);
-
-  return Buffer.concat(chunks).toString("utf8");
-}
 
 // Returns stdout, or null when hws fails or times out.
 function hws(args) {

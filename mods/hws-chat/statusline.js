@@ -10,6 +10,11 @@ const KEY_HINT = /^(← for agents · )?\? for shortcuts$/;
 const MODEL = /^(claude\s+)?(opus|sonnet|haiku|fable|gpt|o[134])\b[-\w. ]*$/i;
 const EFFORT = /^effort:\s*\S+$/i;
 
+const SEPARATOR = / \| | · /;
+const BAR = /^\[([█▓▒░\s]+)\]\s*(.*)$/;
+const TERMINAL_GLYPH = /^[⏵⏸⧉←]+\s*/u;
+const TERMINAL_HINT = /\s*\(shift\+tab to cycle\)$/i;
+
 function belowClaudePrompt(lines) {
   const rules = lines.flatMap((line, i) => (RULE.test(line) ? [i] : []));
   if (rules.length < 2) return null;
@@ -39,4 +44,18 @@ export function statusLines(screen, kind) {
     .map(withoutModel)
     .filter(Boolean);
   return shown.length <= MAX_LINES ? shown : null;
+}
+
+// One line's text, without the marks and key hints that only mean something in a terminal.
+function statusPart(segment) {
+  const text = segment.trim().replace(TERMINAL_GLYPH, "").replace(TERMINAL_HINT, "");
+  const bar = text.match(BAR);
+  if (!bar) return { text };
+  const cells = bar[1].replace(/\s/g, "");
+  return { text: bar[2], meter: cells.replace(/[^█]/g, "").length / cells.length };
+}
+
+// The status lines as separate parts for one quiet row. A text progress bar becomes a meter from 0 to 1.
+export function statusParts(lines) {
+  return lines.flatMap((line) => line.split(SEPARATOR)).map(statusPart).filter((part) => part.text || part.meter !== undefined);
 }

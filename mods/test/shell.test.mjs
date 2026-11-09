@@ -267,11 +267,11 @@ test("the Tasks badge shows only above zero", async () => {
   }
 });
 
-test("the buttons read Tasks, Files, Changes, Outputs, with Tasks and Outputs even when panels are restricted", async () => {
+test("the buttons read Tasks, Outputs, Files, Changes, with Tasks and Outputs even when panels are restricted", async () => {
   tabWorld();
   const view = await mount("hws-tabs");
   const order = nodes(view.render()).map((n) => n.id).filter((id) => /^panel-[a-z]+$/.test(id ?? ""));
-  assert.deepEqual(order, ["panel-tasks", "panel-files", "panel-changes", "panel-outputs"]);
+  assert.deepEqual(order, ["panel-tasks", "panel-outputs", "panel-files", "panel-changes"]);
 
   tabWorld({ sharedValues: { "workspace.panels": ["files"] } });
   const limited = await mount("hws-tabs");
@@ -304,6 +304,46 @@ test("Tasks opens a Board tab when the active space has none", async () => {
   assert.equal(selected(view), false);
   await view.click("panel-tasks");
   assert.deepEqual(H.runs, [{ name: "tab.new", args: { name: "Board", mod: "hws-work", props: { view: "tasks" } } }]);
+});
+
+test("Tasks in a workspace shows its Board space and adds no tab", async () => {
+  const H = tabWorld();
+  H.hws["board open"] = { workspace: "spc1", space: "spb", tab: "tbb" };
+  const view = await mount("hws-tabs");
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, [{ name: "space.select", args: { id: "spb" } }, { name: "tab.select", args: { id: "tbb" } }]);
+});
+
+test("Tasks in a workspace with no Board adds nothing and says where to add one", async () => {
+  const H = tabWorld();
+  H.hws["board open"] = { workspace: "spc1", space: null, tab: null };
+  H.notices = [];
+  const view = await mount("hws-tabs");
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, []);
+  assert.match(H.notices.at(-1).title, /no Board/);
+});
+
+test("the tab bar hides a workspace's Board tab and keeps agents beside it", async () => {
+  const hidden = { id: "tbb", name: "Workspace board", index: 1, status: null };
+  const agent = { id: "tba", name: "Worker", index: 2, status: null };
+  tabWorld({ spaces: [{ ...SPACES[0], tabs: [{ ...hidden, active: true }, agent] }], panes: [boardPane("tbb")], terminals: [] });
+  const view = await mount("hws-tabs");
+  assert.equal(byId(view, "tab-tbb"), null);
+  assert.match(textOf(byId(view, "tab-tba")), /Worker/);
+  assert.equal(selected(view), true);
+});
+
+test("Tasks on a workspace's Board returns to the space it came from", async () => {
+  const H = tabWorld();
+  H.hws["board open"] = { workspace: "spc1", space: "spb", tab: "tbb" };
+  const view = await mount("hws-tabs");
+  await view.click("panel-tasks");
+  H.runs.length = 0;
+  H.spaces = [{ ...SPACES[0], active: false }, { id: "spb", name: "Board", active: true, machine: null, tabs: [{ id: "tbb", name: "Workspace board", index: 1, active: true, status: null }] }];
+  H.panes = [boardPane("tbb")];
+  await view.click("panel-tasks");
+  assert.deepEqual(H.runs, [{ name: "space.select", args: { id: "spc1" } }]);
 });
 
 test("a Board in another space does not count", async () => {

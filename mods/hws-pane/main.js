@@ -5,7 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { props, run, theme, home, exec, hc, nextCommand, setShared, openOverlay } from "herdr";
+import { props, run, theme, home, exec, hc, nextCommand, shared, setShared, openOverlay } from "herdr";
 import { panes, terminals, spaces, inRender } from "./live.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { LABEL, sweep } from "./parked.js";
@@ -18,10 +18,43 @@ const SWAP_GAP_MS = 3000;
 const CHAT_FADE_OUT_MS = 120;
 const LEAVING = "hws-chat.leaving";
 const MENU_WIDTH = 240;
+const BOARDS = "hws-pane.boards";
+const BOARDS_MS = 5000;
 
 // Every header copy shares these.
 let lastSwap = 0;
 let lastSweep = 0;
+let lastBoards = 0;
+let boardsJson = "";
+let resuming = false;
+
+const hws = (args) => exec(`${home()}/.local/bin/hws`, [...args, "--json"]);
+const boardsOf = (terminal) => [shared(BOARDS)].flat().filter((b) => b?.terminal === terminal);
+
+// One header copy reads the list, and shared state carries it to the others.
+async function refreshBoards() {
+  if (Date.now() - lastBoards < BOARDS_MS / 2) return;
+  lastBoards = Date.now();
+  let r;
+  try { r = await hws(["surface", "list"]); } catch { return; }
+  if (r.code !== 0 || r.stdout === boardsJson) return;
+  boardsJson = r.stdout;
+  try { setShared(BOARDS, JSON.parse(r.stdout)); } catch { boardsJson = ""; }
+}
+
+async function resumeBoard(id) {
+  if (resuming) return;
+  resuming = true;
+  try {
+    const r = await hws(["surface", "resume", "--id", id]);
+    if (r.code !== 0) throw new Error(r.stdout.trim() || r.stderr.trim());
+  } catch (e) {
+    toast({ title: "Board didn't open", body: plainError(e), level: "error" });
+  }
+  resuming = false;
+  lastBoards = 0;
+  refreshBoards();
+}
 
 const chatty = (p) => Boolean(p?.terminal) && (["claude-code", "codex"].includes(p.app) || ["claude", "codex"].includes(p.program?.key));
 
@@ -71,6 +104,8 @@ export default class Pane extends View {
       lastSweep = Date.now();
       sweep();
     });
+    refreshBoards();
+    cx.timer.every(BOARDS_MS, () => { refreshBoards(); });
 
     // A short wait lets a reloaded build exit at its next cx use.
     cx.spawn(async (cx) => {
@@ -120,8 +155,17 @@ export default class Pane extends View {
     const space = spaces().find((s) => s.tabs.some((c) => c.id === self.tab))?.id;
     const cwd = self.mod === CHAT ? parked(agent)?.cwd : self.cwd;
     const where = { space, ...(cwd ? { cwd } : {}) };
-    const menu = self.mod === CHAT ? { terminal: agent, chat: true, pane: self.pane, ...where } : { terminal: self.terminal, ...where };
+    const boards = boardsOf(agent ?? self.terminal);
+    const owned = boards.length > 0 ? { boards } : {};
+    const menu = self.mod === CHAT ? { terminal: agent, chat: true, pane: self.pane, ...owned, ...where } : { terminal: self.terminal, ...owned, ...where };
     openOverlay({ mod: "hws-actions", kind: "popup", width: MENU_WIDTH, props: menu });
+  }
+
+  // Acts on the newest board. The + menu lists them all and discards drafts.
+  boardButton(boards, pane) {
+    const board = boards.at(-1);
+    const more = boards.length > 1 ? ` +${boards.length - 1}` : "";
+    return uiButton(`ph-board-${pane}`, `${board.open ? "Show" : "Resume"} board${more}`, { onClick: () => resumeBoard(board.id) });
   }
 
   toChat(p, cx) {
@@ -216,6 +260,7 @@ export default class Pane extends View {
     // A surface runs on this computer, so a remote agent has no + menu.
     const canAct = canSwitch && !(agent ?? self.terminal ?? "").includes("/");
     const confirming = Boolean(agent) && this.ending;
+    const boards = canAct ? boardsOf(agent ?? self.terminal) : [];
 
     return h_flex()
       .id(`pane-head-${pane}`)
@@ -246,6 +291,7 @@ export default class Pane extends View {
         .child(this.button(t, `ph-z-${pane}`, self.zoomed ? "unzoom" : "zoom", () => run("pane.zoom", { pane })))
         .child(this.button(t, `ph-x-${pane}`, "close", () => { if (agent) this.ending = true; else run("pane.close", { pane }); })))
       .when(canAct, (el) => el.child(this.button(t, `ph-new-${pane}`, "plus", () => this.openActions(self, agent))))
+      .when(boards.length > 0, (el) => el.child(this.boardButton(boards, pane)))
       .when(canSwitch, (el) => el.child(segmented(`ph-mode-${pane}`, [["chat", "Chat"], ["terminal", "Terminal"]], this.going ?? (chatMode ? "chat" : "terminal"),
         (v, _e, cx) => (v === "chat" ? this.toChat(self, cx) : this.toTerminal(pane, cx)))));
   }

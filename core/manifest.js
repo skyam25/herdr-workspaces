@@ -5,9 +5,12 @@ import { HwsError } from './errors.js';
 import { withLock } from './lock.js';
 import { STANDALONE, home, manifestPath, stateRoot } from './paths.js';
 
+// A manifest written before workspaces held several spaces has only its own space.
 export function readManifest(id) {
   try {
-    return JSON.parse(readFileSync(manifestPath(id), 'utf8'));
+    const manifest = JSON.parse(readFileSync(manifestPath(id), 'utf8'));
+    manifest.spaces ??= manifest.id === STANDALONE ? [] : [manifest.id];
+    return manifest;
   } catch {
     return null;
   }
@@ -38,11 +41,16 @@ export function listManifests({ includeStandalone = false } = {}) {
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
+export function manifestOfSpace(space) {
+  return listManifests().find((manifest) => manifest.spaces.includes(space)) ?? null;
+}
+
 function blankManifest(fields) {
   return {
     version: 1,
     instructions: '',
     createdAt: Date.now(),
+    spaces: fields.id === STANDALONE ? [] : [fields.id],
     tabs: [],
     terminals: [],
     surfaces: [],

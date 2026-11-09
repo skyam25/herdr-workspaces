@@ -101,7 +101,7 @@ function hiddenPanelWindow(options) {
   return win;
 }
 
-// An ordinary window that floats on the right of the screen, where a split would sit.
+// An ordinary window on the right of the screen, where a split would sit.
 function ownPanelWindow(options) {
   const { x: _x, y: _y, ...rest } = options;
   const { screen, Menu } = realElectron;
@@ -112,22 +112,31 @@ function ownPanelWindow(options) {
   const title = [process.env.HWS_SURFACE_TITLE || 'Board', owner].filter(Boolean).join(' — ');
   const win = new realElectron.BrowserWindow({ ...rest, ...bounds, show: false, focusable: true, frame: true, enableLargerThanScreen: false });
 
-  // Panel treats a surface as offscreen, so its placement calls do nothing here.
   const inert = () => {};
   const reveal = win.show.bind(win);
-  Object.assign(win, { show: inert, showInactive: inert, hide: inert, focus: inert, setPosition: inert, setBounds: inert });
+  const takeFocus = win.focus.bind(win);
+  let ready = false;
+
+  // Panel treats a surface as offscreen, so every show arrives here as showInactive.
+  const raise = () => {
+    if (!ready) return;
+    if (win.isMinimized()) win.restore();
+    reveal();
+    takeFocus();
+    app.focus({ steal: true });
+  };
+  Object.assign(win, { show: inert, showInactive: raise, hide: inert, focus: inert, setPosition: inert, setBounds: inert });
 
   const float = (on) => win.setAlwaysOnTop(on, 'floating');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-  float(true);
   win.once('ready-to-show', () => {
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { role: 'appMenu' },
       { role: 'editMenu' },
-      { label: 'Window', submenu: [{ label: 'Keep on Top', type: 'checkbox', checked: true, click: (item) => float(item.checked) }, { role: 'minimize' }, { role: 'close' }] },
+      { label: 'Window', submenu: [{ label: 'Keep on Top', type: 'checkbox', checked: false, click: (item) => float(item.checked) }, { role: 'minimize' }, { role: 'close' }] },
     ]));
-    reveal();
-    app.focus({ steal: true });
+    ready = true;
+    raise();
   });
   win.setTitle(title);
   win.on('page-title-updated', (event) => event.preventDefault());

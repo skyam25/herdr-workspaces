@@ -1,13 +1,13 @@
 import { HwsError, UsageError } from './errors.js';
 import { findTerminal, listLive } from './herdr.js';
-import { listManifests, readManifest } from './manifest.js';
+import { listManifests, manifestOfSpace, readManifest } from './manifest.js';
 
 // Finds a terminal's workspace. The live window decides when it answers.
 // Otherwise the recorded terminals decide.
 export function locateTerminal(terminal) {
   const live = listLive();
   const found = live && findTerminal(live, terminal);
-  if (found) return { manifest: readManifest(found.space.id), tabId: found.tab.id };
+  if (found) return { manifest: manifestOfSpace(found.space.id), tabId: found.tab.id };
   const manifest = listManifests().find((item) => item.terminals.some((t) => t.terminal === terminal));
   if (!manifest) return { manifest: null, tabId: null };
   return { manifest, tabId: manifest.terminals.find((t) => t.terminal === terminal).tabId };

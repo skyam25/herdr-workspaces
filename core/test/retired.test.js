@@ -130,6 +130,17 @@ test('an open surface window keeps its throwaway open', (t) => {
   assert.ok(hasManifest(box, manifest.id));
 });
 
+test('a closed draft does not keep its throwaway open', (t) => {
+  const box = sandbox(t);
+  const manifest = idleThrowaway(box);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--terminal', manifest.terminals[0].terminal]);
+  const boards = join(box.root, 'workspaces', manifest.id, 'surfaces', surface.id, 'boards');
+  mkdirSync(boards, { recursive: true });
+  writeFileSync(join(boards, 'Sketch.excalidraw'), JSON.stringify({ elements: [{ id: 'a' }] }));
+  box.setState({ selected: 'sp-elsewhere', hc: { t90: 'missing' } });
+  assert.deepEqual(box.json(['prune']).expired, [manifest.id]);
+});
+
 function flip(box, manifest, state) {
   const spaces = box.state().spaces.map((item) => (item.id === manifest.id ? { ...item, tabs: item.tabs.map((one) => ({ ...one, terminals: [] })) } : item));
   box.setState({ spaces, hc: { [manifest.terminals[0].terminal]: { labels: { 'herdr.chat': 'p9' }, status: { state } } } });

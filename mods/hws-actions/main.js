@@ -1,6 +1,6 @@
 // The + menu on agent panes and in the chat composer. It starts boards, notes and page
 // reviews glued to an agent, and reaches the chat's file picker, the Board tab and the right panel.
-// Props: { terminal, chat?, pane?, space?, cwd?, lastReply? }. docs/CONTRACT.md lists the rows.
+// Props: { terminal, chat?, pane?, space?, cwd?, lastReply?, boards? }. docs/CONTRACT.md lists the rows.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -59,6 +59,13 @@ export default class Actions extends View {
     if (r.code !== 0) throw new Error(r.stderr.trim() || "Couldn't open that page.");
   }
 
+  boardRows(boards) {
+    return boards.flatMap((b, i) => [
+      { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${b.title}`, icon: "sketch", divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
+      ...(b.open ? [] : [{ id: `discard-${b.id}`, name: `Discard ${b.title}`, icon: "close", work: () => hws(["surface", "discard", "--id", b.id]) }]),
+    ]);
+  }
+
   items() {
     const p = props() ?? {};
     return [
@@ -70,6 +77,7 @@ export default class Actions extends View {
       { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: openBoard },
       { id: "outputs", name: "Outputs", icon: "outputs", work: () => showPanel("outputs") },
       ...(p.space && p.cwd ? [{ id: "orchestrate", name: "Orchestrate this space", icon: "orchestrate", divided: true, work: () => hws(["orchestrator", "start", "--space", p.space, "--folder", p.cwd]) }] : []),
+      ...this.boardRows(p.boards ?? []),
     ];
   }
 

@@ -3,11 +3,11 @@
 // decision or Promote, a `mod.open` copy toggles the pane and closes itself, and
 // a layout block with `view: "sidebar"` shows the Workspaces section.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, panes, spaces, focused, props, exec, theme, run, openOverlay, closeOverlay, watchFolder } from "herdr";
+import { agents, panes, spaces, focused, props, exec, theme, run, openOverlay, closeOverlay, shared, setShared, watchFolder } from "herdr";
 import { hws, message, submitDialog, openWorkspaceForm, KINDS, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
-import { startSidebar, drawSidebar } from "./sidebar.js";
+import { startSidebar, drawSidebar, WORKSPACES_CHANGED } from "./sidebar.js";
 
 const MOD = "hws-panel";
 const REFRESH_MS = 20000;
@@ -45,6 +45,9 @@ export default class Panel extends View {
       makeInput(this, "name", { value: p.name ?? "", placeholder: "Untitled workspace", submit });
       makeInput(this, "folder", { submit });
       fillParent(this, cx);
+      focusField(this, "name", cx);
+    } else if (this.view === "add-space") {
+      makeInput(this, "name", { placeholder: "Space name", submit: (cx) => this.addSpace(cx) });
       focusField(this, "name", cx);
     } else if (this.view === "instructions") {
       makeInput(this, "instructions", { rows: 9, value: p.instructions ?? "", placeholder: INSTRUCTIONS_HINT });
@@ -269,6 +272,22 @@ export default class Panel extends View {
     }, cx);
   }
 
+  // Runs in the Add space dialog.
+  addSpace(cx) {
+    const name = this.values.name.trim();
+    submitDialog(this, "add", async () => {
+      await hws(["space", "add", "--workspace", props().workspace, ...(name ? ["--name", name] : [])]);
+      setShared(WORKSPACES_CHANGED, Date.now());
+    }, cx);
+  }
+
+  moveSpace(space, cx) {
+    submitDialog(this, `move-${space.id}`, async () => {
+      await hws(["space", "move", "--space", space.id, "--workspace", props().workspace]);
+      setShared(WORKSPACES_CHANGED, Date.now());
+    }, cx);
+  }
+
   smallButton(t, id, text, action, enabled = true) {
     return div()
       .id(id)
@@ -287,7 +306,7 @@ export default class Panel extends View {
   }
 
   tabsSection(t, workspace, space) {
-    const liveAgents = agents().filter((a) => a.space === workspace.id);
+    const liveAgents = agents().filter((a) => workspace.spaces.includes(a.space));
     return v_flex()
       .flex_none()
       .gap(6)
@@ -337,6 +356,7 @@ export default class Panel extends View {
   surfacesSection(t, workspace) {
     const surfaces = workspace.surfaces ?? [];
     const livePanes = new Set(panes().map((p) => p.pane));
+    const drafts = new Set((shared("hws-pane.boards") ?? []).filter((b) => !b.open).map((b) => b.id));
     return v_flex()
       .flex_none()
       .gap(1)
@@ -352,8 +372,9 @@ export default class Panel extends View {
             .items_center()
             .rounded(6)
             .when(livePanes.has(s.pane), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(() => run("pane.focus", { pane: s.pane })))
+            .when(Boolean(s.host), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(() => { hws(["surface", "resume", "--id", s.id]).catch(() => {}); }))
             .child(div().flex_1().min_w(0).truncate().child(s.title || s.type))
-            .child(div().flex_none().text_size(11).text_color(t.dim).child(s.terminal ? `${s.type} · ${s.terminal}` : `${s.type} · standalone`)),
+            .child(div().flex_none().text_size(11).text_color(t.dim).child(`${s.terminal ? `${s.type} · ${s.terminal}` : `${s.type} · standalone`}${drafts.has(s.id) ? " · draft" : ""}`)),
         ),
       );
   }
@@ -506,10 +527,51 @@ export default class Panel extends View {
     }
     if (this.problem) return this.renderMessage(t, this.problem, false);
     if (this.manifests === null) return this.renderMessage(t, "Loading…", false);
-    const workspace = this.manifests.find((m) => m.id === spaceId);
+    const workspace = this.manifests.find((m) => m.spaces.includes(spaceId));
     if (!workspace) return this.renderMessage(t, "This space is not a workspace.", true);
     this.watch(workspace.dir, cx);
     return this.renderWorkspace(t, workspace);
+  }
+
+  renderAddSpace(t) {
+    const members = props().spaces ?? [];
+    const movable = spaces().filter((s) => !s.machine && !members.includes(s.id));
+    const moveRow = (s) => h_flex()
+      .id(`move-${s.id}`)
+      .h(32)
+      .flex_none()
+      .px(8)
+      .gap(8)
+      .items_center()
+      .rounded(6)
+      .cursor_pointer()
+      .hover((st) => st.bg(t.hover))
+      .on_click((_e, cx) => this.moveSpace(s, cx))
+      .child(svg("mods/workspace-chrome/terminal.svg").size(12).flex_none().text_color(t.dim))
+      .child(div().flex_1().min_w(0).truncate().child(s.name))
+      .child(div().flex_none().text_size(11.5).text_color(t.dim).child(`${s.tabs.length} ${s.tabs.length === 1 ? "tab" : "tabs"}`));
+
+    return dialogRoot(t, "hws-add-space")
+      .track_focus(this.handle)
+      .on_key_down(formKeys(this, () => closeOverlay(props().overlay)))
+      .child(
+        v_flex()
+          .id("hws-add-space-body")
+          .flex_1()
+          .min_h(0)
+          .overflow_y_scrollbar()
+          .p(18)
+          .gap(12)
+          .child(div().text_size(15).font_semibold().child(`Add a space to ${props().name}`))
+          .child(labeled(t, "New space", field(t, this, "name")))
+          .when(movable.length > 0, (el) => el.child(labeled(t, "Or move an open space here", v_flex().children(movable.map(moveRow)))))
+          .when(Boolean(this.problem), (el) => el.child(problemLine(t, this.problem))),
+      )
+      .child(
+        dialogFooter()
+          .child(button(t, "cancel", "Cancel", false, () => closeOverlay(props().overlay)))
+          .child(button(t, "add-space-yes", this.busy === "add" ? "Adding…" : "Add space", true, (_e, cx) => this.addSpace(cx), !this.busy)),
+      );
   }
 
   renderDecide(t) {
@@ -588,6 +650,7 @@ export default class Panel extends View {
     if (this.view === "sidebar") return drawSidebar(this.sidebar);
     if (this.view === "decide") return this.renderDecide(t);
     if (this.view === "promote") return this.renderPromote(t);
+    if (this.view === "add-space") return this.renderAddSpace(t);
     if (this.view === "instructions") return this.renderInstructions(t);
     return this.renderPanel(t, cx);
   }

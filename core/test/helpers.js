@@ -89,6 +89,7 @@ export function sandbox(t) {
     },
 
     manifest: (id) => JSON.parse(readFileSync(join(root, 'workspaces', id, 'workspace.json'), 'utf8')),
+    rewriteManifest: (id, change) => writeFileSync(join(root, 'workspaces', id, 'workspace.json'), JSON.stringify(change(box.manifest(id)))),
 
     folder(name) {
       const path = join(dir, name);

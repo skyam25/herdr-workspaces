@@ -46,7 +46,6 @@ export default class Launcher extends View {
     makeInput(this, "name", { placeholder: "Untitled workspace", submit });
     makeInput(this, "folder", { submit });
     makeInput(this, "instructions", { rows: 4, placeholder: "Optional. How agents should work and organize context here." });
-    makeInput(this, "tabs", { value: "Plan, Build", submit });
     fillParent(this, cx);
     focusField(this, "name", cx);
   }
@@ -132,13 +131,11 @@ export default class Launcher extends View {
   create(cx) {
     submitDialog(this, "create", async () => {
       const path = await checkFolder(this.values.folder);
-      const tabs = this.values.tabs.split(",").map((s) => s.trim()).filter(Boolean);
       const instructions = this.values.instructions.trim();
       await hws([
         "new", "workspace",
         "--name", this.values.name.trim() || "Untitled workspace",
         "--folder", path,
-        ...(tabs.length > 0 ? ["--tabs", tabs.join(",")] : []),
         ...(instructions ? ["--instructions", instructions] : []),
       ]);
     }, cx);
@@ -147,7 +144,7 @@ export default class Launcher extends View {
   menuItems() {
     return [
       { id: "new-terminal", name: "New terminal", line: "A plain tab with no workspace.", go: (cx) => this.newTerminal(cx) },
-      { id: "new-workspace", name: "New workspace…", line: "A named place with instructions, tabs and kept work.", go: () => this.openForm() },
+      { id: "new-workspace", name: "New workspace…", line: "A named place with its spaces, instructions and kept work.", go: () => this.openForm() },
       { id: "new-throwaway", name: "Throwaway", line: "Claude in a scratch workspace.", go: (cx) => this.launch("new-throwaway", ["new", "throwaway"], cx) },
       { id: "find-throwaway", name: "Find throwaway…", line: "Reopen one that closed or went idle.", go: () => this.openFind() },
       { id: "new-board", name: "New board", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled board", "--standalone"], cx) },
@@ -214,7 +211,6 @@ export default class Launcher extends View {
           .child(labeled(t, "Name", field(t, this, "name")))
           .child(labeled(t, "Folder", folderRow(t, this)))
           .child(labeled(t, "Instructions", areaField(t, this, "instructions")))
-          .child(labeled(t, "Starting tabs, separated by commas", field(t, this, "tabs")))
           .when(Boolean(this.problem), (el) => el.child(problemLine(t, this.problem))),
       )
       .child(

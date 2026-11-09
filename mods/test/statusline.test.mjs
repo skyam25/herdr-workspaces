@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { statusLines } from "../hws-chat/statusline.js";
+import { statusLines, statusParts } from "../hws-chat/statusline.js";
 
 const RULE = "─".repeat(100);
 
@@ -45,4 +45,17 @@ test("an unknown CLI has no lines", () => {
 test("too many lines below the prompt keeps the last lines", () => {
   const screen = [RULE, "❯ ", RULE, ...Array.from({ length: 7 }, (_, i) => `line ${i}`)].join("\n");
   assert.equal(statusLines(screen, "claude"), null);
+});
+
+test("status parts drop terminal marks and split on both separators", () => {
+  const parts = statusParts(["herdr-workspaces | main | Max", "⏵⏵ auto mode on (shift+tab to cycle) · ⧉ mock · ← 1 agent"]);
+  assert.deepEqual(parts.map((p) => p.text), ["herdr-workspaces", "main", "Max", "auto mode on", "mock", "1 agent"]);
+});
+
+test("a status text bar becomes a meter and keeps its figure", () => {
+  assert.deepEqual(statusParts(["[██░░░░░░░░] 13% | $1.40"]), [{ text: "13%", meter: 0.2 }, { text: "$1.40" }]);
+});
+
+test("status parts keep a git arrow and a home path", () => {
+  assert.deepEqual(statusParts(["~/Projects/app · ↑3"]).map((p) => p.text), ["~/Projects/app", "↑3"]);
 });

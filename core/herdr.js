@@ -52,6 +52,15 @@ export function listLive() {
   return liveListing;
 }
 
+// Herdr selects every new tab, so this puts the window back where the person was.
+export function keepingSelection(work) {
+  const before = windowStatus();
+  const result = work();
+  if (before?.space) act('space.select', { id: before.space });
+  if (before?.tab) act('tab.select', { id: before.tab });
+  return result;
+}
+
 export function requireLive() {
   const live = listLive();
   if (!live) throw new HwsError('the Herdr window did not answer');
@@ -100,6 +109,12 @@ export function runDetached(argv, cwd) {
     throw new HwsError(result.stderr.trim() || result.stdout.trim() || result.failure || 'hc run failed');
   }
   return reply.address;
+}
+
+export function startWorker({ name, label, cwd, argv }) {
+  const result = run(hcBin(), ['run', '--bg', '--json', '--name', name, '--label', label, '--cwd', cwd, '--', ...argv], ACT_MS);
+  if (!result.ok) throw new HwsError(result.stderr.trim() || result.stdout.trim() || result.failure || 'hc run failed');
+  return parseJson(result.stdout);
 }
 
 export function killTerminal(terminal) {

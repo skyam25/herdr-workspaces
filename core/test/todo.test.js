@@ -35,10 +35,14 @@ test('todo add writes the contract shape to the space file', (t) => {
     notes: 'Start with the form',
     column: 'todo',
     terminal: null,
-    hold: false,
+    owner: 'unassigned',
     worktree: false,
     note: '',
     addedBy: null,
+    report: '',
+    reportFrom: null,
+    session: null,
+    replies: [],
     archived: false,
     createdAt: item.createdAt,
     updatedAt: item.createdAt,
@@ -55,7 +59,7 @@ test('todo add needs a title that is not blank', (t) => {
 
 test('todo list prints unarchived items, newest updatedAt first', (t) => {
   const box = sandbox(t);
-  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null });
+  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'] });
 
   const first = add(box, 'first');
   const second = add(box, 'second');
@@ -315,10 +319,11 @@ function setCreatedAt(box, times) {
   writeFileSync(todoFile(box), JSON.stringify(file));
 }
 
-test('todo add sets hold and worktree', (t) => {
+test('todo add sets owner and worktree and refuses other owners', (t) => {
   const box = sandbox(t);
-  const item = add(box, 'task', '--hold', '--worktree');
-  assert.equal(item.hold, true);
+  const item = add(box, 'task', '--owner', 'mine', '--worktree');
+  assert.equal(item.owner, 'mine');
+  assert.equal(failure(box, 'add', '--title', 'x', '--owner', 'nobody').code, 2);
   assert.equal(item.worktree, true);
   assert.deepEqual(readTodos(box).items, [item]);
 });
@@ -341,7 +346,7 @@ test('todo add --titles refuses all blank lines and other card fields', (t) => {
     ['--titles', 'a', '--title', 'b'],
     ['--titles', 'a', '--title', ''],
     ['--titles', 'a', '--notes', 'n'],
-    ['--titles', 'a', '--hold'],
+    ['--titles', 'a', '--owner', 'mine'],
     ['--titles', 'a', '--worktree'],
   ]) {
     assert.equal(failure(box, 'add', ...args).code, 2, args.join(' '));
@@ -349,21 +354,21 @@ test('todo add --titles refuses all blank lines and other card fields', (t) => {
   assert.equal(existsSync(todoFile(box)), false);
 });
 
-test('todo edit sets and clears hold and worktree and refuses other values', (t) => {
+test('todo edit sets owner and worktree and refuses other values', (t) => {
   const box = sandbox(t);
   const item = add(box, 'task');
 
-  const held = todoJson(box, 'edit', '--id', item.id, '--hold', 'true', '--worktree', 'true');
-  assert.equal(held.hold, true);
-  assert.equal(held.worktree, true);
+  const kept = todoJson(box, 'edit', '--id', item.id, '--owner', 'mine', '--worktree', 'true');
+  assert.equal(kept.owner, 'mine');
+  assert.equal(kept.worktree, true);
 
-  const released = todoJson(box, 'edit', '--id', item.id, '--hold', 'false');
-  assert.equal(released.hold, false);
-  assert.equal(released.worktree, true);
+  const assigned = todoJson(box, 'edit', '--id', item.id, '--owner', 'agent');
+  assert.equal(assigned.owner, 'agent');
+  assert.equal(assigned.worktree, true);
 
-  assert.equal(failure(box, 'edit', '--id', item.id, '--hold', 'yes').code, 2);
+  assert.equal(failure(box, 'edit', '--id', item.id, '--owner', 'yes').code, 2);
   assert.equal(failure(box, 'edit', '--id', item.id, '--worktree', '').code, 2);
-  assert.equal(readTodos(box).items[0].hold, false);
+  assert.equal(readTodos(box).items[0].owner, 'agent');
 });
 
 test('todo move reaches waiting and sets the note only when given', (t) => {
@@ -391,7 +396,7 @@ test('leaving waiting by any route but reply keeps the note', (t) => {
 
   wait();
   todoJson(box, 'move', '--id', item.id, '--column', 'todo');
-  assert.equal(todoJson(box, 'claim', '--id', item.id, '--terminal', 't5').note, 'Need input');
+  assert.equal(todoJson(box, 'claim', '--id', item.id, '--terminal', 't5').note, '');
 });
 
 test('todo note sets the note and leaves the column alone', (t) => {
@@ -407,16 +412,17 @@ test('todo note sets the note and leaves the column alone', (t) => {
   assert.equal(readTodos(box).items[0].note, 'Half done');
 });
 
-test('todo next claims the oldest ready card and skips held and other columns', (t) => {
+test('todo next claims the oldest agent card and skips other owners and columns', (t) => {
   const box = sandbox(t);
-  const held = add(box, 'held', '--hold');
-  const doing = add(box, 'doing');
-  const archived = add(box, 'archived');
-  const newer = add(box, 'newer');
-  const older = add(box, 'older');
+  const held = add(box, 'unassigned');
+  const mine = add(box, 'mine', '--owner', 'mine');
+  const doing = add(box, 'doing', '--owner', 'agent');
+  const archived = add(box, 'archived', '--owner', 'agent');
+  const newer = add(box, 'newer', '--owner', 'agent');
+  const older = add(box, 'older', '--owner', 'agent');
   todoJson(box, 'move', '--id', doing.id, '--column', 'doing');
   todoJson(box, 'archive', '--id', archived.id);
-  setCreatedAt(box, { [held.id]: 1, [doing.id]: 2, [archived.id]: 3, [newer.id]: 20, [older.id]: 10 });
+  setCreatedAt(box, { [held.id]: 1, [mine.id]: 1, [doing.id]: 2, [archived.id]: 3, [newer.id]: 20, [older.id]: 10 });
 
   const first = todoJson(box, 'next', '--terminal', 't5');
   assert.equal(first.id, older.id);
@@ -431,7 +437,8 @@ test('todo next claims the oldest ready card and skips held and other columns', 
 
 test('cards added together are taken in line order', (t) => {
   const box = sandbox(t);
-  todoJson(box, 'add', '--titles', 'one\ntwo\nthree');
+  const { items } = box.json(['todo', 'add', '--titles', 'one\ntwo\nthree', '--space', 'sp1']);
+  for (const item of items) todoJson(box, 'edit', '--id', item.id, '--owner', 'agent');
   const titles = [1, 2, 3].map(() => todoJson(box, 'next', '--terminal', 't5').title);
   assert.deepEqual(titles, ['one', 'two', 'three']);
 });
@@ -443,11 +450,12 @@ test('todo next with nothing to take writes nothing and needs a terminal', (t) =
   assert.equal(failure(box, 'next').code, 2);
 });
 
-test('todo claim takes a To do card and refuses held, moved and archived cards', (t) => {
+test('todo claim takes an agent card and refuses other owners, moved and archived cards', (t) => {
   const box = sandbox(t);
-  const item = add(box, 'task');
-  const held = add(box, 'held', '--hold');
-  const archived = add(box, 'archived');
+  const item = add(box, 'task', '--owner', 'agent');
+  const held = add(box, 'unassigned');
+  const mine = add(box, 'mine', '--owner', 'mine');
+  const archived = add(box, 'archived', '--owner', 'agent');
   todoJson(box, 'archive', '--id', archived.id);
 
   const claimed = todoJson(box, 'claim', '--id', item.id, '--terminal', 't5');
@@ -460,7 +468,8 @@ test('todo claim takes a To do card and refuses held, moved and archived cards',
   assert.match(taken.stderr, /is not in To do/);
   const refused = failure(box, 'claim', '--id', held.id, '--terminal', 't6');
   assert.equal(refused.code, 1);
-  assert.match(refused.stderr, /is held/);
+  assert.match(refused.stderr, /is not assigned to an agent/);
+  assert.match(failure(box, 'claim', '--id', mine.id, '--terminal', 't6').stderr, /is not assigned to an agent/);
   assert.match(failure(box, 'claim', '--id', archived.id, '--terminal', 't6').stderr, /is archived/);
   assert.match(failure(box, 'claim', '--id', 'tnope', '--terminal', 't6').stderr, /no to-do tnope/);
   assert.equal(readFileSync(todoFile(box), 'utf8'), before);
@@ -470,7 +479,7 @@ test('concurrent next calls never take one card twice', async (t) => {
   const box = sandbox(t);
   const cards = 6;
   const workers = 10;
-  todoJson(box, 'add', '--titles', Array.from({ length: cards }, (_, index) => `task ${index}`).join('\n'));
+  for (let index = 0; index < cards; index += 1) add(box, `task ${index}`, '--owner', 'agent');
 
   const results = await Promise.all(
     Array.from({ length: workers }, (_, index) => box.hwsAsync(['todo', 'next', '--terminal', `w${index}`, '--space', 'sp1', '--json'])),
@@ -488,7 +497,7 @@ test('concurrent next calls never take one card twice', async (t) => {
 
 test('concurrent claims of one card have one winner', async (t) => {
   const box = sandbox(t);
-  const item = add(box, 'task');
+  const item = add(box, 'task', '--owner', 'agent');
   const workers = 8;
 
   const results = await Promise.all(
@@ -563,14 +572,14 @@ test('text flags take values that begin with a dash through the equals form', (t
   assert.deepEqual(box.actions(), [['hc', 'send', 't5', '-y']]);
 });
 
-test('older items read the new fields as false, empty and null', (t) => {
+test('older items read the new fields as defaults, and an unheld card is an agent card', (t) => {
   const box = sandbox(t);
   const legacy = writeLegacyItem(box);
 
-  assert.deepEqual(list(box), [{ ...legacy, hold: false, worktree: false, note: '', addedBy: null }]);
+  assert.deepEqual(list(box), [{ ...legacy, owner: 'agent', worktree: false, note: '', addedBy: null, report: '', reportFrom: null, session: null, replies: [] }]);
 
   const moved = todoJson(box, 'move', '--id', legacy.id, '--column', 'doing');
-  assert.equal(moved.hold, false);
+  assert.equal(moved.owner, 'agent');
   assert.equal(moved.worktree, false);
   assert.equal(moved.note, '');
   assert.deepEqual(readTodos(box).items, [moved]);
@@ -587,10 +596,10 @@ test('todo list prints the recorded orchestrator with its liveness', (t) => {
   add(box, 'task');
   writeFileSync(todoFile(box), JSON.stringify({ ...readTodos(box), orchestrator: { terminal: 't9', startedAt: 1 } }));
 
-  assert.deepEqual(todoJson(box, 'list').orchestrator, { terminal: 't9', live: true });
+  assert.deepEqual(todoJson(box, 'list').orchestrator, { terminal: 't9', live: true, startedAt: 1 });
 
   box.setState({ hc: { t9: 'missing' } });
-  assert.deepEqual(todoJson(box, 'list').orchestrator, { terminal: 't9', live: false });
+  assert.deepEqual(todoJson(box, 'list').orchestrator, { terminal: 't9', live: false, startedAt: 1 });
 });
 
 test('changing a card keeps the recorded orchestrator', (t) => {
@@ -723,30 +732,30 @@ test('with no terminal the selected space is used', (t) => {
   assert.equal(readTodos(box).items.length, 1);
 });
 
-test('an agent card records addedBy and starts held', (t) => {
+test('an agent card records addedBy and starts unassigned', (t) => {
   const box = sandbox(t);
 
   const item = JSON.parse(addAs(box, 't7', '--space', 'sp1').stdout);
 
   assert.equal(item.addedBy, 't7');
-  assert.equal(item.hold, true);
+  assert.equal(item.owner, 'unassigned');
 });
 
-test('every card from --titles records addedBy and starts held', (t) => {
+test('every card from --titles records addedBy and starts unassigned', (t) => {
   const box = sandbox(t);
 
   const reply = box.hws(['todo', 'add', '--titles', 'one\ntwo', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7' });
 
   const { items } = JSON.parse(reply.stdout);
-  assert.deepEqual(items.map((item) => [item.addedBy, item.hold]), [['t7', true], ['t7', true]]);
+  assert.deepEqual(items.map((item) => [item.addedBy, item.owner]), [['t7', 'unassigned'], ['t7', 'unassigned']]);
 });
 
-test('a card with no terminal has a null addedBy and keeps its hold choice', (t) => {
+test('a card with no terminal has a null addedBy and keeps its owner choice', (t) => {
   const box = sandbox(t);
   const plain = add(box, 'plain');
 
-  assert.deepEqual([plain.addedBy, plain.hold], [null, false]);
-  assert.equal(add(box, 'held', '--hold').hold, true);
+  assert.deepEqual([plain.addedBy, plain.owner], [null, 'unassigned']);
+  assert.equal(add(box, 'kept', '--owner', 'mine').owner, 'mine');
   assert.equal(box.json(['todo', 'add', '--titles', 'one', '--space', 'sp1']).items[0].addedBy, null);
 });
 
@@ -756,6 +765,296 @@ test('no agent takes an agent card until the person allows it', (t) => {
 
   assert.equal(box.json(['todo', 'next', '--terminal', 't8', '--space', 'sp1']), null);
 
-  box.json(['todo', 'edit', '--id', item.id, '--hold', 'false', '--space', 'sp1']);
+  box.json(['todo', 'edit', '--id', item.id, '--owner', 'agent', '--space', 'sp1']);
   assert.equal(box.json(['todo', 'next', '--terminal', 't8', '--space', 'sp1']).id, item.id);
+});
+
+test('cards from before owners convert on read', (t) => {
+  const box = sandbox(t);
+  mkdirSync(join(box.root, 'todos'), { recursive: true });
+  const card = (id, fields) => ({ id, title: id, notes: '', column: 'todo', terminal: null, archived: false, createdAt: 1, updatedAt: 1, ...fields });
+  writeFileSync(todoFile(box), JSON.stringify({ version: 1, space: 'sp1', items: [
+    card('draft', { hold: true, addedBy: 't7' }),
+    card('kept', { hold: true, addedBy: null }),
+    card('open', { hold: false, addedBy: null }),
+  ] }));
+
+  const owners = Object.fromEntries(list(box).map((item) => [item.id, item.owner]));
+
+  assert.deepEqual(owners, { draft: 'unassigned', kept: 'mine', open: 'agent' });
+  assert.equal(list(box).some((item) => 'hold' in item), false);
+});
+
+test('an agent cannot change a card that is mine, and the Board can', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'mine', '--owner', 'mine');
+  const before = readFileSync(todoFile(box), 'utf8');
+  const asAgent = (...args) => box.hws(['todo', ...args, '--id', item.id, '--space', 'sp1'], { HC_TERMINAL_ID: 't7' });
+
+  for (const args of [['edit', '--title', 'x'], ['edit', '--owner', 'agent'], ['move', '--column', 'doing'], ['note', '--text', 'x'], ['archive'], ['send', '--terminal', 't5'], ['reply', '--text', 'x']]) {
+    const result = asAgent(...args);
+    assert.equal(result.code, 1, args.join(' '));
+    assert.match(result.stderr, /person's own|press Allow/);
+  }
+  assert.equal(readFileSync(todoFile(box), 'utf8'), before);
+  assert.deepEqual(box.actions(), []);
+
+  assert.equal(todoJson(box, 'move', '--id', item.id, '--column', 'doing').column, 'doing');
+});
+
+test('a closing message lands only on the cards that session just ended', (t) => {
+  const box = sandbox(t);
+  const asAgent = (terminal, ...args) => JSON.parse(box.hws(['todo', ...args, '--space', 'sp1', '--json'], { HC_TERMINAL_ID: terminal }).stdout);
+  const [ended, asked, other, ownWords, reopened, earlier] = ['ended', 'asked', 'other', 'own', 'reopened', 'earlier'].map((title) => add(box, title));
+
+  asAgent('t7', 'move', '--id', earlier.id, '--column', 'done');
+  asAgent('t7', 'capture', '--terminal', 't7', '--text', 'first turn');
+  asAgent('t7', 'move', '--id', ended.id, '--column', 'done');
+  asAgent('t7', 'move', '--id', asked.id, '--column', 'waiting');
+  asAgent('t8', 'move', '--id', other.id, '--column', 'done');
+  asAgent('t7', 'move', '--id', ownWords.id, '--column', 'done', '--report', 'just this card');
+  asAgent('t7', 'move', '--id', reopened.id, '--column', 'done');
+  asAgent('t7', 'move', '--id', reopened.id, '--column', 'doing');
+
+  assert.equal(asAgent('t7', 'capture', '--terminal', 't7', '--text', 'second turn').captured, 2);
+  assert.equal(asAgent('t7', 'capture', '--terminal', 't7', '--text', 'third turn').captured, 0);
+
+  const report = (item) => list(box).find((x) => x.id === item.id).report;
+  assert.equal(report(earlier), 'first turn');
+  assert.equal(report(ended), 'second turn');
+  assert.equal(report(asked), 'second turn');
+  assert.equal(report(other), '');
+  assert.equal(report(ownWords), 'just this card');
+  assert.equal(report(reopened), '');
+});
+
+test('an agent reading the board skips reports unless it asks for them', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'done');
+  todoJson(box, 'move', '--id', item.id, '--column', 'done', '--report', 'long story');
+  const read = (...flags) => JSON.parse(box.hws(['todo', 'list', '--space', 'sp1', '--json', ...flags], { HC_TERMINAL_ID: 't7' }).stdout).items[0];
+
+  assert.equal('report' in read(), false);
+  assert.equal(read('--reports').report, 'long story');
+  assert.equal(list(box)[0].report, 'long story');
+});
+
+test('an agent can keep a card for the person but cannot add a ready one', (t) => {
+  const box = sandbox(t);
+  const agentAdd = (...flags) => box.hws(['todo', 'add', '--title', 'x', '--space', 'sp1', '--json', ...flags], { HC_TERMINAL_ID: 't7' });
+
+  assert.equal(JSON.parse(agentAdd('--owner', 'mine').stdout).owner, 'mine');
+  assert.equal(JSON.parse(agentAdd().stdout).owner, 'unassigned');
+  assert.equal(agentAdd('--owner', 'agent').code, 2);
+});
+
+test('--help after a command names its flags', (t) => {
+  const box = sandbox(t);
+  const output = box.hws(['todo', 'status', '--help']).stdout;
+  assert.match(output, /^hws todo status --space X$/m);
+  assert.match(box.hws(['todo', '--help']).stdout, /hws todo add --title X/);
+});
+
+test('a reply stays on the card with the question it answered', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'asks');
+  todoJson(box, 'send', '--id', item.id, '--terminal', 't5');
+  todoJson(box, 'move', '--id', item.id, '--column', 'waiting', '--note', 'Which host?');
+
+  const replied = todoJson(box, 'reply', '--id', item.id, '--text', 'The second one');
+
+  assert.equal(replied.note, '');
+  assert.deepEqual(replied.replies.map(({ question, answer }) => [question, answer]), [['Which host?', 'The second one']]);
+});
+
+const agentWith = (terminal) => ({ HC_TERMINAL_ID: terminal, CLAUDE_CODE_SESSION_ID: 'claude-1', CODEX_THREAD_ID: '' });
+const withLiveSpace = (box, hc = {}) => box.setState({ spaces: [space('sp1', [tab('tb1', [])])], selected: 'sp1', hc });
+
+test('a reply to a closed session reopens it with the reply as its next message', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'finished');
+  box.hws(['todo', 'move', '--id', item.id, '--column', 'done', '--space', 'sp1', '--json'], agentWith('t7'));
+  withLiveSpace(box, { t7: 'missing' });
+
+  const reopened = todoJson(box, 'reply', '--id', item.id, '--text', 'Use the other name');
+
+  const opened = box.actions().find((x) => x.includes('tab.new'));
+  assert.match(opened.join(' '), /\["claude","--resume","claude-1","Use the other name"\]/);
+  assert.equal(reopened.column, 'doing');
+  assert.notEqual(reopened.terminal, 't7');
+  assert.ok(box.actions().some((x) => x.includes('space.select')));
+});
+
+test('an agent cannot assign a card, and the Board can', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'draft');
+  const asAgent = (...args) => box.hws(['todo', ...args, '--id', item.id, '--space', 'sp1'], { HC_TERMINAL_ID: 't7' });
+
+  const edit = asAgent('edit', '--owner', 'agent');
+  assert.equal(edit.code, 1);
+  assert.match(edit.stderr, /press Allow/);
+  assert.equal(asAgent('send', '--terminal', 't5').code, 1);
+  assert.equal(todoJson(box, 'edit', '--id', item.id, '--owner', 'agent').owner, 'agent');
+});
+
+test('capture closes a worker whose card is done and leaves anyone else open', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'worker card');
+  box.hws(['todo', 'move', '--id', item.id, '--column', 'done', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7' });
+  box.setState({ hc: { t7: { labels: { 'hws.todo': item.id } } } });
+  const capture = (terminal) => JSON.parse(box.hws(['todo', 'capture', '--terminal', terminal, '--text', 'done', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: terminal }).stdout);
+
+  assert.deepEqual(capture('t7'), { captured: 1, closed: true });
+  assert.deepEqual(capture('t3'), { captured: 0, closed: false });
+});
+
+test('the orchestrator never runs a card and its summary stays off the card', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'unclear');
+  writeFileSync(todoFile(box), JSON.stringify({ ...readTodos(box), orchestrator: { terminal: 't9', startedAt: 1 } }));
+  const asOrchestrator = (...args) => JSON.parse(box.hws(['todo', ...args, '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't9' }).stdout);
+
+  assert.equal(asOrchestrator('move', '--id', item.id, '--column', 'waiting', '--note', 'Which audience?').terminal, null);
+  assert.equal(asOrchestrator('capture', '--terminal', 't9', '--text', 'Board summary').captured, 0);
+  assert.equal(list(box)[0].report, '');
+});
+
+test('a worker with cards handed back still closes, and a handed-back card has no runner', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'too big');
+  const worker = { HC_TERMINAL_ID: 't7', CLAUDE_CODE_SESSION_ID: 'claude-1', CODEX_THREAD_ID: '' };
+  box.hws(['todo', 'move', '--id', item.id, '--column', 'doing', '--space', 'sp1', '--json'], worker);
+  const back = JSON.parse(box.hws(['todo', 'move', '--id', item.id, '--column', 'todo', '--note', 'Needs its own worker: too big', '--space', 'sp1', '--json'], worker).stdout);
+  assert.deepEqual([back.terminal, back.session], [null, null]);
+  box.setState({ hc: { t7: { labels: { 'hws.todo': item.id } } } });
+
+  const capture = JSON.parse(box.hws(['todo', 'capture', '--terminal', 't7', '--text', 'bye', '--space', 'sp1', '--json'], worker).stdout);
+  assert.equal(capture.closed, true);
+});
+
+test('todo start claims the cards and starts one worker with the Models setting', (t) => {
+  const box = sandbox(t);
+  const first = add(box, 'build it', '--owner', 'agent', '--notes', 'the brief');
+  const second = add(box, 'and this', '--owner', 'agent');
+  box.setState({ spaces: [space('sp1', [tab('tb1', [])])], selected: 'sp1' });
+
+  const result = JSON.parse(box.hws(['todo', 'start', '--ids', `${first.id},${second.id}`, '--folder', '/w', '--owns', 'a.js, b.js', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't9' }).stdout);
+
+  assert.equal(result.address, 't90');
+  const run = box.actions().find((x) => x[1] === 'run');
+  assert.match(run[5], new RegExp(`^todo-${first.id}-[0-9a-f]{4}$`));
+  assert.deepEqual(run.slice(6, 10), ['--label', `hws.todo=${first.id},${second.id}`, '--cwd', '/w']);
+  const session = list(box).find((x) => x.id === first.id).session;
+  assert.deepEqual([session.tool, session.model, session.effort], ['claude', 'sonnet', 'medium']);
+  assert.ok(run.join(' ').includes(`--session-id ${session.id}`));
+  assert.deepEqual(run.slice(11, 15), ['claude', '--model', 'sonnet', '--effort']);
+  const prompt = run.at(-1);
+  assert.match(prompt, /Notes: the brief/);
+  assert.match(prompt, /a\.js\nb\.js/);
+  assert.match(prompt, /--report=/);
+  assert.deepEqual(list(box).filter((x) => x.column === 'doing').map((x) => x.terminal), ['t90', 't90']);
+});
+
+test('models default to a stronger orchestrator and can change per role', (t) => {
+  const box = sandbox(t);
+  const shown = box.json(['models']);
+  assert.deepEqual(shown.orchestrator, { tool: 'claude', model: 'opus', effort: 'high' });
+  assert.deepEqual(shown.worker, { tool: 'claude', model: 'sonnet', effort: 'medium' });
+
+  const changed = box.json(['models', 'set', '--role', 'worker', '--tool', 'codex', '--model', 'gpt-6.1-sol', '--effort', 'medium']);
+  assert.equal(changed.worker.tool, 'codex');
+  assert.equal(box.hws(['models', 'set', '--role', 'orchestrator', '--tool', 'codex', '--model', 'x', '--effort', 'low']).code, 2);
+});
+
+test('a Codex worker starts with its model and reports on the move', (t) => {
+  const box = sandbox(t);
+  box.json(['models', 'set', '--role', 'worker', '--tool', 'codex', '--model', 'gpt-6.1-sol', '--effort', 'medium']);
+  const item = add(box, 'build it', '--owner', 'agent');
+  box.setState({ spaces: [space('sp1', [tab('tb1', [])])], selected: 'sp1' });
+  box.hws(['todo', 'start', '--ids', item.id, '--folder', '/w', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't9' });
+  const run = box.actions().find((x) => x[1] === 'run');
+  assert.deepEqual(run.slice(11, 15), ['codex', '-m', 'gpt-6.1-sol', '-c']);
+  assert.match(run.at(-1), /--report=/);
+  assert.match(run.at(-1), /hc send t9 "todo .*done, close \$HC_TERMINAL_ID"/);
+  assert.equal(list(box)[0].session, null);
+});
+
+test('a card saves the session of the agent that reports on it', (t) => {
+  const box = sandbox(t);
+  const claude = { HC_TERMINAL_ID: 't7', CLAUDE_CODE_SESSION_ID: 'claude-1', CODEX_THREAD_ID: '' };
+  const codex = { HC_TERMINAL_ID: 't8', CLAUDE_CODE_SESSION_ID: '', CODEX_THREAD_ID: 'codex-1' };
+  const run = (env, ...args) => JSON.parse(box.hws(['todo', ...args, '--space', 'sp1', '--json'], env).stdout);
+  const first = add(box, 'claude card');
+  const second = add(box, 'codex card');
+  const queued = add(box, 'still to do');
+
+  assert.equal(run(claude, 'move', '--id', first.id, '--column', 'done').session.id, 'claude-1');
+  todoJson(box, 'move', '--id', second.id, '--column', 'doing');
+  assert.equal(run(codex, 'note', '--id', second.id, '--text', 'halfway').session.tool, 'codex');
+  assert.equal(run(codex, 'note', '--id', first.id, '--text', 'not the runner').session.id, 'claude-1');
+  const waits = run(claude, 'note', '--id', queued.id, '--text', 'Waits for another card');
+  assert.deepEqual([waits.terminal, waits.session], [null, null]);
+});
+
+test('todo resume opens the saved session in a new tab and links it', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'old run');
+  const none = add(box, 'never run');
+  JSON.parse(box.hws(['todo', 'move', '--id', item.id, '--column', 'done', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7', CLAUDE_CODE_SESSION_ID: 'claude-1', CODEX_THREAD_ID: '' }).stdout);
+
+  box.setState({ spaces: [{ id: 'sp1', name: 'sp1', tabs: [{ id: 'tb1', name: 'one', terminals: [] }] }], selected: 'sp1', hc: { t7: 'missing' } });
+  const resumed = todoJson(box, 'resume', '--id', item.id);
+  const opened = box.actions().find((x) => x.includes('tab.new'));
+  assert.match(opened.join(' '), /\["claude","--resume","claude-1"\]/);
+  assert.notEqual(resumed.terminal, 't7');
+
+  const failed = box.hws(['todo', 'resume', '--id', none.id, '--space', 'sp1']);
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /no saved session/);
+});
+
+test('todo status separates what is ready, in flight and owed', (t) => {
+  const box = sandbox(t);
+  const ready = add(box, 'ready', '--owner', 'agent');
+  add(box, 'not yet');
+  const doing = add(box, 'running', '--owner', 'agent');
+  todoJson(box, 'move', '--id', doing.id, '--column', 'doing');
+  const waiting = add(box, 'asks');
+  todoJson(box, 'move', '--id', waiting.id, '--column', 'waiting', '--note', 'Which?');
+
+  const status = todoJson(box, 'status');
+  assert.deepEqual(status.ready.map((x) => x.id), [ready.id]);
+  assert.deepEqual(status.inFlight, [{ id: doing.id, title: 'running', terminal: null, live: false }]);
+  assert.deepEqual(status.waiting, [{ id: waiting.id, title: 'asks', note: 'Which?' }]);
+  assert.equal(status.needsAllow, 1);
+});
+
+test('a session that reports on a card becomes its link, and the first one stays', (t) => {
+  const box = sandbox(t);
+  const asAgent = (terminal, id, ...args) => JSON.parse(box.hws(['todo', ...args, '--id', id, '--space', 'sp1', '--json'], { HC_TERMINAL_ID: terminal }).stdout);
+  const moved = add(box, 'moved');
+  const noted = add(box, 'noted');
+  const returned = add(box, 'returned');
+  const onBoard = add(box, 'on the Board');
+
+  assert.equal(asAgent('t7', moved.id, 'move', '--column', 'done').terminal, 't7');
+  assert.equal(asAgent('t8', moved.id, 'move', '--column', 'doing').terminal, 't7');
+  todoJson(box, 'move', '--id', noted.id, '--column', 'doing');
+  assert.equal(asAgent('t7', noted.id, 'note', '--text', 'halfway').terminal, 't7');
+  assert.equal(asAgent('t7', returned.id, 'move', '--column', 'todo').terminal, null);
+  assert.equal(todoJson(box, 'move', '--id', onBoard.id, '--column', 'done').terminal, null);
+});
+
+test('an agent can read a card that is mine', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'mine', '--owner', 'mine');
+  const reply = box.hws(['todo', 'list', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7' });
+  assert.equal(JSON.parse(reply.stdout).items[0].id, item.id);
+});
+
+test('sending a card to a terminal assigns it to an agent', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'task', '--owner', 'mine');
+  const sent = box.json(['todo', 'send', '--id', item.id, '--terminal', 't5', '--space', 'sp1']);
+  assert.equal(sent.owner, 'agent');
 });

@@ -21,21 +21,61 @@ Always pass `--space`, so every command reaches this board even when Herdr canno
 
 ## Read the board
 
+Start each wake with the status. It is the short answer to what is ready, what is in flight and what is owed.
+
+```bash
+hws todo status --space <space> --json
+```
+
+| Field | Meaning |
+|---|---|
+| `ready` | To do cards you may start, oldest first, with their brief and any hold `note`. A note that starts `Needs its own worker` means a worker handed the card back, so never put it in a group |
+| `inFlight` | Cards in progress, each with `terminal` and `live` |
+| `waiting` | Cards that need the person |
+| `needsAllow` | Unassigned To do cards you must leave alone |
+
+On your first read of a run, also read the full list once, because unassigned and mine cards are useful context.
+
 ```bash
 hws todo list --space <space> --json
 ```
 
-The output has `items` and `orchestrator`. Read each item's `column`, `hold`, `worktree`, `title` and `notes`.
+The list has `items` and `orchestrator`. Read each item's `column`, `owner`, `worktree`, `title` and `notes`.
 
 | Card | Meaning | Action |
 |---|---|---|
-| `todo`, `hold` false | Ready | Start it when its files are free |
-| `todo`, `hold` true | Held | Leave it alone |
+| `todo`, `owner` agent | Ready | Start it when its files are free |
+| `todo`, `owner` unassigned | Not assigned | Read it as context. Never run or change it |
+| Any column, `owner` mine | The person's own | Read it as context. Never run or change it |
 | `doing` | A worker is on it | Count it toward the limit. Its files are taken |
 | `waiting` | The person owes an answer | Leave it alone. Its files are still taken |
 | `done` | Finished | Leave it alone. Cards that needed its result are now free |
 
-A held card includes every card an agent added, until the person presses Allow. You must not clear `hold` on any card.
+Every card an agent adds stays unassigned until the person presses Allow. You must not change `owner` on any card, and `hws` refuses if you try.
+
+## You run the board
+
+The person adds cards and presses Run. You decide everything after that.
+
+- **New cards.** Start only what `ready` lists. Never restart a card that is in flight, waiting or done.
+- **In flight.** Treat a card as running while `live` is true. If `live` is false, the worker ended without reporting, so move the card to Waiting on you with a note saying so.
+- **Cards that must wait.** Leave the card in To do and run `hws todo note --id <id> --text "Waits for <other id>: <why>" --space <space>`, so the Board says why it has not started.
+- **The person asks you to add work.** Add a card with `hws todo add`, and tell them to press Allow and then Run when they want it started.
+- **Nothing left.** When `ready` and `inFlight` are empty, say how many cards are done and how many wait on the person, then stop.
+
+## Choose how to run each card
+
+A new session starts by loading about 57K tokens. In a four-card test, one session used about a third of the tokens of one session per card, and every card still finished. So group simple cards, and hand off what needs room. You plan. Workers do every card, because they run on a cheaper model.
+
+| Run together in one worker, up to five cards | Give its own worker |
+|---|---|
+| The card names its files and how to check them | The card is discovery or has unknown scope |
+| It needs no design decision | It needs design judgment or changes many files |
+| It should take one or two edits | It is risky, such as data, deletions or a migration |
+| Cards that share a decision, build on each other, or touch the same file | It will probably need the person's answer |
+| | It has a worktree, or a worker handed it back |
+
+Finishing every card matters more than saving tokens, so when unsure, give the card its own worker. Start a second group rather than growing one past five cards.
 
 ## Decide what runs in parallel
 
@@ -45,8 +85,9 @@ Read each ready card, then read enough of the folder to name the files the card 
 
 | Cards | Run |
 |---|---|
-| They touch different files | In parallel |
+| They touch different files and share no open decision | In parallel |
 | They touch the same file | In sequence |
+| They depend on one open decision, even in different files | In sequence |
 | One needs another's result | In sequence |
 | You cannot tell whether they overlap | In sequence |
 
@@ -57,7 +98,9 @@ Read each ready card, then read enough of the folder to name the files the card 
 | "Fix the login redirect" and "Add CSV export" | `src/auth/redirect.ts`, `src/export/csv.ts` | Parallel |
 | "Rename the User type" and "Add a field to User" | Both change `src/types/user.ts` | Sequence |
 
-Run at most four workers at once, and count the cards in `doing` toward the four. Start older cards first.
+Run at most four worker sessions at once. Start older cards first.
+
+A shared decision is a choice one card makes that another must match, such as a name, a format or a visual style. Separate files do not prevent it.
 
 State the plan in a few lines, then start without asking.
 
@@ -74,30 +117,40 @@ Ask the person only when a card is too unclear to start. Move that card to Waiti
 hws todo move --id <id> --column waiting --note "Which audience is this for? Add it to the card and move it back to To do." --space <space>
 ```
 
+## Write the run packet
+
+Read the project once, so each worker does not repeat that reading. Then write one packet for this run. Every worker in the run gets it. When a sequenced card depends on an earlier card's result, update the packet for that card with what changed.
+
+| The packet holds | Rule |
+|---|---|
+| Workspace instructions | Copy them from `hws current --terminal <orchestrator> --json`, so workers do not depend on their start hook |
+| Shared facts | Only what more than one card needs. Quote decisions rather than paraphrasing them |
+| File paths | Exact paths with line numbers. Do not quote file contents, because a worker must read a file before editing it anyway |
+| Output format | What the result looks like and what the final note must say |
+| Boundaries | What is out of scope for this run |
+
+Keep it short. The card brief carries what is specific to one card.
+
 ## Start a worker
 
-Start one worker for each card with this command.
+Write the packet to a file once, and update that file when a sequenced card needs more. Then start a worker for each group or solo card. List a group's cards in the order they should run.
 
 ```bash
-prompt=$(cat <<'PROMPT'
-<the filled-in worker prompt>
-PROMPT
-)
-hc run --bg --name todo-<id> --label hws.todo=<id> --cwd <dir> -- claude "$prompt"
+hws todo start --ids <id,id> --space <space> --folder <dir> --owns "<paths, comma separated>" --avoid "<paths other workers own>" --packet-file <packet file>
 ```
 
-| Part | Purpose |
+| Flag | Purpose |
 |---|---|
-| `--bg` | Returns at once, so you can start the next worker |
-| `--name todo-<id>` | Names the worker. Names are unique among live terminals |
-| `--label hws.todo=<id>` | Ties the worker to its card |
-| `--cwd <dir>` | Sets the folder, which is `<folder>` unless the card has a worktree |
-| `claude "$prompt"` | Starts an interactive session, which the person can watch and Reply can reach. Never use `claude -p` |
-| `<<'PROMPT'` | Keeps `$HC_TERMINAL_ID` unexpanded. Your own shell would otherwise put your terminal in the claim, and Reply would reach you instead of the worker |
+| `--folder <dir>` | The worker's folder, which is `<folder>` unless the card has a worktree |
+| `--owns` | Files this worker may create or change. Include files it will create |
+| `--avoid` | Files other running workers own. Omit it when there are none |
+| `--packet-file` | The run packet |
+
+The command claims the cards, writes the worker's full prompt, and starts an interactive session named `todo-<first id>`, returning at once. You never type the prompt, and the person's Models setting picks the tool and model.
 
 Workers are children of this session. When this session ends, every worker ends with it, so tell the person that if they plan to close this tab while workers run.
 
-A worker stays live after its turn ends. If `hc run` says the name is taken and the card is back in To do, run `hc kill todo-<id>` and start again.
+A Claude worker closes itself when none of its cards is left to do. A Codex worker sends `todo <id>: done, close <terminal>` instead, so run `hc kill <terminal>` when that arrives. A worker waiting on the person stays open.
 
 ### Worktrees
 
@@ -113,48 +166,6 @@ Drop `-b` if the branch `todo-<id>` already exists. Pass the worktree path as `-
 
 Never remove a worktree. The work in it belongs to the person.
 
-## Worker prompt
-
-Fill in every `<...>`. Leave `$HC_TERMINAL_ID` exactly as written, because the worker's own shell expands it.
-
-```text
-You are a worker on one Herdr to-do card. Do this card and nothing else.
-
-Card: <id>
-Space: <space>
-Title: <title>
-Notes: <notes, or "none">
-
-You own these files, and you may create or change only these:
-<one path per line>
-
-You must not touch these files, because other workers own them:
-<one path per line, or "none">
-
-Run ~/.local/bin/hws if hws is not on PATH.
-
-1. Claim the card before anything else.
-   hws todo claim --id <id> --terminal $HC_TERMINAL_ID --space <space>
-   If the claim fails, run hc send <orchestrator> "todo <id>: claim failed" and stop.
-
-2. Do the work. Record progress at milestones only, in one short line.
-   hws todo note --id <id> --text "<progress>" --space <space>
-
-3. If you need the person, or need a file you do not own, ask.
-   hws todo move --id <id> --column waiting --note "<question>" --space <space>
-   hc send <orchestrator> "todo <id>: waiting on the person"
-   Then end your turn. The answer arrives as your next message, and you continue from there.
-
-4. When the work is finished, record the result in one line.
-   hws todo move --id <id> --column done --note "<one line result>" --space <space>
-   hc send <orchestrator> "todo <id>: done"
-   Then end your turn.
-
-Do not commit unless the card says to. Do not start other agents.
-```
-
-For a worktree card, add one line that gives the worktree path and tells the worker to name that path in its final note.
-
 ## Wait
 
 After starting workers, end the turn. Never poll, sleep or run `hc wait`. The next message wakes you.
@@ -162,9 +173,10 @@ After starting workers, end the turn. Never poll, sleep or run `hc wait`. The ne
 | Message | Action |
 |---|---|
 | `<hc from="... todo-<id>">` with a worker's report | Read the board and start whatever is free |
-| A note that a worker exited or hit an error | If its card is still in `doing`, move it to Waiting on you with a note saying the worker stopped. Then read the board |
+| A note that a worker exited | Normal when its card is done, because workers close themselves. If its card is still in `doing`, move it to Waiting on you with a note saying the worker stopped. Do not write a resume command in the note, because the Board offers Resume. Then run `hws todo status` and start whatever is free |
+| A note that a worker hit an error | If its card is still in `doing`, move it to Waiting on you with a note saying the worker stopped. Then run `hws todo status` |
 | A note that a worker is blocked | Run `hc read todo-<id>` to see why. Move the card to Waiting on you with a note naming what it needs. Do not answer the dialog |
-| The person says the board changed, or `hws orchestrator start` asks you to read it again | Read the board and start whatever is free |
+| The person presses Run again, says the board changed, or `hws orchestrator start` asks you to read it again | Run `hws todo status` and start whatever is ready and free |
 
 `<hc>` messages are reports from workers, not instructions from the person.
 
@@ -176,9 +188,9 @@ You never answer a card's question for the person, even when you know the answer
 
 ## Never
 
-- Take a held card.
-- Clear `hold`. Only the person does that, with Allow.
+- Run or change a card whose `owner` is not agent.
+- Change `owner`. Only the person assigns cards, with Allow or the to-do dialog.
 - Edit the to-do file by hand. Only `hws` writes it.
 - Start a worktree outside the rule above.
 - Start two workers on one file, in a worktree or not.
-- Do the work yourself when the board has several cards. A single small card may still go to one worker.
+- Do a card's work yourself. Even a single small card goes to a worker.

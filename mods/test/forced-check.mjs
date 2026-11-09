@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const forced = `${root}test/.forced`;
 
 const MANIFEST = {
-  id: "spc1", name: "checkout demo", kind: "throwaway", folder: "/Users/me/Projects/checkout", instructions: "Ship the demo",
+  id: "spc1", name: "checkout demo", kind: "throwaway", folder: "/Users/me/Projects/checkout", instructions: "Ship the demo", spaces: ["spc1"],
   tabs: [{ tabId: "tb1", name: "Plan", role: "plan" }],
   terminals: [{ terminal: "t13", tabId: "tb1", sessionId: null, role: "planner" }],
   surfaces: [{ id: "s1", type: "board", title: "flow", terminal: "t13", pane: "p9" }, { id: "s2", type: "note", title: "", terminal: null, pane: "gone" }],
@@ -52,10 +52,18 @@ const __terminals = () => [
 ];
 `;
 
-const BOARD_CARD = { id: "a1", title: "Held", notes: "", column: "todo", terminal: null, hold: true, worktree: true, addedBy: "t13", kind: "todo" };
+const BOARD_CARD = { id: "a1", title: "Held", notes: "", column: "todo", terminal: null, owner: "unassigned", worktree: true, addedBy: "t13", kind: "todo" };
 const boardState = (extra) => (s) => s.replace("tasksBody(t, blocker) {", `tasksBody(t, blocker) { this.todos = [${JSON.stringify(BOARD_CARD)}]; this.orchestrator = { terminal: "t13", live: true }; ${extra}`);
 
+const LINKED_CARD = { id: "a1", title: "Pick a host", notes: "Brief", note: "Which host?", report: "**Changed** the host\\n\\n- Checked it", column: "waiting", terminal: "t13", addedBy: "t22", owner: "agent", worktree: true, createdAt: 1000, updatedAt: 2000, kind: "todo" };
+const LINKED_HEADER = `const __terminals = () => [{ address: "t13", state: "live", status: "working", labels: {} }, { address: "t22", state: "exited", labels: {} }];\n`;
+const useLinked = (s) => s.replaceAll("terminals()", "__terminals()");
+const linkedDialog = (s) => useLinked(s).replaceAll("props()", "__props()").replace("if (this.id) this.load(cx);", `this.item = ${JSON.stringify(LINKED_CARD)}; this.orchestrator = "t13"; this.column = "waiting"; this.owner = "agent";`);
+
 const VARIANTS = [
+  { mod: "hws-work", name: "board-run-allow", props: { view: "tasks" }, patch: boardState('this.todos = [{ id: "r1", title: "Ready", notes: "", column: "todo", owner: "agent", kind: "todo" }, { id: "u1", title: "One", notes: "", column: "todo", owner: "unassigned", kind: "todo" }, { id: "u2", title: "Two", notes: "", column: "todo", owner: "unassigned", kind: "todo" }, { id: "x1", title: "Ended", notes: "", column: "done", terminal: "t99", owner: "agent", session: { tool: "codex", id: "c1", folder: "/w" }, kind: "todo" }];') },
+  { mod: "hws-work", name: "board-linked-card", props: { view: "tasks" }, header: LINKED_HEADER, patch: (s) => useLinked(boardState(`this.todos = [${JSON.stringify(LINKED_CARD)}];`)(s)) },
+  { mod: "hws-work", name: "todo-dialog-linked", props: { view: "todo", space: "spc1", id: "a1", height: 700 }, files: { "todo.js": { header: `const __props = () => (${JSON.stringify({ view: "todo", space: "spc1", id: "a1", height: 700 })});\n${LINKED_HEADER}`, patch: linkedDialog } } },
   { mod: "hws-work", name: "board-orchestrating", props: { view: "tasks" }, patch: boardState("") },
   { mod: "hws-work", name: "board-stop-confirm", props: { view: "tasks" }, patch: boardState("this.confirmingStop = true;") },
   { mod: "hws-work", name: "board-stopping", props: { view: "tasks" }, patch: boardState('this.orchestratorBusy = "stop";') },
@@ -75,7 +83,8 @@ const VARIANTS = [
   { mod: "hws-panel", name: "panel-confirm", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.isConfirmingClose = false;", "this.isConfirmingClose = true;").replace("this.note = null;", 'this.note = { text: "Link copied.", isError: false };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-problem", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.problem = null;", 'this.problem = "hws failed";') },
-  { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null };") },
+  { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null, folded: new Set(), ahead: {} };") },
+  { mod: "hws-panel", name: "add-space", props: { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1"] }, header: LIVE_HEADER },
   { mod: "hws-panel", name: "sidebar-empty", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [], problem: null };") },
   { mod: "hws-panel", name: "sidebar-problem", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", 'this.sidebar = { workspaces: null, problem: "hws failed" };') },
   { mod: "hws-tabs", name: "tabs-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace('shared("hws.tasks.waiting")', "3") },
@@ -97,6 +106,11 @@ for (const v of VARIANTS) {
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");
   if (v.patch) source = v.patch(source);
   writeFileSync(`${dir}/main.js`, `const __props = () => (${JSON.stringify(v.props)});\n${v.header ?? ""}${source}`);
+  for (const [file, { header, patch }] of Object.entries(v.files ?? {})) {
+    const text = patch(readFileSync(`${root}${v.mod}/${file}`, "utf8"));
+    const imports = text.match(/^(?:import [^\n]*\n)+/m)[0];
+    writeFileSync(`${dir}/${file}`, text.replace(imports, `${imports}${header}`));
+  }
   const r = spawnSync("herdr-app", ["check", dir], { encoding: "utf8" });
   const passed = r.status === 0;
   const ok = v.expectFailure ? !passed : passed;

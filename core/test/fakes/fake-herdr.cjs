@@ -63,6 +63,14 @@ if (action === 'space.new') {
   reply({ space: id, tab: tab.id, terminal: tab.terminals[0].terminal });
 }
 
+if (action === 'tab.close') {
+  const owner = state.spaces.find((item) => item.tabs.some((one) => one.id === flags.id));
+  if (!owner) fail(`no tab ${flags.id}`);
+  owner.tabs = owner.tabs.filter((one) => one.id !== flags.id);
+  save();
+  reply({ ok: true });
+}
+
 if (action === 'tab.new') {
   const spaceId = flags.space ?? state.selected;
   const space = state.spaces.find((item) => item.id === spaceId);

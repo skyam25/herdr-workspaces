@@ -19,7 +19,7 @@
 // As Shepherdr's chat (docs/chat.md): a CLI stopped on its own first screen (trust, theme, sign
 // in) shows it as a card to answer here (screens.js; a task worker's also in its Assistant's
 // chat); an agent whose resumed session is gone starts a new one by itself (lostSession());
-// /model opens the model picker instead of reaching the CLI; long replies fold with Show more;
+// /model opens the model picker instead of reaching the CLI; long replies open in full and fold with Show less;
 // a day's line (Today, Yesterday, ...) goes where a new day starts.
 
 import { View, div, svg, image } from "gpui-kit";
@@ -74,7 +74,7 @@ import { dayLabel, dayOf } from "./days.js";
 import { CallScreen } from "./call-screen.js";
 import { on as addonOn } from "./addons.js";
 import { note } from "./usage.js";
-import { statusLines } from "./statusline.js";
+import { statusLines, statusParts } from "./statusline.js";
 import { insertedRange, isImageNames, namesMatch, imagePaths } from "./clipboard.js";
 import { imageToken, nextImageNumber, numberForSend, orphanedImages, withoutLeadingLabels } from "./imagelabels.js";
 
@@ -84,7 +84,9 @@ const PAGE = 200;
 // oldest go (scrolling to the top reads them again).
 const KEEP = 2000;
 // The conversation's width at most, in px: lines stay readable in a wide pane.
-const COLUMN = 760;
+const COLUMN = 1000;
+// How long the width must hold still before rows are measured again.
+const WIDTH_SETTLE_MS = 150;
 const FLIP_FADE_MS = 160;
 const REVEAL_LATEST_MS = 350;
 const CLI_STATUS_MS = 3000;
@@ -140,7 +142,7 @@ const ACT = 22, ACT_GAP = 2, BAND_IN = 4, ACT_ROW = BAND_IN + ACT, GAP = 16;
 // inside the row's top and bottom edges (QUIET_PY, then the small text's own leading; the
 // baseline sits a little higher than the caps sit low), measured from the window.
 const QUIET_PY = 1, QUIET_IN = { top: 5, bottom: 6 };
-// A long reply folds (Show more) when it would run past FOLD_TALL lines (estimated from its
+// A long reply can fold (Show less) when it would run past FOLD_TALL lines (estimated from its
 // words), to its first FOLD lines; LINE_H is a reply's line in px.
 const FOLD = 20, FOLD_TALL = 28, LINE_H = 21;
 // A session that is gone (LOST), what the new agent hears (lostMessage) and the chat's note: core/chat-view.js, as
@@ -465,8 +467,8 @@ export default class Chat extends View {
     this.screenErr = new Map();
     // Agents whose lost session this chat already started again (lostSession()).
     this.lostTried = new Set();
-    // Long replies opened with Show more (by message id).
-    this.unfolded = new Set();
+    // Long replies folded with Show less (by message id).
+    this.collapsed = new Set();
     // Find in the chat (Ctrl+F): open, the current match.
     this.finding = false;
     this.findIdx = 0;
@@ -2131,7 +2133,7 @@ export default class Chat extends View {
     if (!target) return;
     this.pinned = false;
     // A jump into a folded reply opens it.
-    if (target.blk) this.unfolded.add(target.blk);
+    if (target.blk) this.collapsed.delete(target.blk);
     this.scroll.scroll_to_item(rows.indexOf(target), "center");
     this.flash = { id: target.id, on: true };
   }
@@ -2960,7 +2962,7 @@ export default class Chat extends View {
       if (x.kind === "agent") {
         const ps = parts(x.text);
         const first = out.length;
-        // A long reply: its first lines (the part where they end cut off there), then Show more.
+        // A long reply: whole with Show less, or once folded its first lines (the part where they end cut off there) with Show more.
         const fold = this.foldOf(x, ps);
         const clip = (n) => (fold && !fold.open ? fold.clips.get(n) : undefined);
         if (ps.length === 1 && ps[0].type === "md") out.push(clip(0) ? { ...x, clip: clip(0) } : x);
@@ -3025,7 +3027,7 @@ export default class Chat extends View {
     const w = Math.max(240, Math.floor(Math.min(this.width, COLUMN) * 0.8)) - 24;
     const est = ps.map((p) => (p.type === "md" ? wrapLines(p.text, w) * LINE_H : 34 + 16 + p.code.split("\n").length * 19));
     if (est.reduce((a, b) => a + b, 0) <= FOLD_TALL * LINE_H) return null;
-    if (this.unfolded.has(x.id)) return { open: true, clips: new Map(), last: ps.length - 1 };
+    if (!this.collapsed.has(x.id)) return { open: true, clips: new Map(), last: ps.length - 1 };
     const clips = new Map();
     let left = FOLD * LINE_H, last = ps.length - 1;
     for (let n = 0; n < ps.length; n++) {
@@ -3042,8 +3044,8 @@ export default class Chat extends View {
   // down brings its start back into view.
   toggleFold(row, rows) {
     this.pinned = false;
-    if (!this.unfolded.has(row.of)) { this.unfolded.add(row.of); return; }
-    this.unfolded.delete(row.of);
+    if (this.collapsed.has(row.of)) { this.collapsed.delete(row.of); return; }
+    this.collapsed.add(row.of);
     const i = rows.findIndex((r) => r.blk === row.of && r.kind !== "replyref");
     if (i >= 0 && i <= (this.range?.start ?? 0)) this.scroll.scroll_to_item(i, "top");
   }
@@ -4158,9 +4160,14 @@ export default class Chat extends View {
   cliStatus(t) {
     const lines = lastCliStatus.get(this.addr);
     if (!lines?.length) return null;
-    return v_flex().flex_none().w_full().max_w(COLUMN + 28).mx_auto().px(20).pt(6).gap(1)
-      .font_family(settings().font_family ?? "JetBrains Mono").text_size(11.5).text_color(t.muted)
-      .children(lines.map((line, i) => div().id(`chat-cli-status-${i}`).w_full().truncate().child(line)));
+    const meter = (fill) => div().w(44).h(4).flex_none().rounded(2).bg(t.border).child(div().h_full().rounded(2).bg(t.muted).w(Math.round(44 * fill)));
+
+    // Lines up with the words inside the composer: its outer room, border and inner room.
+    return h_flex().flex_none().flex_wrap().w_full().max_w(COLUMN + 28).mx_auto().px(27).pt(6).gap_x(14).gap_y(2).items_center()
+      .text_size(12).text_color(t.dim)
+      .children(statusParts(lines).map((part, i) => h_flex().id(`chat-cli-status-${i}`).max_w_full().gap(6).items_center()
+        .when(part.meter !== undefined, (el) => el.child(meter(part.meter)))
+        .child(div().min_w(0).truncate().child(part.text))));
   }
 
   // ---- alerts ---------------------------------------------------------------------------------
@@ -4353,7 +4360,11 @@ export default class Chat extends View {
     const root = v_flex().id("chat").size_full().bg(t.background).text_color(t.foreground).text_size(13)
       .opacity(this.revealed && !leaving ? 1 : 0).transition("opacity", { duration: FLIP_FADE_MS, easing: "ease-out" })
       .on_size_change((size, cx) => {
-        if (Math.abs(size.width - this.width) > 1) this.width = size.width;
+        if (Math.abs(size.width - this.width) > 1) {
+          this.width = size.width;
+          if (this.sized) this.settleWidth(cx);
+        }
+        this.sized = true;
         this.height = size.height;
         if (this.pinned) this.stick = true;
         this.noteArea(null);
@@ -4420,7 +4431,7 @@ export default class Chat extends View {
     // What sits under the list (an ask card, the working line) changes its height: stay on the newest.
     const below = `${this.asks.length}|${this.sasks.map((a) => a.name + (a.kept ? "+" : "")).join(",")}|${this.wasks.map((a) => a.id).join(",")}|${[this.addr, ...this.workerTasks().keys()].map((a) => openCard(a)?.id ?? "").join("")}|${st}|${this.focused}|${this.queue.length}|${Boolean(this.call)}|${this.files.length}|${Boolean(this.quote)}`;
     if (below !== this.below) { this.below = below; if (this.pinned) this.stick = true; }
-    if (Math.abs(this.heightsFor - this.width) > 1) { this.heights.clear(); this.measuredAt.clear(); this.heightsFor = this.width; this.measureGen++; }
+    if ((!this.settling || !this.heightsFor) && Math.abs(this.heightsFor - this.width) > 1) { this.heights.clear(); this.measuredAt.clear(); this.heightsFor = this.width; this.measureGen++; }
     const keys = rows.map((x) => this.key(x));
     // Every size a real number of pixels: one NaN, zero or runaway height leaves the list blank.
     const sizes = rows.map((x, i) => {
@@ -4513,6 +4524,21 @@ export default class Chat extends View {
       .child(div().flex_none().h(12));
   }
 
+  // A divider drag changes the width every frame. Rows keep their views and heights until the
+  // width holds still, then measure once.
+  settleWidth(cx) {
+    this.widthAt = Date.now();
+    if (this.settling) return;
+    this.settling = true;
+    const check = (cx) => {
+      const left = WIDTH_SETTLE_MS - (Date.now() - this.widthAt);
+      if (left > 0) { cx.timer.after(left, check); return; }
+      this.settling = false;
+      cx.notify();
+    };
+    cx.timer.after(WIDTH_SETTLE_MS, check);
+  }
+
   // Rows not measured yet, drawn once out of sight at the list's width; their heights go to
   // the list, which then places every row exactly. Those near what is shown go first.
   measurer(rows, keys, t) {
@@ -4526,9 +4552,9 @@ export default class Chat extends View {
     const lo = Math.max(0, (this.range?.start ?? rows.length) - 2), hi = Math.min(rows.length, (this.range?.end ?? 0) + 2);
     const fresh = rows.map((_, i) => i).filter((i) => !this.heights.has(keys[i]))
       .sort((a, b) => Math.abs(a - near) - Math.abs(b - near)).slice(0, 30);
-    const again = rows.map((_, i) => i).filter((i) => this.heights.has(keys[i]) && ((i >= lo && i < hi) || now - (this.measuredAt.get(keys[i]) ?? 0) < 4000));
+    const again = this.settling ? [] : rows.map((_, i) => i).filter((i) => this.heights.has(keys[i]) && ((i >= lo && i < hi) || now - (this.measuredAt.get(keys[i]) ?? 0) < 4000));
     const order = [...new Set([...fresh, ...again])].slice(0, 60);
-    return div().absolute().top(0).left(0).w(this.width).h(0).overflow_hidden().opacity(0)
+    return div().absolute().top(0).left(0).w(this.heightsFor).h(0).overflow_hidden().opacity(0)
       .child(v_flex().w_full().children(order.map((i) => div().id(`m${this.measureGen}-${keys[i]}`).flex_none().w_full()
         .on_size_change((size, cx) => {
           if (!this.measuredAt.has(keys[i])) this.measuredAt.set(keys[i], Date.now());

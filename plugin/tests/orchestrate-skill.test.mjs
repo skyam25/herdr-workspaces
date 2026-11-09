@@ -8,6 +8,7 @@ const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = join(PLUGIN, "..");
 
 const skill = readFileSync(join(PLUGIN, "skills", "orchestrate", "SKILL.md"), "utf8");
+const worker = readFileSync(join(REPO, "core", "worker-prompt.js"), "utf8");
 const contract = readFileSync(join(REPO, "docs", "CONTRACT.md"), "utf8");
 const cli = readFileSync(join(REPO, "core", "cli.js"), "utf8");
 
@@ -41,7 +42,7 @@ describe("orchestrate skill", () => {
   });
 
   it("names the verbs a worker and the orchestrator need", () => {
-    for (const verb of ["list", "claim", "note", "move"]) {
+    for (const verb of ["list", "status", "start", "note", "move"]) {
       assert.ok(verbs.has(verb), `missing hws todo ${verb}`);
     }
   });
@@ -56,17 +57,11 @@ describe("orchestrate skill", () => {
   });
 
   it("starts workers with the agreed command", () => {
-    assert.ok(skill.includes('hc run --bg --name todo-<id> --label hws.todo=<id> --cwd <dir> -- claude "$prompt"'));
-  });
-
-  // An unquoted heredoc expands $HC_TERMINAL_ID in the orchestrator's shell.
-  it("keeps the worker's terminal variable unexpanded", () => {
-    assert.ok(skill.includes("<<'PROMPT'"));
-    assert.ok(skill.includes("--terminal $HC_TERMINAL_ID"));
+    assert.ok(skill.includes('hws todo start --ids <id,id> --space <space> --folder <dir>'));
   });
 
   it("has workers report to the orchestrator", () => {
-    assert.ok(skill.includes('hc send <orchestrator> "todo <id>: done"'));
-    assert.ok(skill.includes('hc send <orchestrator> "todo <id>: waiting on the person"'));
+    assert.ok(worker.includes('todo ${items[0].id}: waiting on the person'));
+    assert.ok(worker.includes("closes this session"));
   });
 });

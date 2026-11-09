@@ -6,7 +6,8 @@ import { close, promote, prune, resume, setWorkspace } from './commands/lifecycl
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
 import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
 import { find, reopen } from './commands/retired.js';
-import { surfaceDone, surfaceFocus, surfaceOpen, surfaceSocket } from './commands/surface.js';
+import { boardAdd, boardOpen, spaceAdd, spaceMove, spaceRemove } from './commands/spaces.js';
+import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceOpen, surfaceResume, surfaceSocket } from './commands/surface.js';
 import {
   todoAdd,
   todoArchive,
@@ -18,7 +19,12 @@ import {
   todoNote,
   todoReply,
   todoSend,
+  todoCapture,
+  todoStart,
+  todoResume,
+  todoStatus,
 } from './commands/todo.js';
+import { modelsSet, modelsShow } from './commands/models.js';
 import { UsageError } from './errors.js';
 
 const text = { type: 'string' };
@@ -33,6 +39,11 @@ const ROUTES = [
     options: { name: text, folder: text, kind: text, tabs: text, instructions: text },
   },
   { path: ['new', 'throwaway'], run: newThrowaway, prunes: true, options: { name: text } },
+  { path: ['board', 'add'], run: boardAdd, options: { workspace: text } },
+  { path: ['board', 'open'], run: boardOpen, options: { space: text } },
+  { path: ['space', 'add'], run: spaceAdd, options: { workspace: text, name: text, folder: text } },
+  { path: ['space', 'move'], run: spaceMove, options: { space: text, workspace: text } },
+  { path: ['space', 'remove'], run: spaceRemove, options: { space: text } },
   { path: ['current'], run: current, prunes: true, options: { terminal: text, line: flag } },
   { path: ['list'], run: list, prunes: true, options: {} },
   { path: ['register'], run: register, options: { terminal: text, session: text, role: text } },
@@ -52,22 +63,29 @@ const ROUTES = [
   },
   { path: ['surface', 'done'], run: surfaceDone, options: { id: text, bundle: text } },
   { path: ['surface', 'focus'], run: surfaceFocus, options: { id: text } },
+  { path: ['surface', 'list'], run: surfaceList, options: {} },
+  { path: ['surface', 'resume'], run: surfaceResume, options: { id: text } },
+  { path: ['surface', 'discard'], run: surfaceDiscard, options: { id: text } },
   { path: ['surface', 'socket'], run: surfaceSocket, options: { terminal: text, title: text } },
   { path: ['artifact', 'list'], run: artifactList, options: { workspace: text } },
   { path: ['artifact', 'terminal'], run: artifactTerminal, options: {}, positionals: 1 },
   { path: ['link'], run: link, options: {}, positionals: 1 },
-  { path: ['todo', 'list'], run: todoList, options: { space: text } },
+  { path: ['todo', 'list'], run: todoList, options: { reports: flag, space: text } },
   {
     path: ['todo', 'add'],
     run: todoAdd,
-    options: { title: text, titles: text, notes: text, hold: flag, worktree: flag, space: text },
+    options: { title: text, titles: text, notes: text, owner: text, worktree: flag, space: text },
   },
   {
     path: ['todo', 'edit'],
     run: todoEdit,
-    options: { id: text, title: text, notes: text, hold: text, worktree: text, space: text },
+    options: { id: text, title: text, notes: text, owner: text, worktree: text, space: text },
   },
-  { path: ['todo', 'move'], run: todoMove, options: { id: text, column: text, note: text, space: text } },
+  { path: ['todo', 'move'], run: todoMove, options: { id: text, column: text, note: text, report: text, space: text } },
+  { path: ['todo', 'status'], run: todoStatus, options: { space: text } },
+  { path: ['todo', 'resume'], run: todoResume, options: { id: text, space: text } },
+  { path: ['todo', 'start'], run: todoStart, options: { ids: text, folder: text, owns: text, avoid: text, 'packet-file': text, space: text } },
+  { path: ['todo', 'capture'], run: todoCapture, options: { terminal: text, text, space: text } },
   { path: ['todo', 'note'], run: todoNote, options: { id: text, text, space: text } },
   { path: ['todo', 'next'], run: todoNext, options: { terminal: text, space: text } },
   { path: ['todo', 'claim'], run: todoClaim, options: { id: text, terminal: text, space: text } },
@@ -75,6 +93,8 @@ const ROUTES = [
   { path: ['todo', 'reply'], run: todoReply, options: { id: text, text, space: text } },
   { path: ['todo', 'archive'], run: todoArchive, options: { id: text, space: text } },
   { path: ['orchestrator', 'start'], run: orchestratorStart, options: { space: text, folder: text } },
+  { path: ['models', 'set'], run: modelsSet, options: { role: text, tool: text, model: text, effort: text } },
+  { path: ['models'], run: modelsShow, options: {} },
   { path: ['orchestrator', 'stop'], run: orchestratorStop, options: { space: text } },
   { path: ['orchestrator', 'status'], run: orchestratorStatus, options: { space: text } },
   {
@@ -96,6 +116,13 @@ const USAGE = `Usage: hws <command> [--json]
 ${ROUTES.map((route) => `  ${route.path.join(' ')}`).join('\n')}
 
 The contract in docs/CONTRACT.md lists every option.`;
+
+function helpFor(words) {
+  const routes = ROUTES.filter(({ path }) => words.every((word, index) => path[index] === word));
+  if (routes.length === 0) return USAGE;
+  const describe = ({ type }, name) => (type === 'boolean' ? `--${name}` : `--${name} X`);
+  return routes.map(({ path, options }) => `hws ${[...path, ...Object.entries(options).map(([name, option]) => describe(option, name))].join(' ')}`).join('\n');
+}
 
 function findRoute(args) {
   const route = ROUTES.find(({ path }) => path.every((word, index) => args[index] === word));
@@ -139,6 +166,11 @@ export async function main(argv) {
   const args = argv.filter((arg) => arg !== '--json');
   if (args[0] === '--help' || args[0] === '-h') {
     console.log(USAGE);
+    return;
+  }
+  const helpAt = args.findIndex((arg) => arg === '--help' || arg === '-h');
+  if (helpAt > 0) {
+    console.log(helpFor(args.slice(0, helpAt)));
     return;
   }
   try {

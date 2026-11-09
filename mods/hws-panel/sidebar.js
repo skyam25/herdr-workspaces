@@ -3,17 +3,23 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { layout, run, spaces, theme } from "herdr";
+import { exec, layout, openOverlay, run, shared, spaces, theme } from "herdr";
 import { hws, message, openWorkspaceForm } from "./hws.js";
 
 const NODE = "workspaces";
 const HEADING_PX = 31;
 const ROW_PX = 30;
+const SPACE_ROW_PX = 26;
 const BOTTOM_PX = 8;
-const MAX_ROWS = 5;
+const MAX_LIST_PX = 300;
 const NARROW_PX = 160;
 const CHECK_MS = 1000;
 const REFRESH_MS = 60000;
+const GIT_TIMEOUT_MS = 5000;
+const FOLDED_KEY = "sidebar.folded";
+const STATUS_ORDER = ["blocked", "done", "working", "idle"];
+
+export const WORKSPACES_CHANGED = "hws.workspaces.changed";
 
 // `hws new workspace` makes the space before it writes the manifest.
 const MANIFEST_WAIT_MS = 1500;
@@ -31,6 +37,26 @@ function findNode(tree, id) {
 
 const isNarrow = () => (findNode(layout(), "sidebar")?.size?.px ?? Infinity) < NARROW_PX;
 
+const membersOf = (workspace, shown) => workspace.spaces.flatMap((id) => shown.filter((s) => s.id === id));
+const boardFirst = (workspace, members) => [...members].sort((a, b) => (b.id === workspace.board?.space) - (a.id === workspace.board?.space));
+const isCurrent = (members) => members.some((s) => s.active);
+const mostUrgent = (members) => STATUS_ORDER.find((status) => members.some((s) => s.status === status)) ?? null;
+
+// One space needs no list of its own, because the workspace row already stands for it.
+const showsSpaces = (state, workspace, members) => members.length > 1 && !state.folded.has(workspace.id);
+const showsAddRows = (state, workspace, members) => isCurrent(members) && !state.folded.has(workspace.id);
+const hasBoard = (workspace, members) => members.some((s) => s.id === workspace.board?.space);
+
+// A folder with no upstream, or no repo at all, has no count to show.
+async function aheadOf(folder) {
+  try {
+    const r = await exec("git", ["rev-list", "--count", "@{upstream}..HEAD"], { cwd: folder, timeout: GIT_TIMEOUT_MS });
+    return r.code === 0 ? Number(r.stdout.trim()) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function load(state, cx) {
   if (state.fetching) {
     state.fetchAgain = true;
@@ -40,6 +66,8 @@ function load(state, cx) {
   cx.spawn(async (cx) => {
     try {
       state.workspaces = await hws(["list"]);
+      const counts = await Promise.all(state.workspaces.map(async (w) => [w.id, await aheadOf(w.folder)]));
+      state.ahead = Object.fromEntries(counts);
       state.problem = null;
     } catch (e) {
       state.problem = message(e);
@@ -54,18 +82,30 @@ function load(state, cx) {
   });
 }
 
+function listPx(state) {
+  const shown = spaces();
+  const px = state.workspaces.reduce((sum, w) => {
+    const members = membersOf(w, shown);
+    const addRows = showsAddRows(state, w, members) ? (hasBoard(w, members) ? 1 : 2) : 0;
+    const rows = (showsSpaces(state, w, members) ? members.length : 0) + addRows;
+    return sum + ROW_PX + rows * SPACE_ROW_PX;
+  }, 0);
+  return Math.min(Math.max(px, ROW_PX), MAX_LIST_PX);
+}
+
 // Sizes the block to its rows, so an empty section leaves no gap above Spaces.
 function fit(state) {
   const block = findNode(layout(), NODE);
   if (!block || !state.workspaces) return;
-  const rows = Math.max(1, Math.min(state.workspaces.length, MAX_ROWS));
-  const px = isNarrow() ? HEADING_PX : HEADING_PX + rows * ROW_PX + BOTTOM_PX;
+  const px = isNarrow() ? HEADING_PX : HEADING_PX + listPx(state) + BOTTOM_PX;
   if (block.size?.px !== px) run("layout.resize", { id: NODE, px });
 }
 
-// A workspace is a space, so a change in the spaces is the cheap signal to reload.
+const changeKey = () => `${spaces().map((s) => s.id).join()}|${shared(WORKSPACES_CHANGED) ?? 0}`;
+
+// A change in the spaces is the cheap signal to reload.
 function check(state, cx) {
-  const key = spaces().map((s) => s.id).join();
+  const key = changeKey();
   fit(state);
   if (key === state.spaceKey) return;
   state.spaceKey = key;
@@ -77,7 +117,15 @@ function check(state, cx) {
 }
 
 export function startSidebar(cx) {
-  const state = { workspaces: null, problem: null, fetching: false, fetchAgain: false, spaceKey: spaces().map((s) => s.id).join() };
+  const state = {
+    workspaces: null,
+    problem: null,
+    fetching: false,
+    fetchAgain: false,
+    spaceKey: changeKey(),
+    folded: new Set(JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]")),
+    ahead: {},
+  };
   load(state, cx);
   cx.timer.every(CHECK_MS, (cx) => check(state, cx));
   cx.timer.every(REFRESH_MS, (cx) => load(state, cx));
@@ -97,7 +145,7 @@ function iconButton(t, id, name, size, onClick) {
     .hover((s) => s.bg(t.hover).text_color(t.foreground))
     .on_click((_e, cx) => {
       cx.stop_propagation();
-      onClick();
+      onClick(cx);
     })
     .child(svg(icon(name)).size(14));
 }
@@ -119,8 +167,127 @@ function newRow(t) {
     .child("New workspace");
 }
 
-function workspaceRow(t, workspace, shown) {
-  const isActive = Boolean(shown?.active);
+function toggleFold(state, id, cx) {
+  if (state.folded.has(id)) state.folded.delete(id);
+  else state.folded.add(id);
+  localStorage.setItem(FOLDED_KEY, JSON.stringify([...state.folded]));
+  fit(state);
+  cx.notify();
+}
+
+function foldButton(t, state, id) {
+  const chevron = state.folded.has(id) ? "chevron-right" : "chevron-down";
+  return div()
+    .id(`sidebar-fold-${id}`)
+    .size(16)
+    .flex_none()
+    .flex()
+    .items_center()
+    .justify_center()
+    .rounded(4)
+    .text_color(t.dim)
+    .hover((s) => s.text_color(t.foreground))
+    .on_click((_e, cx) => {
+      cx.stop_propagation();
+      toggleFold(state, id, cx);
+    })
+    .child(svg(icon(chevron)).size(12));
+}
+
+const statusDot = (t, status) => div().size(6).rounded(3).flex_none().bg(t[status] ?? t.dim);
+
+function removeSpace(state, id, cx) {
+  cx.spawn(async (cx) => {
+    try {
+      await hws(["space", "remove", "--space", id]);
+      state.problem = null;
+    } catch (e) {
+      state.problem = message(e);
+      cx.notify();
+      return;
+    }
+    load(state, cx);
+  });
+}
+
+function openAddSpace(workspace) {
+  const dialogProps = { view: "add-space", workspace: workspace.id, name: workspace.name, spaces: workspace.spaces };
+  openOverlay({ mod: "hws-panel", kind: "dialog", modal: true, width: 440, height: 460, props: dialogProps });
+}
+
+function showBoard(board) {
+  run("space.select", { id: board.space });
+  run("tab.select", { id: board.tab });
+}
+
+function spaceRow(t, state, workspace, space) {
+  const isBoard = workspace.board?.space === space.id;
+  return h_flex()
+    .id(`sidebar-space-${space.id}`)
+    .h(SPACE_ROW_PX)
+    .flex_none()
+    .pl(32)
+    .pr(4)
+    .gap(8)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .text_size(12.5)
+    .text_color(space.active ? t.foreground : t.muted)
+    .when(space.active, (el) => el.bg(t.hover))
+    .when(!space.active, (el) => el.hover((s) => s.bg(t.hover)))
+    .on_click(() => (isBoard ? showBoard(workspace.board) : run("space.select", { id: space.id })))
+    .child(svg(isBoard ? "mods/hws-panel/board.svg" : icon("terminal")).size(12).flex_none())
+    .child(div().flex_1().min_w(0).truncate().child(space.name))
+    .when(Boolean(space.status), (el) => el.child(statusDot(t, space.status)))
+    .when(!isBoard, (el) => el.child(iconButton(t, `sidebar-remove-${space.id}`, "minus", 18, (cx) => removeSpace(state, space.id, cx)).tooltip("Take out of this workspace. The space stays open.")));
+}
+
+function addBoard(state, workspace, cx) {
+  cx.spawn(async (cx) => {
+    try {
+      showBoard(await hws(["board", "add", "--workspace", workspace.id]));
+      state.problem = null;
+    } catch (e) {
+      state.problem = message(e);
+      cx.notify();
+      return;
+    }
+    load(state, cx);
+  });
+}
+
+function addRow(t, id, label, onClick) {
+  return h_flex()
+    .id(id)
+    .h(SPACE_ROW_PX)
+    .flex_none()
+    .pl(32)
+    .pr(8)
+    .gap(8)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .text_size(12.5)
+    .text_color(t.dim)
+    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .on_click((_e, cx) => onClick(cx))
+    .child(svg(icon("plus")).size(12).flex_none())
+    .child(label);
+}
+
+function addRows(t, state, workspace, members) {
+  return [
+    addRow(t, `sidebar-add-space-${workspace.id}`, "Add space", () => openAddSpace(workspace)),
+    ...(hasBoard(workspace, members) ? [] : [addRow(t, `sidebar-add-board-${workspace.id}`, "Add board", (cx) => addBoard(state, workspace, cx))]),
+  ];
+}
+
+function workspaceRow(t, state, workspace, members) {
+  const isActive = isCurrent(members);
+  const status = mostUrgent(members);
+  const target = members.find((s) => s.active) ?? members[0];
+  const ahead = state.ahead[workspace.id] ?? 0;
   return h_flex()
     .id(`sidebar-workspace-${workspace.id}`)
     .h(ROW_PX)
@@ -132,10 +299,13 @@ function workspaceRow(t, workspace, shown) {
     .cursor_pointer()
     .when(isActive, (el) => el.bg(t.raised))
     .when(!isActive, (el) => el.hover((s) => s.bg(t.hover)))
-    .on_click(() => run("space.select", { id: workspace.id }))
+    .on_click(() => target && run("space.select", { id: target.id }))
+    .when(members.length > 1, (el) => el.child(foldButton(t, state, workspace.id)))
     .child(svg(icon("layers")).size(14).flex_none().text_color(isActive ? t.foreground : t.dim))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(workspace.name))
     .when(workspace.kind === "throwaway", (el) => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child("Throwaway")))
+    .when(Boolean(status), (el) => el.child(statusDot(t, status)))
+    .when(ahead > 0, (el) => el.child(div().flex_none().text_size(11.5).text_color(t.ansi2).child(`\u2191${ahead}`)))
     .when(isActive, (el) => el.child(iconButton(t, "sidebar-panel", "panel-right", 22, () => run("mod.open", { name: "hws-panel" }))));
 }
 
@@ -144,7 +314,14 @@ function rows(t, state) {
   if (!state.workspaces) return [];
   if (state.workspaces.length === 0) return [newRow(t)];
   const shown = spaces();
-  return state.workspaces.map((w) => workspaceRow(t, w, shown.find((s) => s.id === w.id)));
+  return state.workspaces.flatMap((w) => {
+    const members = membersOf(w, shown);
+    return [
+      workspaceRow(t, state, w, members),
+      ...(showsSpaces(state, w, members) ? boardFirst(w, members).map((space) => spaceRow(t, state, w, space)) : []),
+      ...(showsAddRows(state, w, members) ? addRows(t, state, w, members) : []),
+    ];
+  });
 }
 
 export function drawSidebar(state) {

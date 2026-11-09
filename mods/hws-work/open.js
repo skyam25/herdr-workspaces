@@ -1,7 +1,7 @@
-// Opens an output, beside its agent when it is a page and in macOS otherwise.
+// Opens outputs and agent sessions. A page opens beside its agent and other outputs open in macOS.
 
-import { exec, home, panes, run, spaces } from "herdr";
-import { opensAsPage, outputTarget, surfaceArgs } from "./data.js";
+import { exec, home, panes, run, spaces, terminals } from "herdr";
+import { locateTerminal, opensAsPage, outputTarget, surfaceArgs } from "./data.js";
 
 let found = null;
 
@@ -46,9 +46,24 @@ export async function hws(args) {
 
 // A surface opens in its agent's tab, so that tab must be showing to see it.
 function showPane(tab, pane) {
-  const active = spaces().find((s) => s.active)?.tabs.find((x) => x.active)?.id;
+  const owner = spaces().find((s) => s.tabs.some((x) => x.id === tab));
+  if (owner && !owner.active) run("space.select", { id: owner.id });
+  const active = (owner ?? spaces().find((s) => s.active))?.tabs.find((x) => x.active)?.id;
   if (tab && tab !== active) run("tab.select", { id: tab });
   if (pane) run("pane.focus", { pane });
+}
+
+// Selects the agent's tab when another is active, then focuses its terminal or chat pane.
+export function focusAgent(agent) {
+  showPane(agent.tab, agent.chatPane);
+  if (!agent.chatPane) run("pane.focus", { terminal: agent.address });
+}
+
+// A worker has no pane until one is opened, so peek stands in for focus.
+export function openSession(address) {
+  const seat = locateTerminal({ panes: panes(), terminals: terminals() }, address);
+  if (seat) focusAgent({ address, ...seat });
+  else run("terminal.peek", { terminal: address });
 }
 
 function openedPane(r) {

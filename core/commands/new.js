@@ -23,7 +23,7 @@ export function keptFields(flags) {
 export function createWorkspace({ name, kind, folder, instructions, tabs }) {
   const [firstTab, ...otherTabs] = tabs;
   const first = act('space.new', { name, folder, argv: firstTab.argv });
-  act('tab.rename', { id: first.tab, name: firstTab.name });
+  if (firstTab.name) act('tab.rename', { id: first.tab, name: firstTab.name });
   const opened = [{ ...first, name: firstTab.name }];
   for (const tab of otherTabs) {
     opened.push({ ...act('tab.new', { name: tab.name, space: first.space, folder, argv: tab.argv }), name: tab.name });
@@ -34,14 +34,15 @@ export function createWorkspace({ name, kind, folder, instructions, tabs }) {
     kind,
     folder,
     instructions: instructions ?? '',
-    tabs: opened.map((tab) => ({ tabId: tab.tab, name: tab.name, role: tab.name.toLowerCase() })),
+    tabs: opened.map((tab) => ({ tabId: tab.tab, name: tab.name ?? null, role: tab.name?.toLowerCase() ?? null })),
     terminals: opened.map((tab) => ({ terminal: tab.terminal, tabId: tab.tab, sessionId: null, role: null })),
   });
 }
 
-function parseTabNames(value) {
+// With no names, the workspace starts with one tab Herdr numbers.
+function parseTabs(value) {
   const names = (value ?? '').split(',').map((name) => name.trim()).filter(Boolean);
-  return names.length > 0 ? names : ['Main'];
+  return names.length > 0 ? names.map((name) => ({ name })) : [{}];
 }
 
 export function newTerminal(flags) {
@@ -57,7 +58,7 @@ export function newWorkspace(flags) {
     kind,
     folder,
     instructions: flags.instructions,
-    tabs: parseTabNames(flags.tabs).map((tabName) => ({ name: tabName })),
+    tabs: parseTabs(flags.tabs),
   });
   rememberParent(folder);
   return { data: manifest, text: `created ${kind} workspace ${name} (${manifest.id})` };

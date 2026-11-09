@@ -34,7 +34,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Standalone | Shows Open terminal and Copy link in place of Done |
 | Throwaway | Asks Keep or Trash on close only if something was made. Closes itself after 24 idle hours and stays findable for 30 days |
 | Studio | Removed. New board and New note cover the need |
-| Rendering | Boards open in their own floating window. Notes and pages stay on Pixel in a pane. A native GPUI board was rejected as too costly |
+| Rendering | Boards open in their own window, which stays as a resumable draft when closed. Notes and pages stay on Pixel in a pane. A native GPUI board was rejected as too costly |
 
 ## Next steps, in order
 

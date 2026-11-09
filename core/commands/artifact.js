@@ -22,10 +22,11 @@ export function link(_flags, [artifactId]) {
 
 export function artifactTerminal(_flags, [artifactId]) {
   const { manifest, artifact } = findArtifact(artifactId);
-  const live = listLive()?.spaces.some((space) => space.id === manifest.id);
+  const open = listLive()?.spaces ?? [];
+  const space = (manifest.spaces ?? []).find((id) => open.some((item) => item.id === id));
   const opened = act('tab.new', {
     name: artifact.title,
-    space: live ? manifest.id : undefined,
+    space,
     folder: manifest.folder,
     argv: ['claude'],
     task: linkFor(artifact.prompt),

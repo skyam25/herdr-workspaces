@@ -2,13 +2,14 @@
 // Props are `{ view: "todo", space, id? }` for one card and `{ view: "add-several", space }` for many.
 
 import { div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, TextView } from "gpui-base";
 import { agents, closeOverlay, panes, props, setShared, shared, spaces, terminals, theme } from "herdr";
-import { COLUMNS, FORM, sendTargets, todoItems } from "./data.js";
-import { hws } from "./open.js";
+import { COLUMNS, FORM, cardSessions, cardStory, cardTimes, describeSession, sendTargets, todoItems, todoLayout } from "./data.js";
+import { hws, openSession } from "./open.js";
 
 export const TODOS_CHANGED = "hws.todos.changed";
 
+const OWNERS = [{ key: "unassigned", name: "Unassigned" }, { key: "agent", name: "Agent" }, { key: "mine", name: "Mine" }];
 const message = (e) => String(e?.message ?? e);
 const lineHeight = (px) => `${px}px`;
 
@@ -51,7 +52,7 @@ class DialogForm {
   }
 
   // Runs one change. The board reloads either way, because a failed step can follow a good one.
-  submit(key, work, cx) {
+  submit(key, work, cx, afterClose = () => {}) {
     if (!this.ready()) return;
     this.busy = key;
     this.problem = null;
@@ -66,6 +67,7 @@ class DialogForm {
       setShared(TODOS_CHANGED, (shared(TODOS_CHANGED) ?? 0) + 1);
       if (failure === null) {
         this.close();
+        afterClose();
         return;
       }
       this.problem = failure;
@@ -117,7 +119,43 @@ class DialogForm {
       .child(text);
   }
 
-  body(t, id, heading, fields) {
+  rowButton(t, id, text, action, enabled) {
+    return div()
+      .id(id)
+      .flex_none()
+      .h(20)
+      .px(8)
+      .flex()
+      .items_center()
+      .rounded(5)
+      .border_1()
+      .border_color(t.input)
+      .text_size(11)
+      .opacity(enabled ? 1 : 0.5)
+      .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click(action))
+      .child(text);
+  }
+
+  chip(t, id, text, on, action) {
+    return h_flex()
+      .id(id)
+      .flex_none()
+      .h(FORM.chip)
+      .px(9)
+      .items_center()
+      .rounded(6)
+      .border_1()
+      .border_color(on ? t.accent : t.input)
+      .when(on, (el) => el.bg(t.selected))
+      .text_size(12)
+      .text_color(on ? t.foreground : t.muted)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover))
+      .on_click(action)
+      .child(text);
+  }
+
+  body(t, id, heading, fields, details = null) {
     return v_flex()
       .id(id)
       .flex_1()
@@ -125,7 +163,14 @@ class DialogForm {
       .overflow_y_scrollbar()
       .p(FORM.pad)
       .gap(FORM.gap)
-      .child(div().flex_none().line_height(lineHeight(FORM.heading)).text_size(15).font_semibold().child(heading))
+      .child(
+        h_flex()
+          .flex_none()
+          .gap(8)
+          .items_center()
+          .child(div().flex_none().line_height(lineHeight(FORM.heading)).text_size(15).font_semibold().child(heading))
+          .when(details !== null, (el) => el.child(div().flex_1()).child(div().id("todo-details").flex_none().text_size(11).text_color(t.dim).child(details))),
+      )
       .children(fields)
       .when(Boolean(this.problem), (el) => el.child(div().id("todo-problem").flex_none().line_height(lineHeight(FORM.problem)).text_size(11.5).text_color(t.blocked).child(this.problem)));
   }
@@ -154,12 +199,13 @@ export class TodoForm extends DialogForm {
     super(cx);
     this.id = props().id ?? null;
     this.item = null;
+    this.orchestrator = null;
     this.column = "todo";
-    this.hold = false;
+    this.owner = "unassigned";
     this.worktree = false;
     this.title = this.track("title", InputState.new({ placeholder: "What needs doing?" }), (cx) => this.save(cx));
     this.notes = this.track("notes", TextareaState.new({ placeholder: "Add details for the agent (optional)" }));
-    this.replyBox = this.track("reply", InputState.new({ placeholder: "Answer the worker" }), (cx) => this.reply(cx));
+    this.replyBox = this.track("reply", InputState.new({ placeholder: "Reply to this session" }), (cx) => this.reply(cx));
     this.title.focus();
     cx.timer.after(600, () => this.firstField().focus());
     if (this.id) this.load(cx);
@@ -169,10 +215,16 @@ export class TodoForm extends DialogForm {
     return this.item?.column === "waiting";
   }
 
+  // A finished card takes feedback too, which reopens its session when that has closed.
+  canReply() {
+    if (this.waiting()) return true;
+    return this.item?.column === "done" && Boolean(this.item.session || this.item.terminal);
+  }
+
   // The fields Tab moves through. A card that waits on you starts at its reply.
   fields() {
     const fields = [["title", this.title], ["notes", this.notes]];
-    return this.waiting() ? [["reply", this.replyBox], ...fields] : fields;
+    return this.canReply() ? [["reply", this.replyBox], ...fields] : fields;
   }
 
   firstField() {
@@ -182,11 +234,13 @@ export class TodoForm extends DialogForm {
   load(cx) {
     cx.spawn(async (cx) => {
       try {
-        const item = todoItems(await hws(["todo", "list", "--space", this.space])).find((x) => x.id === this.id);
+        const listed = await hws(["todo", "list", "--space", this.space]);
+        const item = todoItems(listed).find((x) => x.id === this.id);
         if (!item) throw new Error("This to-do no longer exists.");
         this.item = item;
+        this.orchestrator = listed?.orchestrator?.terminal ?? null;
         this.column = item.column;
-        this.hold = Boolean(item.hold);
+        this.owner = item.owner;
         this.worktree = Boolean(item.worktree);
         this.title.set_value(item.title);
         this.notes.set_value(item.notes ?? "");
@@ -207,14 +261,14 @@ export class TodoForm extends DialogForm {
     const textChanged = title !== this.item.title || notes !== (this.item.notes ?? "");
     const changes = [
       ...(textChanged ? [textFlag("title", title), textFlag("notes", notes)] : []),
-      ...(this.hold !== Boolean(this.item.hold) ? [textFlag("hold", this.hold)] : []),
+      ...(this.owner !== this.item.owner ? [textFlag("owner", this.owner)] : []),
       ...(this.worktree !== Boolean(this.item.worktree) ? [textFlag("worktree", this.worktree)] : []),
     ];
     if (changes.length > 0) await hws(["todo", "edit", "--id", this.id, ...changes, ...this.spaceFlag()]);
   }
 
   async add(title, notes) {
-    const options = [...(notes ? [textFlag("notes", notes)] : []), ...(this.hold ? ["--hold"] : []), ...(this.worktree ? ["--worktree"] : [])];
+    const options = [...(notes ? [textFlag("notes", notes)] : []), ...(this.owner !== "unassigned" ? [textFlag("owner", this.owner)] : []), ...(this.worktree ? ["--worktree"] : [])];
     const added = await hws(["todo", "add", textFlag("title", title), ...options, ...this.spaceFlag()]);
     if (this.column !== "todo") await this.move(added.id);
   }
@@ -255,6 +309,22 @@ export class TodoForm extends DialogForm {
     }, cx);
   }
 
+  // Saves edits first, because the dialog closes so the session can take focus.
+  openLinked(address, cx) {
+    const title = this.titleText(cx);
+    if (title === null) return;
+    this.submit("open", () => this.saveFields(title, this.notes.value().trim()), cx, () => openSession(address));
+  }
+
+  resume(cx) {
+    const title = this.titleText(cx);
+    if (title === null) return;
+    this.submit("resume", async () => {
+      await this.saveFields(title, this.notes.value().trim());
+      await hws(["todo", "resume", "--id", this.id, ...this.spaceFlag()]);
+    }, cx);
+  }
+
   // Saves edits first, because the dialog closes after the reply goes.
   reply(cx) {
     const text = this.replyBox.value().trim();
@@ -287,31 +357,12 @@ export class TodoForm extends DialogForm {
     fields[(at + 1) % fields.length][1].focus();
   }
 
-  chip(t, id, text, on, action) {
-    return h_flex()
-      .id(id)
-      .flex_none()
-      .h(FORM.chip)
-      .px(9)
-      .items_center()
-      .rounded(6)
-      .border_1()
-      .border_color(on ? t.accent : t.input)
-      .when(on, (el) => el.bg(t.selected))
-      .text_size(12)
-      .text_color(on ? t.foreground : t.muted)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click(action)
-      .child(text);
-  }
-
   columnChoice(t) {
     const choose = (key) => (_e, cx) => {
       this.column = key;
       cx.notify();
     };
-    return h_flex().gap(4).children(COLUMNS.filter((c) => c.drop).map((c) => this.chip(t, `column-${c.key}`, c.name, c.key === this.column, choose(c.key))));
+    return h_flex().flex_wrap().gap(4).children(COLUMNS.filter((c) => c.drop).map((c) => this.chip(t, `column-${c.key}`, c.name, c.key === this.column, choose(c.key))));
   }
 
   toggle(t, key, text) {
@@ -321,14 +372,25 @@ export class TodoForm extends DialogForm {
     });
   }
 
-  toggles(t) {
-    return h_flex().flex_none().gap(4).child(this.toggle(t, "hold", "Keep for me")).child(this.toggle(t, "worktree", "Use a worktree"));
+  ownerChoice(t) {
+    const choose = (key) => (_e, cx) => {
+      this.owner = key;
+      cx.notify();
+    };
+    return OWNERS.map(({ key, name }) => this.chip(t, `owner-${key}`, name, key === this.owner, choose(key)));
   }
 
-  sendRow(t, target, enabled) {
-    const where = [target.tab, target.flipped ? "Chat" : null, target.address].filter(Boolean).join(" · ");
+  ownerRow(t) {
+    return h_flex().flex_none().flex_wrap().gap(4).children(this.ownerChoice(t)).child(this.toggle(t, "worktree", "Use a worktree"));
+  }
+
+  targets() {
+    return sendTargets({ agents: agents(), panes: panes(), terminals: terminals(), spaces: spaces() }, this.space, props().members ?? []);
+  }
+
+  row(t, id, name, detail, control) {
     return h_flex()
-      .id(`send-${target.address}`)
+      .id(id)
       .flex_none()
       .h(FORM.sendRow)
       .px(9)
@@ -337,50 +399,74 @@ export class TodoForm extends DialogForm {
       .rounded(7)
       .border_1()
       .border_color(t.input)
-      .opacity(enabled ? 1 : 0.5)
-      .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.send(target.address, cx)))
-      .child(div().flex_1().min_w(0).truncate().child(target.name))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child(where));
+      .child(div().flex_1().min_w(0).truncate().child(name))
+      .child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child(detail))
+      .when(control !== null, (el) => el.child(control));
+  }
+
+  sendRow(t, target, enabled) {
+    const where = [target.tab, target.flipped ? "Chat" : null, target.address].filter(Boolean).join(" · ");
+    return this.row(t, `target-${target.address}`, target.name, where, this.rowButton(t, `send-${target.address}`, this.busy === "send" ? "Sending…" : "Send", (_e, cx) => this.send(target.address, cx), enabled));
+  }
+
+  // The sessions behind this card, each with Open while it is live.
+  linkedSessions(t, enabled) {
+    const sessions = this.item ? cardSessions(this.item) : [];
+    if (sessions.length === 0) return [];
+    const lists = { terminals: terminals(), targets: this.targets(), orchestrator: this.orchestrator };
+    const rows = sessions.map(({ role, address }) => {
+      const { name, status, live } = describeSession(lists, address);
+      const canResume = !live && role === "Run by" && Boolean(this.item.session);
+      const resume = canResume ? this.rowButton(t, `session-resume-${address}`, "Resume", (_e, cx) => this.resume(cx), enabled) : null;
+      const open = live ? this.rowButton(t, `session-open-${address}`, "Open", (_e, cx) => this.openLinked(address, cx), enabled) : resume;
+      return this.row(t, `session-row-${address}`, `${role} ${name}`, [status, address].filter(Boolean).join(" · "), open);
+    });
+    return [this.labeled(t, "Session", v_flex().gap(FORM.sendGap).children(rows))];
   }
 
   sendTo(t, enabled) {
-    const targets = sendTargets({ agents: agents(), panes: panes(), terminals: terminals(), spaces: spaces() }, this.space);
+    const targets = this.targets();
     if (targets.length === 0) return div().text_size(12).text_color(t.dim).child("No agents in this space.");
     return v_flex().gap(FORM.sendGap).children(targets.map((x) => this.sendRow(t, x, enabled)));
   }
 
-  // The worker's latest word and the box that answers it, for a card in Waiting on you.
-  replyFields(t, enabled) {
-    if (!this.waiting()) return [];
-    const note = (this.item.note ?? "").trim();
+  // What the session reported, and the box that answers it on a card in Waiting on you.
+  updateFields(t, enabled, story, height) {
+    const shown = story && div().id("todo-note").max_h(height).overflow_y_scrollbar().text_size(12.5).child(TextView.markdown("todo-story", story.text).selectable(true));
+    const update = story ? [this.labeled(t, story.label, shown)] : [];
+    if (!this.canReply()) return update;
     const row = h_flex()
       .gap(8)
       .items_center()
       .child(this.fieldStyle(Input.new(this.replyBox).flex_1().h(FORM.input), t, "reply"))
       .child(this.button(t, "reply-todo", this.busy === "reply" ? "Sending…" : "Reply", true, (_e, cx) => this.reply(cx), enabled));
-    const box = this.labeled(t, "Reply", row);
-    if (!note) return [box];
-    const shown = div().id("todo-note").max_h(FORM.note).overflow_y_scrollbar().line_height("16px").text_size(12.5).whitespace_normal().child(note);
-    return [this.labeled(t, "Latest from the worker", shown), box];
+    return [...update, this.labeled(t, this.waiting() ? "Reply" : "Feedback", row)];
   }
 
   render() {
     const t = theme();
     const enabled = this.ready();
-    const fields = [
-      ...this.replyFields(t, enabled),
+    const story = this.item ? cardStory(this.item) : null;
+    const sizes = todoLayout({ height: props().height, waiting: this.canReply(), story });
+    const reading = v_flex().flex_1().min_w(0).gap(FORM.gap).children([
+      ...this.updateFields(t, enabled, story, sizes.story),
       this.labeled(t, "Title", this.fieldStyle(Input.new(this.title).h(FORM.input), t, "title")),
-      this.labeled(t, "Notes", this.fieldStyle(Textarea.new(this.notes).h(FORM.notes).py(8), t, "notes")),
+      this.labeled(t, "Notes", this.fieldStyle(Textarea.new(this.notes).h(sizes.notes).py(8), t, "notes")),
+    ]);
+    const controls = v_flex().flex_none().w(FORM.side).gap(FORM.gap).children([
+      ...this.linkedSessions(t, enabled),
       this.labeled(t, "Column", this.columnChoice(t)),
-      this.toggles(t),
+      this.labeled(t, "Owner", this.ownerRow(t)),
       ...(this.id ? [this.labeled(t, "Send to", this.sendTo(t, enabled))] : []),
-    ];
+    ]);
+    const fields = [h_flex().flex_none().items_start().gap(FORM.columnGap).child(reading).child(controls)];
     const footer = this.footer()
       .when(Boolean(this.id), (el) => el.child(this.button(t, "archive-todo", this.busy === "archive" ? "Archiving…" : "Archive", false, (_e, cx) => this.archive(cx), enabled)))
       .child(div().flex_1())
       .child(this.button(t, "cancel-todo", "Cancel", false, () => this.close(), true))
       .child(this.button(t, "save-todo", this.busy === "save" ? "Saving…" : "Save", true, (_e, cx) => this.save(cx), enabled));
-    return this.frame(t, "hws-todo", this.body(t, "todo-body", this.id ? "To-do" : "New to-do", fields), footer);
+    const details = this.item ? [this.item.id, ...cardTimes(this.item, Date.now())].join(" · ") : null;
+    return this.frame(t, "hws-todo", this.body(t, "todo-body", this.id ? "To-do" : "New to-do", fields, details), footer);
   }
 }
 
@@ -416,5 +502,93 @@ export class AddSeveralForm extends DialogForm {
       .child(this.button(t, "cancel-todo", "Cancel", false, () => this.close(), true))
       .child(this.button(t, "add-several-save", this.busy === "add" ? "Adding…" : "Add", true, (_e, cx) => this.save(cx), enabled));
     return this.frame(t, "hws-add-several", this.body(t, "several-body", "Add several", fields), footer);
+  }
+}
+
+const ROLES = [{ key: "orchestrator", name: "Orchestrator", line: "Reads the board and decides how to run the cards. It runs on Claude Code." }, { key: "worker", name: "Workers", line: "Do the cards." }];
+const RECOMMENDED = "Recommended: a stronger model orchestrates and Sonnet-level workers do the cards.";
+
+export class ModelsForm extends DialogForm {
+  constructor(cx) {
+    super(cx);
+    this.settings = null;
+    cx.spawn(async (cx) => {
+      try {
+        this.settings = await hws(["models"]);
+      } catch (e) {
+        this.problem = message(e);
+      }
+      cx.notify();
+    });
+  }
+
+  ready() {
+    return super.ready() && Boolean(this.settings);
+  }
+
+  pick(role, change) {
+    return (_e, cx) => {
+      Object.assign(this.settings[role], change);
+      cx.notify();
+    };
+  }
+
+  useRecommended(cx) {
+    Object.assign(this.settings.orchestrator, { tool: "claude", model: "opus", effort: "high" });
+    Object.assign(this.settings.worker, { tool: "claude", model: "sonnet", effort: "medium" });
+    cx.notify();
+  }
+
+  // A model set through hws stays selectable even when the list does not name it.
+  modelChoices(role) {
+    const { tool, model } = this.settings[role];
+    const models = this.settings.catalog[tool].models;
+    return models.some((x) => x.id === model) ? models : [...models, { id: model, name: model }];
+  }
+
+  chips(t, ids) {
+    return h_flex().flex_wrap().gap(4).children(ids);
+  }
+
+  roleFields(t, { key, name, line }) {
+    const current = this.settings[key];
+    const tools = Object.entries(this.settings.catalog).map(([id, tool]) => this.chip(t, `${key}-tool-${id}`, tool.name, id === current.tool, this.pick(key, { tool: id, model: tool.recommendedWorker })));
+    const models = this.modelChoices(key).map((x) => this.chip(t, `${key}-model-${x.id}`, x.name, x.id === current.model, this.pick(key, { model: x.id })));
+    const efforts = this.settings.catalog[current.tool].efforts.map((x) => this.chip(t, `${key}-effort-${x}`, x, x === current.effort, this.pick(key, { effort: x })));
+    return v_flex()
+      .flex_none()
+      .gap(6)
+      .child(div().text_size(13).font_semibold().child(name))
+      .child(div().text_size(11.5).text_color(t.dim).child(line))
+      .when(key === "worker", (el) => el.child(this.chips(t, tools)))
+      .child(this.chips(t, models))
+      .child(this.chips(t, efforts));
+  }
+
+  save(cx) {
+    this.submit("save", async () => {
+      for (const { key } of ROLES) {
+        const { tool, model, effort } = this.settings[key];
+        await hws(["models", "set", "--role", key, "--tool", tool, textFlag("model", model), "--effort", effort]);
+      }
+    }, cx);
+  }
+
+  keys(e, cx) {
+    if (e.key !== "escape") return;
+    this.close();
+    cx.stop_propagation();
+  }
+
+  render() {
+    const t = theme();
+    const enabled = this.ready();
+    const fields = this.settings ? [div().flex_none().text_size(11.5).text_color(t.muted).child(RECOMMENDED), ...ROLES.map((role) => this.roleFields(t, role))] : [];
+    const footer = this.footer()
+      .child(this.button(t, "models-recommended", "Use recommended", false, (_e, cx) => this.useRecommended(cx), enabled))
+      .child(div().flex_1())
+      .child(this.button(t, "cancel-todo", "Cancel", false, () => this.close(), true))
+      .child(this.button(t, "models-save", this.busy === "save" ? "Saving…" : "Save", true, (_e, cx) => this.save(cx), enabled));
+    return this.frame(t, "hws-models", this.body(t, "models-body", "Models", fields), footer);
   }
 }

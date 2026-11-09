@@ -1,27 +1,27 @@
 import { HwsError } from '../errors.js';
-import { act, isLiveChild, isTerminalAlive, killTerminal, sendText } from '../herdr.js';
+import { act, isLiveChild, isTerminalAlive, keepingSelection, killTerminal, sendText } from '../herdr.js';
 import { withLock } from '../lock.js';
 import { expandFolder } from '../paths.js';
 import { requireFlag } from '../resolve.js';
-import { requireFolder } from '../settings.js';
-import { orchestratorState, readTodos, resolveSpace, updateTodos } from './todo.js';
+import { agentArgv, agentModels, requireFolder } from '../settings.js';
+import { boardOf, orchestratorState, readTodos, resolveBoard, updateTodos } from './todo.js';
 
-const BOARD_CHANGED = 'The board changed. Read it and dispatch anything new.';
+const BOARD_CHANGED = 'The board changed. Run hws todo status and start whatever is ready.';
 const STOPPED_NOTE = 'Stopped before finishing';
 
 function firstPrompt(space) {
   return `Use the herdr-workspaces:orchestrate skill. Your board is space ${space}.`;
 }
 
-function openOrchestrator(space, folder) {
-  const { terminal } = act('tab.new', {
+function openOrchestrator(space, board, folder) {
+  const { terminal } = keepingSelection(() => act('tab.new', {
     name: 'Orchestrator',
     space,
     folder,
-    argv: ['claude'],
+    argv: agentArgv(agentModels().orchestrator),
     task: firstPrompt(space),
-  });
-  updateTodos(space, (todos) => {
+  }));
+  updateTodos(board, (todos) => {
     todos.orchestrator = { terminal, startedAt: Date.now() };
   });
   return terminal;
@@ -32,10 +32,11 @@ function openOrchestrator(space, folder) {
 export function orchestratorStart(flags) {
   const space = requireFlag(flags, 'space');
   const folder = requireFolder(expandFolder(requireFlag(flags, 'folder')));
-  const result = withLock(`orchestrator-${encodeURIComponent(space)}`, () => {
-    const state = orchestratorState(readTodos(space));
+  const board = boardOf(space);
+  const result = withLock(`orchestrator-${encodeURIComponent(board)}`, () => {
+    const state = orchestratorState(readTodos(board));
     if (state?.live) return { terminal: state.terminal, started: false };
-    return { terminal: openOrchestrator(space, folder), started: true };
+    return { terminal: openOrchestrator(space, board, folder), started: true };
   });
   if (!result.started) sendText(result.terminal, BOARD_CHANGED);
   return { data: result };
@@ -53,7 +54,7 @@ function returnEndedCards(space, orchestrator) {
   return updateTodos(space, (todos) => {
     const cards = todos.items.filter((item) => item.column === 'doing' && ended.has(item.terminal));
     const updatedAt = Date.now();
-    for (const card of cards) Object.assign(card, { column: 'todo', terminal: null, hold: true, note: STOPPED_NOTE, updatedAt });
+    for (const card of cards) Object.assign(card, { column: 'todo', terminal: null, owner: 'unassigned', note: STOPPED_NOTE, updatedAt });
     if (todos.orchestrator?.terminal === orchestrator) delete todos.orchestrator;
     return cards.map((card) => card.id);
   });
@@ -61,7 +62,7 @@ function returnEndedCards(space, orchestrator) {
 
 // Workers end with their parent, so they are listed before it ends.
 export function orchestratorStop(flags) {
-  const space = resolveSpace(flags);
+  const space = resolveBoard(flags);
   const todos = readTodos(space);
   const state = orchestratorState(todos);
   if (!state?.live) return { data: { stopped: false } };
@@ -75,5 +76,5 @@ export function orchestratorStop(flags) {
 }
 
 export function orchestratorStatus(flags) {
-  return { data: orchestratorState(readTodos(resolveSpace(flags))) };
+  return { data: orchestratorState(readTodos(resolveBoard(flags))) };
 }

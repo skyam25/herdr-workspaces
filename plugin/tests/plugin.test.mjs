@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const HOOK = join(ROOT, "hooks", "session-start.sh");
+const STOP_HOOK = join(ROOT, "hooks", "stop.sh");
 const SUMMARY = join(ROOT, "scripts", "workspace-summary.sh");
 
 const LINE = "This session is in the app workspace checkout demo at /tmp/checkout.";
@@ -85,7 +86,7 @@ function contextOf(result) {
 }
 
 function assertTaskList(context) {
-  for (const text of ["on the Board", "`hws todo list --json`", '`hws todo add --title="..."`', "lands held", "unless asked"]) {
+  for (const text of ["on the Board", "`hws todo list --json`", '`hws todo add --title="..."`', "lands unassigned", "unless asked"]) {
     assert.ok(context.includes(text), text);
   }
 }
@@ -114,7 +115,7 @@ describe("session-start hook", () => {
     homeStub({ current: ":" });
     const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
 
-    assert.ok(context.startsWith("This Herdr space"));
+    assert.ok(context.startsWith("This Herdr workspace or space"));
     assertTaskList(context);
   });
 
@@ -207,6 +208,34 @@ describe("session-start hook", () => {
 
     assert.equal(hook.timeout, 6);
     assert.match(hook.command, /\$\{CLAUDE_PLUGIN_ROOT\}/);
+  });
+});
+
+describe("stop hook", () => {
+  const stopInput = (message) => JSON.stringify({ hook_event_name: "Stop", last_assistant_message: message });
+
+  it("copies the closing message to the board", () => {
+    homeStub();
+    const result = run(STOP_HOOK, { input: stopInput("-Changed the token check") });
+
+    assertSilent(result);
+    assert.deepEqual(calls(), ["bin todo capture --terminal t13 --text=-Changed the token check --json"]);
+  });
+
+  it("does nothing without a message or outside Herdr", () => {
+    homeStub();
+    assertSilent(run(STOP_HOOK, { input: JSON.stringify({ hook_event_name: "Stop" }) }));
+    assertSilent(run(STOP_HOOK, { input: stopInput("done"), terminal: null }));
+    assertSilent(run(STOP_HOOK, { input: "not json" }));
+    assert.deepEqual(calls(), []);
+  });
+
+  it("sets a timeout above the script's own limits", () => {
+    const config = JSON.parse(readFileSync(join(ROOT, "hooks", "hooks.json"), "utf8"));
+    const [hook] = config.hooks.Stop[0].hooks;
+
+    assert.equal(hook.timeout, 5);
+    assert.match(hook.command, /stop\.sh/);
   });
 });
 

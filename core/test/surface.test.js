@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -495,4 +495,85 @@ test('closing a workspace ends its windows', (t) => {
   box.clearCalls();
   box.json(['close', '--workspace', manifest.id]);
   assert.ok(box.actions().some((call) => call[0] === 'hc' && call[1] === 'kill' && call[2] === 't90'));
+});
+
+function surfaceData(box, manifest, surface) {
+  return join(box.root, 'workspaces', manifest.id, 'surfaces', surface.id);
+}
+
+function closeWindowWithDrawing(box, manifest, surface) {
+  const boards = join(surfaceData(box, manifest, surface), 'boards');
+  mkdirSync(boards, { recursive: true });
+  writeFileSync(join(boards, 'Sketch.excalidraw'), JSON.stringify({ elements: [{ id: 'a' }] }));
+  box.setState({ hc: { t90: 'missing' } });
+}
+
+test('a closed window with a drawing stays as a draft', (t) => {
+  const { box, manifest, owner, surface } = openWindow(t);
+  closeWindowWithDrawing(box, manifest, surface);
+  box.json(['prune']);
+  assert.equal(box.manifest(manifest.id).surfaces.length, 1);
+  const [listed] = box.json(['surface', 'list']);
+  assert.deepEqual([listed.id, listed.terminal, listed.open], [surface.id, owner, false]);
+});
+
+test('surface list shows an open window and leaves out an empty closed one', (t) => {
+  const { box, surface } = openWindow(t);
+  assert.deepEqual(box.json(['surface', 'list']).map((item) => [item.id, item.open]), [[surface.id, true]]);
+  box.setState({ hc: { t90: 'missing' } });
+  assert.deepEqual(box.json(['surface', 'list']), []);
+});
+
+test('a board with only deleted elements is not a draft', (t) => {
+  const { box, manifest, surface } = openWindow(t);
+  const boards = join(surfaceData(box, manifest, surface), 'boards');
+  mkdirSync(boards, { recursive: true });
+  writeFileSync(join(boards, 'Sketch.excalidraw'), JSON.stringify({ elements: [{ id: 'a', isDeleted: true }] }));
+  box.setState({ hc: { t90: 'missing' } });
+  box.json(['prune']);
+  assert.deepEqual(box.manifest(manifest.id).surfaces, []);
+});
+
+test('resume starts a closed window again on the same id and data', (t) => {
+  const { box, manifest, surface } = openWindow(t);
+  closeWindowWithDrawing(box, manifest, surface);
+  box.clearCalls();
+  assert.deepEqual(box.json(['surface', 'resume', '--id', surface.id]), { id: surface.id, resumed: true, host: 't90' });
+  const [call] = box.actions();
+  assert.deepEqual(call.slice(0, 3), ['hc', 'run', '--bg']);
+  const pairs = Object.fromEntries(call.slice(11, -1).map((pair) => [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)]));
+  assert.equal(pairs.HWS_SURFACE_ID, surface.id);
+  assert.equal(pairs.COMPANION_DATA_DIR, surfaceData(box, manifest, surface));
+  assert.equal(pairs.HWS_SURFACE_WINDOW, '1');
+  assert.equal(box.manifest(manifest.id).surfaces.length, 1);
+});
+
+test('resume on an open window starts no second host', (t) => {
+  const { box, surface } = openWindow(t);
+  box.clearCalls();
+  const result = box.json(['surface', 'resume', '--id', surface.id]);
+  assert.equal(result.resumed, false);
+  assert.deepEqual(box.actions().filter((call) => call[1] === 'run'), []);
+});
+
+test('an agent cannot reach a draft through its dead socket', (t) => {
+  const { box, manifest, owner, surface } = openWindow(t);
+  assert.equal(box.json(['surface', 'socket', '--terminal', owner]).surface, surface.id);
+  closeWindowWithDrawing(box, manifest, surface);
+  assert.notEqual(box.hws(['surface', 'socket', '--terminal', owner, '--json']).code, 0);
+});
+
+test('discard moves a draft to the Trash and drops its record', (t) => {
+  const { box, manifest, surface } = openWindow(t);
+  closeWindowWithDrawing(box, manifest, surface);
+  assert.deepEqual(box.json(['surface', 'discard', '--id', surface.id]), { id: surface.id, discarded: true });
+  assert.deepEqual(box.manifest(manifest.id).surfaces, []);
+  assert.equal(existsSync(surfaceData(box, manifest, surface)), false);
+  assert.ok(existsSync(join(box.trashDir, `0-${surface.id}`, 'boards', 'Sketch.excalidraw')));
+});
+
+test('discard refuses an open window', (t) => {
+  const { box, manifest, surface } = openWindow(t);
+  assert.notEqual(box.hws(['surface', 'discard', '--id', surface.id, '--json']).code, 0);
+  assert.equal(box.manifest(manifest.id).surfaces.length, 1);
 });
