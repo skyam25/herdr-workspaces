@@ -628,6 +628,13 @@ button.stop-talk:hover {
   justify-content: center;
 }
 
+/* A narrow pane keeps the mic's icon, so the buttons after it stay on screen. */
+@media (max-width: 460px) {
+  .composer button.talk :is(.talk-label, kbd) {
+    display: none;
+  }
+}
+
 /* The composer sits at the bottom, so its chooser opens upward. */
 .composer .popover-panel {
   top: auto;
