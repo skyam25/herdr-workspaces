@@ -155,12 +155,13 @@ function dropSpaces(id, gone) {
 }
 
 // Manifests are read before the window, so a workspace created during the
-// listing is never pruned. An empty window counts as no answer.
+// listing is never pruned. A window with no local space counts as no answer,
+// because remote spaces can stay listed while the local core is down.
 export function prune() {
   const manifests = listManifests();
   const live = listLive();
-  if (!live || live.spaces.length === 0) {
-    return { data: { pruned: [], expired: [], skipped: true }, text: 'the Herdr window did not answer, so nothing changed' };
+  if (!live?.spaces.some((space) => !space.machine)) {
+    return { data: { pruned: [], expired: [], skipped: true }, text: 'the Herdr window listed no local space, so nothing changed' };
   }
   dropEmptyClosedWindows();
   dropOldHints(captureDir());

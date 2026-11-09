@@ -208,6 +208,15 @@ test('prune does nothing when the window reports no spaces', (t) => {
   assert.ok(box.manifest(manifest.id));
 });
 
+test('prune does nothing when the window lists only remote spaces', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  box.setState({ spaces: [{ ...space('frameworkdesktop/sp1', []), machine: 'frameworkdesktop' }] });
+  assert.equal(box.json(['prune']).skipped, true);
+  assert.equal(box.manifest(manifest.id).archived, undefined);
+  assert.deepEqual(box.manifest(manifest.id).spaces, [manifest.id]);
+});
+
 test('prune skips the standalone store', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
