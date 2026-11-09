@@ -94,7 +94,7 @@ export default class Tabs extends View {
       const held = flips.filter(f => f.tab === c.id);
       const program = isBoard ? null : paneList.find(p => p.tab === c.id && p.program?.agent)?.program ?? held[0]?.program ?? paneList.find(p => p.tab === c.id)?.program;
       const status = held.reduce((top, f) => ((RANK[f.status] ?? 0) > (RANK[top] ?? 0) ? f.status : top), c.status);
-      const name = !/^tb\d+$/.test(c.name) ? c.name : isBoard ? "Board" : program?.name ?? "Terminal";
+      const name = !/^tb\d+$/.test(c.name) ? c.name : isBoard ? "Tasks" : program?.name ?? "Terminal";
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover))

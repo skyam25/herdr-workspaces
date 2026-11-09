@@ -83,7 +83,7 @@ export default class Launcher extends View {
   orchestrateRow() {
     const target = this.orchestrateTarget();
     const args = target && ["orchestrator", "start", "--space", target.space, "--folder", target.folder];
-    return { id: "orchestrate", name: "Orchestrate this space", line: "Run the Board with an agent that assigns the work.", go: target ? (cx) => this.launch("orchestrate", args, cx) : null };
+    return { id: "orchestrate", name: "Orchestrate this space", line: "Run Tasks with an agent that assigns the work.", go: target ? (cx) => this.launch("orchestrate", args, cx) : null };
   }
 
   openFind() {
@@ -151,7 +151,7 @@ export default class Launcher extends View {
       { id: "new-workspace", name: "New workspace…", line: "A named place with its spaces, instructions and kept work.", go: () => this.openForm() },
       { id: "new-throwaway", name: "Throwaway", line: "Claude in a scratch workspace.", go: (cx) => this.launch("new-throwaway", ["new", "throwaway"], cx) },
       { id: "find-past", name: "Find past work…", line: "Bring back an archived workspace or a closed throwaway.", go: () => this.openFind() },
-      { id: "new-board", name: "New board", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled board", "--standalone"], cx) },
+      { id: "new-board", name: "New sketch", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled sketch", "--standalone"], cx) },
       { id: "new-note", name: "New note", line: "A prompt, template or note on its own.", go: (cx) => this.launch("new-note", ["surface", "open", "--type", "note", "--title", "Untitled note", "--standalone"], cx) },
       this.orchestrateRow(),
     ];

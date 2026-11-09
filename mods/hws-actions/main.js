@@ -1,5 +1,5 @@
 // The + menu on agent panes and in the chat composer. It starts boards, notes and page
-// reviews glued to an agent, and reaches the chat's file picker, the Board tab and the right panel.
+// reviews glued to an agent, and reaches the chat's file picker, the Tasks tab and the right panel.
 // Props: { terminal, chat?, pane?, space?, cwd?, lastReply?, boards? }. docs/CONTRACT.md lists the rows.
 
 import { View, div, svg } from "gpui-kit";
@@ -82,11 +82,15 @@ export default class Actions extends View {
     setShared(BOARD_LIST, (shared(BOARD_LIST) ?? []).filter((b) => b.id !== id));
   }
 
+  // An untitled sketch carries its type, `board`, as its title.
   boardRows(boards) {
-    return boards.flatMap((b, i) => [
-      { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${b.title}`, icon: "sketch", divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
-      ...(b.open ? [] : [{ id: `discard-${b.id}`, name: `Discard ${b.title}`, icon: "close", work: () => this.discardBoard(b.id) }]),
-    ]);
+    return boards.flatMap((b, i) => {
+      const title = b.title === "board" ? "sketch" : b.title;
+      return [
+        { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${title}`, icon: "sketch", divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
+        ...(b.open ? [] : [{ id: `discard-${b.id}`, name: `Discard ${title}`, icon: "close", work: () => this.discardBoard(b.id) }]),
+      ];
+    });
   }
 
   items() {

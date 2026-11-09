@@ -1,11 +1,11 @@
-// The Board tab and the right panel's Outputs, one copy per view, chosen by props().view.
-// A dialog copy with view "todo" or "add-several" shows a form.
-// An agent binds to a session only by exact terminal, so this mod never guesses.
+// The Tasks tab and the right panel's Outputs, one copy per view, chosen by props().view.
+// A dialog copy with view "todo", "add-several" or "models" shows a form.
+// Outputs binds an agent to a session only by exact terminal, so this mod never guesses.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, exec, home, layout, openOverlay, panes, props, readTextFile, run, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
-import { COLUMNS, DONE_SHOWN, POLL_MS, ago, agentName, board, cardSessions, cardSummary, cleanPath, describeSession, feedbackDir, fileName, findNode, isTracked, lastTouched, locateTerminal, mergeBoard, orchestratorFolder, outputGroups, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
+import { agents, exec, home, layout, openOverlay, panes, props, readTextFile, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
+import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, agentName, cardSummary, cleanPath, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, orchestratorFolder, outputGroups, ownerTag, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
 import { focusAgent, hws, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
@@ -15,11 +15,10 @@ const LANE_PX = 200;
 const BOARD_CHROME_PX = 42;
 const LANES_FIT_PX = 840;
 const LOADING = "Loading…";
-const TRACKING_OFF = "Item tracking is off for these sessions. Turn it on in the Agent Brief app.";
-const NO_AGENT_ITEMS = { waiting: [], progress: [], done: [] };
-const BOARD_HINT = "Add a card, press Allow on it, then press Run.";
-const NEEDS_WORKSPACE = "The Board is only available inside a workspace. Add this space to a workspace to use it.";
+const TASKS_HINT = "Add a card, press Allow on it, then press Run.";
+const NEEDS_WORKSPACE = "Tasks only work inside a workspace. Add this space to a workspace to use them.";
 const STOP_QUESTION = "Stop orchestrator and its workers?";
+const archiveQuestion = (n) => `Archive ${n} done ${n === 1 ? "card" : "cards"}?`;
 
 // Claude reports no status while a start-up prompt is open, so silence this long means it is waiting.
 const SILENT_START_MS = 20000;
@@ -68,19 +67,22 @@ export default class Work extends View {
     this.orchestrator = undefined;
     this.orchestratorBusy = null;
     this.confirmingStop = false;
+    this.confirmingArchive = false;
+    this.archiving = false;
     this.members = [];
-    if (this.kind === "tasks") this.makeQuickAdd();
-    this.syncTodos(cx);
-    this.poll(cx);
+    if (this.kind === "tasks") {
+      this.makeQuickAdd();
+      this.syncTodos(cx);
+    } else this.poll(cx);
 
-    // The board keeps polling while hidden because the tab bar shows its waiting count.
+    // Tasks keeps polling while hidden because the tab bar shows its waiting count.
     cx.timer.every(POLL_MS, (cx) => {
-      if (this.kind === "tasks" || outputsShowing()) this.poll(cx);
       if (this.kind === "tasks") this.loadTodos(cx);
+      else if (outputsShowing()) this.poll(cx);
     });
   }
 
-  // The Board lists its spaces with its cards, so only Outputs asks for them.
+  // Tasks lists its spaces with its cards, so only Outputs asks for them.
   setMembers(members, cx) {
     if (JSON.stringify(members) === JSON.stringify(this.members)) return;
     this.members = members;
@@ -103,7 +105,7 @@ export default class Work extends View {
     this.fetching = true;
     cx.spawn(async (cx) => {
       try {
-        const [, brief] = await Promise.allSettled([this.kind === "outputs" ? this.loadMembers() : null, exec("agent-brief", ["sessions", "--json"])]);
+        const [, brief] = await Promise.allSettled([this.loadMembers(), exec("agent-brief", ["sessions", "--json"])]);
         if (brief.status === "rejected") throw brief.reason;
         const r = brief.value;
         if (r.code === 0) {
@@ -122,7 +124,6 @@ export default class Work extends View {
 
   // Loads to-dos when the active space changes or a dialog reports a change.
   syncTodos(cx) {
-    if (this.kind !== "tasks") return;
     const space = spaces().find((s) => s.active)?.id ?? null;
     const revision = shared(TODOS_CHANGED) ?? 0;
     if (space === this.todoSpace && revision === this.todoRevision) return;
@@ -132,6 +133,7 @@ export default class Work extends View {
       this.orchestrator = undefined;
       this.plainSpace = false;
       this.confirmingStop = false;
+      this.confirmingArchive = false;
       this.note = null;
       this.drag = null;
       this.over = null;
@@ -270,6 +272,31 @@ export default class Work extends View {
     this.changeTodo(["resume", "--id", id], cx);
   }
 
+  askArchive(asking, cx) {
+    this.confirmingArchive = asking;
+    cx.notify();
+  }
+
+  // Archives every Done card in one command, then reloads.
+  archiveDone(cx) {
+    this.confirmingArchive = false;
+    if (this.archiving || !this.todoSpace) return;
+    this.archiving = true;
+    this.note = null;
+    cx.notify();
+    const space = this.todoSpace;
+    cx.spawn(async (cx) => {
+      try {
+        await hws(["todo", "archive", "--done", "--space", space]);
+        this.loadTodos(cx);
+      } catch (e) {
+        this.note = message(e);
+      }
+      this.archiving = false;
+      cx.notify();
+    });
+  }
+
   // Counts for the header and the cards Allow all acts on.
   boardCounts() {
     const cards = (this.todos ?? []).filter((x) => x.column === "todo");
@@ -386,12 +413,15 @@ export default class Work extends View {
     cx.notify();
   }
 
-  // Recomputes the active space's agents and their sessions, and loads files when they change.
+  // Tasks names the workspace's agents. Outputs binds them to sessions and loads files when they change.
   rebind(cx, reload = false) {
     const lists = { agents: agents(), panes: panes(), terminals: terminals(), spaces: spaces() };
     const active = lists.spaces.find((s) => s.active);
+    if (this.kind === "tasks") {
+      this.targets = active ? sendTargets(lists, active.id, this.members) : [];
+      return;
+    }
     this.remote = Boolean(active?.machine);
-    this.targets = active ? sendTargets(lists, active.id, this.members) : [];
     this.roster = roster(lists, this.members);
     this.bound = this.roster.map((agent) => ({ agent, session: sessionFor(this.sessions, agent.address) })).filter((b) => b.session);
     const key = this.bound.map((b) => b.session.sessionId).join(" ");
@@ -407,14 +437,13 @@ export default class Work extends View {
     const id = session.sessionId;
     const cwd = cleanPath(session.cwd);
     const outputsPath = session.outputsPath ?? `${cwd}/.feedback/outputs/${id}.json`;
-    const itemsPath = session.itemsPath ?? `${cwd}/.feedback/items/${id}.md`;
     cx.spawn(async (cx) => {
-      const [outputs, items] = await Promise.all([readTextFile(outputsPath).catch(() => null), readTextFile(itemsPath).catch(() => null)]);
+      const outputs = await readTextFile(outputsPath).catch(() => null);
       if (!this.bound.some((b) => b.session.sessionId === id)) return;
-      this.docs.set(id, { outputs: outputs === null ? [] : parseOutputs(outputs), items: items === null ? null : parseItems(items) });
+      this.docs.set(id, { outputs: outputs === null ? [] : parseOutputs(outputs) });
 
-      // A missing folder has nothing to watch, so a later poll arms this.
-      if (outputs !== null || items !== null) this.watch(feedbackDir(session), cx);
+      // A missing file has nothing to watch, so a later poll arms this.
+      if (outputs !== null) this.watch(feedbackDir(session), cx);
       cx.notify();
     });
   }
@@ -443,11 +472,11 @@ export default class Work extends View {
     });
   }
 
-  // Why the panel has no agents to show, or null when it has.
+  // Why Outputs has no agents to show, or null when it has.
   blocker() {
     if (this.problem) return this.problem;
     if (this.sessions === null) return LOADING;
-    if (this.remote) return this.kind === "tasks" ? "This space runs on another machine, so agent items are not shown." : "This space runs on another machine. This panel only covers this Mac.";
+    if (this.remote) return "This space runs on another machine. This panel only covers this Mac.";
     if (this.roster.length === 0) return "No Claude Code agents in this space.";
     if (this.bound.length === 0) return "Agent Brief reports no session for the Claude Code agents in this space.";
     if (!this.bound.every((b) => this.docs.has(b.session.sessionId))) return LOADING;
@@ -463,9 +492,8 @@ export default class Work extends View {
     if (this.form) return this.form.render();
     const t = theme();
     this.rebind(cx);
-    this.syncTodos(cx);
-    const blocker = this.blocker();
-    const body = this.kind === "outputs" ? this.outputsBody(t, blocker) : this.tasksBody(t, blocker);
+    if (this.kind === "tasks") this.syncTodos(cx);
+    const body = this.kind === "outputs" ? this.outputsBody(t, this.blocker()) : this.tasksBody(t);
     return v_flex()
       .id("root")
       .on_size_change((size, cx) => {
@@ -512,14 +540,13 @@ export default class Work extends View {
     return div().p(14).text_size(12).text_color(t.dim).whitespace_normal().child(text);
   }
 
-  tasksBody(t, blocker) {
+  tasksBody(t) {
     // One copy per render, because every card reads these and `terminals()` copies the whole list.
     this.frame = { live: terminals(), counts: this.boardCounts() };
-    if (this.plainSpace) return { header: this.header(t, "Board", null, h_flex()), quiet: null, content: this.message(t, NEEDS_WORKSPACE) };
+    if (this.plainSpace) return { header: this.header(t, "Tasks", null, h_flex()), quiet: null, content: this.message(t, NEEDS_WORKSPACE) };
 
-    const agentColumns = blocker === null ? board(this.bound, this.docs) : NO_AGENT_ITEMS;
-    const columns = mergeBoard(this.todos ?? [], agentColumns);
-    if (blocker !== LOADING && (this.todos !== null || this.todoProblem !== null)) this.publishWaiting(columns.waiting.length);
+    const columns = todoColumns(this.todos ?? []);
+    if (this.todos !== null || this.todoProblem !== null) this.publishWaiting(columns.waiting.length);
     const open = columns.todo.length + columns.doing.length + columns.waiting.length;
     const controls = h_flex()
       .flex_none()
@@ -527,23 +554,29 @@ export default class Work extends View {
       .items_center()
       .child(this.runStatus(t))
       .children(this.orchestratorControls(t))
-      .when(Boolean(this.modelSettings?.orchestrator), (el) => el.child(this.headerButton(t, "models", modelsLine(this.modelSettings), () => this.openModels())))
+      .when(Boolean(this.modelSettings?.orchestrator), (el) => el.child(this.headerButton(t, "models", this.modelsLabel(t), () => this.openModels())))
       .children(this.runButton(t))
       .child(this.headerButton(t, "add", "+ Add", () => this.openTodo(null)))
       .child(this.headerButton(t, "add-several", "Add several", () => this.openSeveral()));
-    const header = this.header(t, "Board", blocker === LOADING ? null : open, controls);
+    const header = this.header(t, "Tasks", this.todos === null ? null : open, controls);
     const fits = this.width >= LANES_FIT_PX;
-    const empty = this.todos !== null && blocker !== LOADING && Object.values(columns).every((cards) => cards.length === 0);
+    const empty = this.todos !== null && Object.values(columns).every((cards) => cards.length === 0);
     const lanes = COLUMNS.map((c) => this.lane(t, c, columns[c.key], fits, empty));
     const content = h_flex().id("board").flex_1().min_h(0).w_full().items_stretch().p(8).gap(8).overflow_x_scrollbar().children(lanes);
-    return { header, quiet: this.quietLine(blocker, agentColumns), content };
+    return { header, quiet: this.note ?? this.todoProblem, content };
+  }
+
+  // A label names the arrow, so the control reads as the models a run uses.
+  modelsLabel(t) {
+    return h_flex().gap(6).items_center().child(div().text_color(t.dim).child("Models")).child(div().child(modelsLine(this.modelSettings)));
   }
 
   // What is ready, in flight and owed, so the header answers "what happens if I press Run?".
   runStatus(t) {
     const { ready, unassigned, running, waiting } = this.frame.counts;
     const blocked = this.blockedWorkers();
-    const parts = [blocked > 0 && `${blocked} blocked, press Open`, running > 0 && `${running} running`, waiting > 0 && `${waiting} waiting on you`, ready === 0 && unassigned.length > 0 && `${unassigned.length} to Allow`].filter(Boolean);
+    const ok = unassigned.length;
+    const parts = [blocked > 0 && `${blocked} blocked, press Open`, running > 0 && `${running} running`, waiting > 0 && `${waiting} waiting on you`, ready === 0 && ok > 0 && `${ok} ${ok === 1 ? "needs" : "need"} your OK`].filter(Boolean);
     return div().id("run-status").flex_none().px(6).text_size(11).text_color(t.dim).child(parts.join(" · "));
   }
 
@@ -586,17 +619,6 @@ export default class Work extends View {
       .child(this.headerButton(t, "orchestrator-stop-yes", "Stop", (_e, cx) => this.stopOrchestrator(cx), true, true));
   }
 
-  // The one line under the header. A failed action outranks the state of agent items.
-  quietLine(blocker, agentColumns) {
-    if (this.note) return this.note;
-    if (this.todoProblem) return this.todoProblem;
-    if (blocker === LOADING) return null;
-    if (blocker !== null) return blocker;
-    const agentItems = agentColumns.waiting.length + agentColumns.progress.length + agentColumns.done.length;
-    const tracked = this.bound.some((b) => isTracked(b.session, this.docs.get(b.session.sessionId)));
-    return agentItems === 0 && !tracked ? TRACKING_OFF : null;
-  }
-
   headerButton(t, id, text, action, enabled = true, primary = false) {
     return div()
       .id(id)
@@ -635,9 +657,12 @@ export default class Work extends View {
       .child(div().flex_none().size(8).rounded_full().bg(t[column.color]))
       .child(div().text_size(12).font_medium().text_color(t.muted).child(column.name))
       .child(div().text_size(12).text_color(t.dim).child(String(cards.length)))
-      .when(column.key === "todo" && unassigned.length > 1, (el) => el.child(div().flex_1()).child(this.headerButton(t, "allow-all", `Allow all ${unassigned.length}`, (_e, cx) => this.allowAll(unassigned, cx))));
+      .when(column.key === "todo" && unassigned.length > 1, (el) => el.child(div().flex_1()).child(this.headerButton(t, "allow-all", `Allow all ${unassigned.length}`, (_e, cx) => this.allowAll(unassigned, cx))))
+      .when(column.key === "done" && cards.length > 0 && !this.confirmingArchive, (el) =>
+        el.child(div().flex_1()).child(this.headerButton(t, "archive-done", this.archiving ? "Archiving…" : "Archive done", (_e, cx) => this.askArchive(true, cx), !this.archiving)),
+      );
     const rows = this.laneRows(t, column, cards);
-    if (empty && column.key === "todo") rows.push(div().id("board-hint").flex_none().px(4).py(4).text_size(11.5).text_color(t.dim).whitespace_normal().child(BOARD_HINT));
+    if (empty && column.key === "todo") rows.push(div().id("board-hint").flex_none().px(4).py(4).text_size(11.5).text_color(t.dim).whitespace_normal().child(TASKS_HINT));
     const lane = v_flex()
       .id(`lane-${column.key}`)
       .h_full()
@@ -654,13 +679,31 @@ export default class Work extends View {
     return lane.flex_none().w(width)
       .child(head)
       .when(column.key === "todo", (el) => el.child(this.quickAddField(t)))
+      .when(column.key === "done" && cards.length > 0 && this.confirmingArchive, (el) => el.child(this.archiveConfirm(t, cards.length)))
       .child(v_flex().id(`scroll-${column.key}`).flex_1().min_h(0).overflow_y_scrollbar().gap(6).children(rows));
+  }
+
+  // Asks in place, as Stop does. Moving the pointer away cancels.
+  archiveConfirm(t, count) {
+    return h_flex()
+      .id("archive-confirm")
+      .flex_none()
+      .flex_wrap()
+      .gap(4)
+      .px(4)
+      .items_center()
+      .on_hover((hovered, cx) => {
+        if (!hovered) this.askArchive(false, cx);
+      })
+      .child(div().flex_1().min_w(0).text_size(11).text_color(t.foreground).whitespace_normal().child(archiveQuestion(count)))
+      .child(this.headerButton(t, "archive-done-no", "Cancel", (_e, cx) => this.askArchive(false, cx)))
+      .child(this.headerButton(t, "archive-done-yes", "Archive", (_e, cx) => this.archiveDone(cx), true, true));
   }
 
   laneRows(t, column, cards) {
     const isDone = column.key === "done";
     const shown = isDone && !this.doneOpen ? cards.slice(0, DONE_SHOWN) : cards;
-    const rows = shown.map((c) => (c.kind === "todo" ? this.todoCard(t, c, column.key) : this.card(t, c)));
+    const rows = shown.map((c) => this.todoCard(t, c, column.key));
     if (isDone && cards.length > DONE_SHOWN) rows.push(this.moreRow(t, cards.length - DONE_SHOWN));
     return rows;
   }
@@ -690,34 +733,33 @@ export default class Work extends View {
       .child(text);
   }
 
-  ownerTags(item) {
-    if (item.owner === "mine") return ["Mine"];
-    if (item.column !== "todo") return [];
-    if (item.owner === "unassigned") return ["Unassigned"];
-    return item.owner === "agent" ? ["Agent"] : [];
-  }
-
   describe(address) {
     return describeSession({ terminals: this.frame.live, targets: this.targets, orchestrator: this.orchestrator?.terminal }, address);
   }
 
-  // The session the card links to, with Open while that session is live.
-  sessionRow(t, item, { role, address }) {
+  // A different session that added the card, by name only while it is live and named.
+  fromTag(item) {
+    if (!item.addedBy || item.addedBy === item.terminal) return null;
+    const { name, live } = this.describe(item.addedBy);
+    return `From ${live && name ? name : SOME_AGENT}`;
+  }
+
+  // The session running the card, with Open while it is live and Resume once it has ended.
+  sessionRow(t, item, address) {
     const { name, status, live } = this.describe(address);
+    const text = live ? [`Run by ${name ?? SOME_AGENT}`, status].filter(Boolean).join(" · ") : SESSION_ENDED;
     return h_flex()
       .id(`session-${item.id}`)
       .gap(6)
       .items_center()
-      .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child([`${role} ${name}`, status].filter(Boolean).join(" · ")))
+      .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child(text))
       .when(live, (row) => row.child(this.rowAction(t, `open-${item.id}`, "Open", () => openSession(address))))
       .when(!live && Boolean(item.session), (row) => row.child(this.rowAction(t, `resume-${item.id}`, "Resume", (cx) => this.resumeTodo(item.id, cx))));
   }
 
   todoCard(t, item, columnKey) {
     const summary = item.summary ?? cardSummary(item);
-    const session = item.terminal ? cardSessions(item)[0] : null;
-    const addedElsewhere = item.addedBy && item.addedBy !== item.terminal;
-    const tags = [...this.ownerTags(item), ...(item.worktree ? ["Worktree"] : []), ...(addedElsewhere ? [`From ${this.describe(item.addedBy).name}`] : [])];
+    const tags = [ownerTag(item), item.worktree && "Worktree", this.fromTag(item)].filter(Boolean);
     const canAllow = item.owner === "unassigned" && item.column === "todo";
     return v_flex()
       .id(`todo-${item.id}`)
@@ -736,7 +778,7 @@ export default class Work extends View {
       .on_hover((hovered, cx) => this.hoverCard(item.id, hovered, cx))
       .child(div().line_height("18px").max_h(36).overflow_hidden().whitespace_normal().child(item.title))
       .when(Boolean(summary), (el) => el.child(div().line_height("15px").max_h(45).overflow_hidden().whitespace_normal().text_size(11).text_color(t.dim).child(summary)))
-      .when(session !== null, (el) => el.child(this.sessionRow(t, item, session)))
+      .when(Boolean(item.terminal), (el) => el.child(this.sessionRow(t, item, item.terminal)))
       .when(tags.length > 0, (el) =>
         el.child(
           h_flex()
@@ -747,30 +789,6 @@ export default class Work extends View {
             .when(canAllow, (row) => row.child(this.rowAction(t, `allow-${item.id}`, "Allow", (cx) => this.allowTodo(item.id, cx), t.accent))),
         ),
       );
-  }
-
-  card(t, card) {
-    const meta = card.last === null ? card.name : `${card.name} · ${card.last}`;
-    return v_flex()
-      .id(`card-${card.agent.address}-${card.n}`)
-      .flex_none()
-      .p(8)
-      .gap(3)
-      .rounded(7)
-      .border_1()
-      .border_color(t.border)
-      .bg(t.background)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click(() => focusAgent(card.agent))
-      .child(
-        h_flex()
-          .items_start()
-          .gap(6)
-          .child(div().flex_none().text_size(12).line_height("18px").text_color(t.dim).child(`#${card.n}`))
-          .child(div().flex_1().min_w(0).line_height("18px").max_h(36).overflow_hidden().whitespace_normal().child(card.title)),
-      )
-      .child(div().truncate().text_size(11).text_color(t.dim).child(meta));
   }
 
   moreRow(t, hidden) {

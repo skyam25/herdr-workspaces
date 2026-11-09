@@ -43,12 +43,13 @@ test("the workspace panel's pane is titled Workspace", async () => {
   assert.doesNotMatch(m.text(), /hws-panel/);
 });
 
-test("a Board pane is titled Board with no folder and keeps its close button", async () => {
+test("the kanban pane is titled Tasks with no folder and keeps its close button", async () => {
   const H = world({ panes: [{ pane: "p3", terminal: null, tab: "tb1", focused: true, mod: "hws-work", title: "Work", cwd: "/w" }] });
   const m = await mount("hws-pane", { pane: "p3" });
   m.view.hovered = true;
 
-  assert.match(m.text(), /^Board\b/);
+  assert.match(m.text(), /^Tasks\b/);
+  assert.doesNotMatch(m.text(), /Board/);
   assert.doesNotMatch(m.text(), /Work|\/w/);
   assert.equal(m.has("ph-mode-p3-chat"), false);
   assert.equal(m.has("ph-new-p3"), false);

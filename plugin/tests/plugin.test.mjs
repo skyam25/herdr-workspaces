@@ -66,6 +66,7 @@ function stub(
     json = `echo '${MANIFEST}'`,
     tidy = ":",
     scan = ":",
+    match = ":",
   } = {},
 ) {
   mkdirSync(folder, { recursive: true });
@@ -80,6 +81,7 @@ case "$1 $2" in
   "current --json") ${json} ;;
   "tidy status") ${tidy} ;;
   "artifact scan") ${scan} ;;
+  "space match") ${match} ;;
   register*) ${register} ;;
 esac
 `,
@@ -121,7 +123,7 @@ function contextOf(result) {
 }
 
 function assertTaskList(context) {
-  for (const text of ["on the Board", "`hws todo list --json`", '`hws todo add --title="..."`', "lands unassigned", "unless asked"]) {
+  for (const text of ["in Tasks", "`hws todo list --json`", '`hws todo add --title="..."`', "lands unassigned", "unless asked"]) {
     assert.ok(context.includes(text), text);
   }
 }
@@ -252,7 +254,63 @@ describe("session-start hook", () => {
     homeStub({ current: ":", tidy: status() });
 
     assertSilent(run(HOOK));
-    assert.deepEqual(calls(), [REGISTER, "bin current --line"].sort());
+    assert.deepEqual(calls(), [REGISTER, "bin current --line", "bin space match --json"].sort());
+  });
+
+  const matchBody = (...names) =>
+    `echo '${JSON.stringify({ space: "sp1", folder: FOLDER, candidates: names.map((name, index) => ({ id: `w${index}`, name, folder: FOLDER, home: null })) })}'`;
+
+  it("names the workspace that owns this folder when the space is not in it", () => {
+    homeStub({ current: ":", match: matchBody("checkout demo") });
+
+    assert.equal(
+      contextOf(run(HOOK, { bundle: HERDR_APP })),
+      'This folder belongs to the Herdr workspace "checkout demo", but this space is not part of it, so its instructions and task list do not apply here. The person can add this space from the Workspace panel. Mention this to the person once, and do not act on it yourself.',
+    );
+    assert.deepEqual(calls(), [REGISTER, "bin current --line", "bin space match --json"].sort());
+  });
+
+  it("names up to three owning workspaces and counts the rest", () => {
+    homeStub({ current: ":", match: matchBody("one", "two", "three", "four") });
+
+    const context = contextOf(run(HOOK));
+    assert.ok(context.startsWith('This folder belongs to the Herdr workspaces "one", "two", "three" and 1 more, but this space is not part of any of them, so their instructions'), context);
+    assert.ok(!context.includes("four"));
+  });
+
+  it("joins two owning workspaces with and", () => {
+    homeStub({ current: ":", match: matchBody("one", "two") });
+    assert.ok(contextOf(run(HOOK)).startsWith('This folder belongs to the Herdr workspaces "one" and "two", but'));
+  });
+
+  for (const [name, match] of [
+    ["has no candidates", matchBody()],
+    ["fails", "echo oops >&2; exit 1"],
+    ["prints malformed JSON", "echo '{not json'"],
+  ]) {
+    it(`stays silent outside a workspace when space match ${name}`, () => {
+      homeStub({ current: ":", match });
+      assertSilent(run(HOOK));
+    });
+  }
+
+  it("stays silent when space match hangs, within the hook's budget", () => {
+    homeStub({ current: ":", match: "sleep 8" });
+    const result = run(HOOK);
+
+    assertSilent(result);
+    assert.ok(result.elapsed < 5000, `took ${result.elapsed}ms`);
+  });
+
+  it("skips space match inside a workspace and when current fails", () => {
+    homeStub({ match: matchBody("checkout demo") });
+    assert.equal(contextOf(run(HOOK)), LINE);
+    assert.ok(!calls().includes("bin space match --json"));
+
+    rmSync(log, { force: true });
+    homeStub({ current: "echo oops >&2; exit 1", match: matchBody("checkout demo") });
+    assertSilent(run(HOOK));
+    assert.ok(!calls().includes("bin space match --json"));
   });
 
   it("never calls hws place, which creates folders", () => {

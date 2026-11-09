@@ -1,9 +1,9 @@
-// Pure logic for the Tasks and Outputs panel. Nothing here calls Herdr.
+// Pure logic for the Tasks view and the Outputs panel. Nothing here calls Herdr.
 
 export const POLL_MS = 10000;
 export const DONE_SHOWN = 8;
 
-// The board's columns. `drop` marks the ones a to-do can move to.
+// The Tasks columns. `drop` marks the ones a card can move to.
 export const COLUMNS = [
   { key: "todo", name: "To do", color: "idle", drop: true },
   { key: "doing", name: "In progress", color: "working", drop: true },
@@ -42,28 +42,6 @@ export function parseOutputs(text) {
     return true;
   });
 }
-
-// Same format as companion/src/shared/items.ts.
-export function parseItems(text) {
-  const items = [];
-  let current;
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/\r$/, "");
-    const item = /^- \[( |x|X)\] #(\d+)\s*(.*)$/.exec(line);
-    if (item) {
-      current = { n: Number(item[2]), title: item[3].trim(), done: item[1] !== " ", lines: [] };
-      items.push(current);
-    } else if (line.trim() !== "" && /^\s+/.test(line) && current) {
-      const spoken = /^(Claude|You):\s?(.*)$/.exec(line.trim());
-      if (spoken) current.lines.push({ by: spoken[1] === "You" ? "you" : "claude", text: spoken[2].trim() });
-    } else if (line.trim() !== "") {
-      current = undefined;
-    }
-  }
-  return items;
-}
-
-export const awaitsUser = (item) => !item.done && item.lines.at(-1)?.by === "claude";
 
 export function ago(ms) {
   const minutes = Math.floor(Math.max(0, ms) / 60000);
@@ -122,21 +100,7 @@ export function sessionFor(sessions, address) {
     .reduce((best, s) => (best === null || (s.lastSeen ?? 0) > (best.lastSeen ?? 0) ? s : best), null);
 }
 
-// Sorts items into Tasks columns. Items carry no timestamps, so a higher #n counts as newer.
-export function board(bound, docs) {
-  const columns = { waiting: [], progress: [], done: [] };
-  for (const { agent, session } of bound) {
-    for (const item of docs.get(session.sessionId)?.items ?? []) {
-      const last = item.lines.filter((l) => l.by === "claude").at(-1)?.text ?? null;
-      const card = { n: item.n, title: item.title, agent, name: agentName(session), last };
-      (item.done ? columns.done : awaitsUser(item) ? columns.waiting : columns.progress).push(card);
-    }
-  }
-  columns.done.sort((a, b) => b.n - a.n);
-  return columns;
-}
-
-// Summaries are worked out once per load, because the Board draws every card on each render.
+// Summaries are worked out once per load, because Tasks draws every card on each render.
 export const todoItems = (listed) => (listed?.items ?? []).map((item) => ({ ...item, summary: cardSummary(item) }));
 
 function modelName(settings, role) {
@@ -182,15 +146,17 @@ export function cardSessions(item) {
 }
 
 const STATUS_WORDS = { working: "Working", blocked: "Needs you", idle: "Idle", done: "Finished" };
+export const SESSION_ENDED = "Session ended";
+export const SOME_AGENT = "an agent";
 
-// Names a session and says whether it can still be opened.
+// Names a session and says whether it can still be opened. `name` is null when only the address is known.
 export function describeSession({ terminals, targets, orchestrator }, address) {
   const record = terminals.find((x) => x.address === address);
   const live = record?.state === "live";
-  const worker = record?.labels?.["hws.todo"] ? `Worker ${record.name ?? address}` : null;
+  const worker = record?.labels?.["hws.todo"] ? ["Worker", record.name].filter(Boolean).join(" ") : null;
   return {
-    name: address === orchestrator ? "Orchestrator" : worker ?? targets.find((x) => x.address === address)?.name ?? address,
-    status: live ? STATUS_WORDS[record.status] ?? "" : "Ended",
+    name: address === orchestrator ? "Orchestrator" : worker ?? targets.find((x) => x.address === address)?.name ?? null,
+    status: live ? STATUS_WORDS[record.status] ?? "" : SESSION_ENDED,
     live,
   };
 }
@@ -200,15 +166,17 @@ export function cardTimes(item, now) {
   return item.updatedAt && item.updatedAt !== item.createdAt ? [...times, `Updated ${ago(now - item.updatedAt)}`] : times;
 }
 
-// Puts the person's to-dos beside the agents' items. To-dos come first in each column.
-export function mergeBoard(todos, agentColumns) {
-  const mine = (column) => todos.filter((x) => x.column === column).map((x) => ({ ...x, kind: "todo" }));
-  return {
-    todo: mine("todo"),
-    doing: [...mine("doing"), ...agentColumns.progress],
-    waiting: [...mine("waiting"), ...agentColumns.waiting],
-    done: [...mine("done"), ...agentColumns.done],
-  };
+// Sorts cards into their columns, keeping list order.
+export function todoColumns(todos) {
+  return Object.fromEntries(COLUMNS.map(({ key }) => [key, todos.filter((x) => x.column === key)]));
+}
+
+export const OWNER_NAMES = { mine: "Mine", unassigned: "Needs your OK", agent: "Ready" };
+
+// The one owner tag a card shows. Outside To do only Mine shows.
+export function ownerTag(item) {
+  if (item.owner === "mine") return OWNER_NAMES.mine;
+  return item.column === "todo" ? OWNER_NAMES[item.owner] ?? null : null;
 }
 
 // Where an orchestrator starts: the space's first agent's folder, else the space's folder.
@@ -229,7 +197,7 @@ export function locateTerminal({ panes, terminals }, address) {
   return chat ? { tab: chat.tab, chatPane: chat.pane } : null;
 }
 
-// Dialog heights in px. The forms draw with these and the board adds them up.
+// Dialog heights in px. The forms draw with these and Tasks adds them up.
 export const FORM = { pad: 18, gap: 12, heading: 20, label: 15, labelGap: 5, input: 34, notes: 96, lines: 170, chip: 26, sendRow: 28, sendGap: 4, note: 48, story: 360, side: 300, columnGap: 24, problem: 16, footerTop: 4, button: 30, frame: 4, sectionName: 18, rowGap: 8 };
 
 export const MODELS_DIALOG = { width: 520 };
@@ -241,7 +209,7 @@ const labeled = (height) => FORM.gap + FORM.label + FORM.labelGap + height;
 // Padding, heading, the error line, the footer and Herdr's frame.
 const shellHeight = () => FORM.pad * 2 + FORM.heading + FORM.gap + FORM.problem + FORM.footerTop + FORM.button + FORM.pad + FORM.frame;
 
-// As large as the Board allows, up to a size that still reads comfortably.
+// As large as Tasks allows, up to a size that still reads comfortably.
 export function todoDialogSize({ width, height }) {
   const fit = (room, most, least) => Math.max(least, Math.min(most, room - TODO_DIALOG.margin));
   return { width: fit(width, TODO_DIALOG.width, TODO_DIALOG.leastWidth), height: fit(height, TODO_DIALOG.height, TODO_DIALOG.leastHeight) };
@@ -259,9 +227,6 @@ export const severalDialogHeight = () => shellHeight() + labeled(FORM.lines);
 // The recommended line, then a section per role: name, hint and one row per choice.
 const roleSectionHeight = (rows) => FORM.gap + FORM.sectionName + 2 + FORM.label + 2 + rows * FORM.chip + (rows - 1) * FORM.rowGap;
 export const modelsDialogHeight = () => shellHeight() + FORM.label + roleSectionHeight(2) + roleSectionHeight(3);
-
-// True when a session reports tracking on or already has an items file.
-export const isTracked = (session, doc) => Boolean(session.trackItems || session.itemsPath || (doc && doc.items !== null));
 
 const newestFirst = (list) => [...list].sort((a, b) => lastTouched(b) - lastTouched(a));
 

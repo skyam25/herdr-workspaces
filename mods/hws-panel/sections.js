@@ -7,9 +7,10 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, TextView } from "gpui-base";
 import { run } from "herdr";
 import { tilde } from "./hws.js";
-import { revealLabel } from "./cites.js";
+import { revealLabel, showBoard } from "./cites.js";
 import { openArtifactMenu } from "./artifactmenu.js";
-import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, isNote, linkCite, livePass, placeRows, recordedSessions } from "./context.js";
+import { openRowMenu, openStageMenu } from "./rowmenu.js";
+import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, isNote, linkCite, livePass, placeRows, recordedSessions, tasksLine, typeLabel } from "./context.js";
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
 
@@ -31,6 +32,27 @@ function smallButton(t, id, text, action, enabled = true) {
     .text_size(11)
     .text_color(enabled ? t.muted : t.dim)
     .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.raised).text_color(t.foreground)).on_click(action))
+    .child(text);
+}
+
+// The one filled button in the panel, for its main action.
+function filledButton(t, id, text, action, enabled = true) {
+  return div()
+    .id(id)
+    .flex_none()
+    .px(8)
+    .h(20)
+    .flex()
+    .items_center()
+    .rounded(5)
+    .border_1()
+    .border_color(t.solid)
+    .bg(t.solid)
+    .text_size(11)
+    .font_medium()
+    .text_color(t.solid_foreground)
+    .opacity(enabled ? 1 : 0.5)
+    .when(enabled, (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)).on_click(action))
     .child(text);
 }
 
@@ -76,15 +98,75 @@ function freshnessRow({ t, host, workspace, target }) {
     .items_center()
     .when(Boolean(level), (el) => el.child(freshnessDot(t, level)))
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(sentence))
-    .child(smallButton(t, "open-current", "Open note", (_e, cx) => host.openCurrent(target, cx), Boolean(context?.currentPath && (target || context.current)) && !host.busy))
-    .child(smallButton(t, "tidy", live ? "Tidy again" : "Tidy", (_e, cx) => host.startTidy(workspace, cx), !host.busy));
+    .child(filledButton(t, "tidy", live ? "Tidy again" : "Tidy", (_e, cx) => host.startTidy(workspace, cx), !host.busy))
+    .child(smallButton(t, "open-current", "Open note", (_e, cx) => host.openCurrent(target, cx), Boolean(context?.currentPath && (target || context.current)) && !host.busy));
+}
+
+// Open cards by column, loaded beside the context. A workspace with no Board offers one.
+function tasksRow({ t, host, workspace }) {
+  if (!workspace.board) {
+    return h_flex()
+      .pt(4)
+      .gap(6)
+      .items_center()
+      .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child("No task list yet"))
+      .child(smallButton(t, "add-tasks", host.busy === "add-tasks" ? "Adding…" : "Add tasks", (_e, cx) => host.addTasks(workspace, cx), !host.busy));
+  }
+  const tasks = host.tasks?.workspaceId === workspace.id ? host.tasks : null;
+  const counts = !tasks ? "Checking…" : tasks.counts ? tasksLine(tasks.counts) : "";
+  return h_flex()
+    .id("tasks-row")
+    .mt(4)
+    .h(22)
+    .gap(8)
+    .items_center()
+    .rounded(5)
+    .cursor_pointer()
+    .hover((s) => s.bg(t.hover))
+    .on_click(() => showBoard(workspace.board))
+    .child(div().flex_none().text_size(11.5).font_medium().text_color(t.foreground).child("Tasks"))
+    .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(counts));
+}
+
+// The folder name sits at the end, so the middle gives way first.
+const pathText = (t, path) => div().min_w(0).truncate().text_ellipsis_middle().text_color(t.dim).child(tilde(path));
+
+function folderLine(t, workspace) {
+  if (!workspace.home) return pathText(t, workspace.folder).text_size(11);
+  return h_flex()
+    .gap(4)
+    .text_size(11)
+    .text_color(t.dim)
+    .child(div().flex_none().child("Runs in"))
+    .child(pathText(t, workspace.folder))
+    .child(div().flex_none().child("· files in"))
+    .child(pathText(t, workspace.home));
+}
+
+function stagePill(t, workspace) {
+  return div()
+    .id("stage")
+    .flex_none()
+    .px(5)
+    .rounded(4)
+    .border_1()
+    .border_color(t.border)
+    .text_size(10)
+    .text_color(workspace.stage ? t.muted : t.dim)
+    .cursor_pointer()
+    .hover((s) => s.bg(t.raised).text_color(t.foreground))
+    .on_click(() => openStageMenu(workspace))
+    .child(workspace.stage || "Set stage");
+}
+
+function workspaceMenu(workspace) {
+  openRowMenu({ workspace: workspace.id, name: workspace.name, kind: workspace.kind, archived: false, space: null });
 }
 
 export function headerSection(view) {
-  const { t, host, workspace, target } = view;
+  const { t, host, workspace } = view;
   const isThrowaway = workspace.kind === "throwaway";
-  const stage = workspace.stage;
-  const canAttach = Boolean(target) && !host.busy;
+  const firstLine = workspace.instructions ? workspace.instructions.split("\n")[0] : "";
   return v_flex()
     .flex_none()
     .px(14)
@@ -97,21 +179,17 @@ export function headerSection(view) {
         .gap(8)
         .items_center()
         .child(div().flex_1().min_w(0).truncate().font_semibold().child(workspace.name))
-        .when(Boolean(stage) && !isThrowaway, (el) => el.child(pill(t, stage)))
-        .when(isThrowaway, (el) => el.child(pill(t, "Throwaway"))),
+        .child(isThrowaway ? pill(t, "Throwaway") : stagePill(t, workspace))
+        .child(smallButton(t, "workspace-menu", "···", () => workspaceMenu(workspace)).tooltip(isThrowaway ? "Rename or close" : "Rename or archive")),
     )
-    .when(Boolean(workspace.instructions), (el) => el.child(div().truncate().text_size(12).text_color(t.muted).child(workspace.instructions.split("\n")[0])))
-    .when(!isThrowaway, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(workspace.home ? `Runs in ${tilde(workspace.folder)} · files in ${tilde(workspace.home)}` : tilde(workspace.folder))).child(freshnessRow(view)))
     .child(
       h_flex()
-        .pt(6)
-        .gap(4)
+        .gap(6)
         .items_center()
-        .child(smallButton(t, "new-board", "New board", (_e, cx) => host.openSurface("board", target, cx), canAttach))
-        .child(smallButton(t, "new-note", "New note", (_e, cx) => host.openSurface("note", target, cx), canAttach))
-        .child(smallButton(t, "edit-instructions", "Instructions…", () => host.openInstructions(workspace)))
-        .child(div().flex_1().min_w(0).truncate().pl(4).text_size(11).text_color(t.dim).child(target ? `Boards and notes open beside ${agentName(target)}` : "Boards and notes need an agent. Click one first.")),
-    );
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(firstLine ? t.muted : t.dim).child(firstLine || "No instructions yet"))
+        .child(smallButton(t, "edit-instructions", "Instructions…", () => host.openInstructions(workspace))),
+    )
+    .when(!isThrowaway, (el) => el.child(folderLine(t, workspace)).child(freshnessRow(view)).child(tasksRow(view)));
 }
 
 // Current
@@ -294,7 +372,7 @@ function artifactRow(t, host, workspace, artifact, now) {
         .child(artifact.title || artifact.id),
     )
     .when(Boolean(status) && status !== "current", (el) => el.child(pill(t, status, t[STATUS_COLOR[status]])))
-    .child(div().flex_none().text_size(11).text_color(t.dim).child(`${artifact.type} · ${ago(now - (artifact.createdAt ?? now))}`))
+    .child(div().flex_none().text_size(11).text_color(t.dim).child(`${typeLabel(artifact.type)} · ${ago(now - (artifact.createdAt ?? now))}`))
     .child(smallButton(t, `open-${artifact.id}`, "Open", open))
     .child(smallButton(t, `more-${artifact.id}`, "···", () => openArtifactMenu(artifact)).tooltip("More ways to open"));
 }

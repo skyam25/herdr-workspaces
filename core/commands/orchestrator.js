@@ -7,11 +7,11 @@ import { agentArgv } from '../agent-tools.js';
 import { agentModels, requireFolder } from '../settings.js';
 import { boardOf, orchestratorState, readTodos, requireWorkspace, resolveBoard, updateTodos } from './todo.js';
 
-const BOARD_CHANGED = 'The board changed. Run hws todo status and start whatever is ready.';
+const BOARD_CHANGED = 'The task list changed. Run hws todo status and start whatever is ready.';
 const STOPPED_NOTE = 'Stopped before finishing';
 
 function firstPrompt(space) {
-  return `Use the herdr-workspaces:orchestrate skill. Your board is space ${space}.`;
+  return `Use the herdr-workspaces:orchestrate skill. Your task list is in space ${space}.`;
 }
 
 function openOrchestrator(space, board, folder) {

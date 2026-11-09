@@ -1,12 +1,15 @@
-// The right-click menu on a sidebar workspace row, and the dialogs it opens.
+// The workspace menu, from a sidebar row's right-click or the panel's ··· button,
+// the dialogs it opens, and the panel's stage menu.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { closeOverlay, openOverlay, panes, props, run, spaces } from "herdr";
 import { hws, submitDialog, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, button, problemLine } from "./hws.js";
+import { STAGES } from "./context.js";
 
 const MOD = "hws-panel";
 const MENU_WIDTH = 176;
+const STAGE_MENU_WIDTH = 140;
 const MENU_ROW_PX = 28;
 const MENU_PADDING_PX = 4;
 
@@ -98,6 +101,22 @@ export function renderRowMenu(t) {
 
 export function popupHeight(count) {
   return count * MENU_ROW_PX + MENU_PADDING_PX * 2;
+}
+
+export function openStageMenu(workspace) {
+  openOverlay({ mod: MOD, kind: "popup", width: STAGE_MENU_WIDTH, height: popupHeight(STAGES.length), props: { view: "stage-menu", workspace: workspace.id } });
+}
+
+// Each item closes the popup and then runs `hws set`. The panel's manifest
+// watch shows the new stage.
+export function renderStageMenu(t) {
+  const { workspace, overlay } = props();
+  const items = STAGES.map((stage) => ({
+    id: stage,
+    label: stage[0].toUpperCase() + stage.slice(1),
+    open: () => { hws(["set", "--workspace", workspace, "--stage", stage]).catch(() => {}); },
+  }));
+  return popupMenu(t, items, overlay);
 }
 
 export function initRename(view, cx) {

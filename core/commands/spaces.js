@@ -1,11 +1,15 @@
+import { realpathSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
+
 import { HwsError } from '../errors.js';
-import { act, keepingSelection, requireLive } from '../herdr.js';
+import { act, keepingSelection, listLive, requireLive } from '../herdr.js';
 import { withLock } from '../lock.js';
-import { manifestOfSpace, readManifest, updateManifest } from '../manifest.js';
-import { expandFolder } from '../paths.js';
+import { listManifests, manifestOfSpace, readManifest, updateManifest } from '../manifest.js';
+import { expandFolder, home } from '../paths.js';
+import { isKept } from '../places.js';
 import { callerIsAgent, requireFlag, resolveWorkspace, workspaceByRef } from '../resolve.js';
 import { requireFolder } from '../settings.js';
-import { boardOf, moveCards } from './todo.js';
+import { boardOf, callerSpace, moveCards } from './todo.js';
 
 const BOARD_TAB = 'Workspace board';
 
@@ -17,7 +21,7 @@ function liveSpace(id) {
 }
 
 function requireOtherSpaces(manifest, space) {
-  if (manifest.board?.space === space.id) throw new HwsError(`the Board space stays with ${manifest.name}`);
+  if (manifest.board?.space === space.id) throw new HwsError(`the Tasks space stays with ${manifest.name}`);
   if (manifest.spaces.length > 1) return;
   throw new HwsError(`${space.name} is the only space in ${manifest.name}, so add another space there first`);
 }
@@ -89,7 +93,7 @@ function ensureBoard(id) {
   const { open, hasBoard } = liveBoard(manifest);
   if (hasBoard) return manifest.board;
 
-  const fresh = open ? null : act('space.new', { name: 'Board', folder: manifest.folder });
+  const fresh = open ? null : act('space.new', { name: 'Tasks', folder: manifest.folder });
   const space = open?.id ?? fresh.space;
   const openBoard = () => act('tab.new', { name: BOARD_TAB, space, mod: 'hws-work', props: { view: 'tasks' } });
 
@@ -110,7 +114,7 @@ export const addBoard = (id) => withLock(`board-${encodeURIComponent(id)}`, () =
 export function boardAdd(flags) {
   const manifest = requireNotArchived(resolveWorkspace(flags));
   const board = addBoard(manifest.id);
-  return { data: { workspace: manifest.id, ...board }, text: `Board is space ${board.space}` };
+  return { data: { workspace: manifest.id, ...board }, text: `Tasks is space ${board.space}` };
 }
 
 // Finds a space's Board and never makes one. A plain space answers with no workspace.
@@ -119,5 +123,46 @@ export function boardOpen(flags) {
   if (!manifest) return { data: { workspace: null }, text: 'this space is not in a workspace' };
   const { hasBoard } = liveBoard(manifest);
   const board = hasBoard ? manifest.board : { space: null, tab: null };
-  return { data: { workspace: manifest.id, ...board }, text: hasBoard ? `Board is space ${board.space}` : `${manifest.name} has no Board` };
+  return { data: { workspace: manifest.id, ...board }, text: hasBoard ? `Tasks is space ${board.space}` : `${manifest.name} has no Tasks space` };
+}
+
+// Real paths, so /tmp and /private/tmp agree. A missing folder keeps its own path.
+function realPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+const isWithin = (folder, root) => folder.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+
+// Returns the length of the deepest workspace root that holds the folder, or 0.
+// A root at home or / only matches itself, because everything sits inside it.
+function matchDepth(folder, manifest, broad) {
+  const roots = [manifest.folder, manifest.home].filter(Boolean).map(realPath);
+  const hits = roots.filter((root) => folder === root || (!broad.has(root) && isWithin(folder, root)));
+  return Math.max(0, ...hits.map((root) => root.length));
+}
+
+// A plain local space whose folder belongs to kept workspaces it is not part of.
+function matchingWorkspaces(space) {
+  if (!space?.folder || space.machine || space.id.includes('/') || manifestOfSpace(space.id)) return [];
+  const folder = realPath(space.folder);
+  const broad = new Set([realPath(home()), sep]);
+  return listManifests()
+    .filter((manifest) => isKept(manifest) && !manifest.archived)
+    .map((manifest) => ({ manifest, depth: matchDepth(folder, manifest, broad) }))
+    .filter(({ depth }) => depth > 0)
+    .sort((a, b) => b.depth - a.depth)
+    .map(({ manifest: { id, name, folder: own, home: files } }) => ({ id, name, folder: own, home: files ?? null }));
+}
+
+// Finds the kept workspaces a space's folder belongs to. Writes nothing.
+export function spaceMatch(flags) {
+  const id = callerSpace(flags);
+  const space = listLive()?.spaces.find((item) => item.id === id);
+  const candidates = matchingWorkspaces(space);
+  const data = { space: id, folder: space?.folder ?? null, candidates };
+  return { data, text: candidates.map((item) => `${item.id}\t${item.name}\t${item.folder}`).join('\n') };
 }

@@ -73,11 +73,14 @@ async function openArtifact(artifact, { target, workspace }) {
   return openPath(file, { target, workspace, title: artifact.title || artifact.id });
 }
 
+// Shows a workspace's Tasks, which live in the Board space's Board tab.
+export function showBoard(board) {
+  run("space.select", { id: board.space });
+  run("tab.select", { id: board.tab });
+}
+
 function openCard(id, workspace, space) {
-  if (workspace.board) {
-    run("space.select", { id: workspace.board.space });
-    run("tab.select", { id: workspace.board.tab });
-  }
+  if (workspace.board) showBoard(workspace.board);
   const props = { view: "todo", space: workspace.board?.space ?? space, id, height: CARD_DIALOG.height };
   openOverlay({ mod: "hws-work", kind: "dialog", modal: true, ...CARD_DIALOG, props });
   return null;

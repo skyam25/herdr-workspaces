@@ -23,8 +23,9 @@ const FOLDED_KEY = "sidebar.folded";
 const ARCHIVED_OPEN_KEY = "sidebar.archived.open";
 const STATUS_ORDER = ["blocked", "done", "working", "idle"];
 
-// hws-tabs reads this key.
+// hws-tabs reads the first key. The second lists every space in an open workspace.
 const BOARD_TABS = "hws.board.tabs";
+const WORKSPACE_SPACES = "hws.workspace.spaces";
 
 // `hws new workspace` makes the space before it writes the manifest.
 const MANIFEST_WAIT_MS = 1500;
@@ -82,6 +83,12 @@ function publishBoardTabs(workspaces) {
   if (JSON.stringify(tabs) !== JSON.stringify(shared(BOARD_TABS) ?? [])) setShared(BOARD_TABS, tabs);
 }
 
+// Sorted, Board spaces included, and set only when it changes.
+function publishWorkspaceSpaces(workspaces) {
+  const ids = [...new Set(workspaces.flatMap((w) => [...w.spaces, ...(w.board ? [w.board.space] : [])]))].sort();
+  if (JSON.stringify(ids) !== JSON.stringify(shared(WORKSPACE_SPACES) ?? [])) setShared(WORKSPACE_SPACES, ids);
+}
+
 // An agent or the CLI can change who is in a workspace with no change to the spaces.
 function watchManifests(state, cx) {
   const dir = [...state.workspaces, ...(state.archived ?? [])][0]?.dir;
@@ -113,6 +120,7 @@ function load(state, cx, { listOnly = false } = {}) {
       state.archived = await hws(["list", "--archived"]);
       state.problem = null;
       publishBoardTabs(state.workspaces);
+      publishWorkspaceSpaces(state.workspaces);
       watchManifests(state, cx);
 
       // The list paints first, so a slow `git` or `hws tidy status` cannot hold up a new row.
@@ -301,7 +309,7 @@ function spaceRow(t, state, workspace, space, canRemove) {
     .when(!space.active, (el) => el.hover((s) => s.bg(t.hover)))
     .on_click(() => (isBoard ? showBoard(workspace.board) : run("space.select", { id: space.id })))
     .child(svg(isBoard ? "mods/hws-panel/board.svg" : icon("terminal")).size(12).flex_none())
-    .child(div().flex_1().min_w(0).truncate().child(space.name || workspace.name))
+    .child(div().flex_1().min_w(0).truncate().child(isBoard ? "Tasks" : space.name || workspace.name))
     .when(Boolean(space.status), (el) => el.child(statusDot(t, space.status)))
     .when(!isBoard && canRemove, (el) => el.child(iconButton(t, `sidebar-remove-${space.id}`, "minus", 18, (cx) => removeSpace(state, space.id, cx)).tooltip("Take out of this workspace. The space stays open.")));
 }
@@ -334,7 +342,7 @@ function addRowSpecs(state, workspace, members) {
   if (!showsAddRows(state, workspace, members)) return [];
   const addSpace = { id: `sidebar-add-space-${workspace.id}`, label: "Add space", onClick: () => openAddSpace(workspace) };
   if (hasBoard(workspace, members)) return [addSpace];
-  return [addSpace, { id: `sidebar-add-board-${workspace.id}`, label: "Add board", onClick: (cx) => addBoard(state, workspace, cx) }];
+  return [addSpace, { id: `sidebar-add-board-${workspace.id}`, label: "Add tasks", onClick: (cx) => addBoard(state, workspace, cx) }];
 }
 
 const menuTarget = (workspace, archived, space = null) => ({ workspace: workspace.id, name: workspace.name, kind: workspace.kind, archived, space });

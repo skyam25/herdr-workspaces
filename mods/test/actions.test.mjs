@@ -226,14 +226,14 @@ test("outputs selects its panel view and shows the panel", async () => {
 
 const SPACE = (tabs) => [{ id: "spc1", active: true, machine: null, tabs }];
 
-test("Tasks in a plain space opens nothing and says the Board needs a workspace", async () => {
+test("Tasks in a plain space opens nothing and says Tasks needs a workspace", async () => {
   const H = world({ spaces: SPACE([{ id: "tb1", name: "1", active: true }]), panes: [AGENT_PANE] });
   H.notices = [];
   const m = await mount("hws-actions", TERMINAL);
   await m.click("tasks");
 
   assert.deepEqual(H.runs, []);
-  assert.match(H.notices.at(-1).title, /needs a workspace/);
+  assert.deepEqual(H.notices.at(-1), { title: "Tasks needs a workspace", body: "Add this space to a workspace to use Tasks." });
   assert.deepEqual(H.closed, ["ov1"]);
 });
 
@@ -488,19 +488,19 @@ const BOARD_LIST = "hws-pane.boards";
 const boardsWorld = (boards) => world({ panes: [AGENT], sharedValues: { [BOARD_LIST]: boards } });
 const draft = { id: "s1", title: "Plan", terminal: "t1", open: false };
 
-test("a draft shows Resume board in its agent's header and resumes on click", async () => {
+test("a draft shows Resume sketch in its agent's header and resumes on click", async () => {
   const H = boardsWorld([draft]);
   const m = await mount("hws-pane", { pane: "p1" });
-  assert.match(m.text(), /Resume board/);
+  assert.match(m.text(), /Resume sketch/);
   await m.click("ph-board-p1");
   await settle();
   assert.ok(openArgs(H).some((args) => args.join(" ") === "surface resume --id s1 --json"));
 });
 
-test("an open board shows Show board, and extra boards are counted", async () => {
+test("an open sketch shows Show sketch, and extra sketches are counted", async () => {
   boardsWorld([draft, { ...draft, id: "s2", open: true }]);
   const m = await mount("hws-pane", { pane: "p1" });
-  assert.match(m.text(), /Show board \+1/);
+  assert.match(m.text(), /Show sketch \+1/);
 });
 
 test("another agent's board stays out of this header", async () => {
@@ -515,6 +515,14 @@ test("the + menu resumes and discards a draft and has no discard for an open boa
   const list = rows(m);
   assert.ok(list.includes("Resume Plan") && list.includes("Discard Plan") && list.includes("Show Flow"));
   assert.equal(list.includes("Discard Flow"), false);
+});
+
+test("an untitled sketch reads as sketch in the + menu", async () => {
+  world({});
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [{ ...draft, title: "board" }] });
+  const list = rows(m);
+  assert.ok(list.includes("Resume sketch") && list.includes("Discard sketch"));
+  assert.equal(list.some((row) => /board/i.test(row)), false);
 });
 
 test("discarding a draft takes it off the shared list at once", async () => {

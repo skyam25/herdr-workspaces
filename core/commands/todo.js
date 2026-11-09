@@ -36,7 +36,7 @@ export function spaceOfTerminal(terminal) {
 }
 
 // An agent's card must reach its own board, so a set terminal never falls back to the selected space.
-function callerSpace(flags) {
+export function callerSpace(flags) {
   if (flags.space) return flags.space;
   const terminal = process.env.HC_TERMINAL_ID;
   if (terminal) {
@@ -50,7 +50,7 @@ function callerSpace(flags) {
 }
 
 export function requireWorkspace(space) {
-  if (!manifestOfSpace(space)) throw new HwsError(`the Board is only available inside a workspace, and space ${space} is not in one`);
+  if (!manifestOfSpace(space)) throw new HwsError(`the task list is only available inside a workspace, and space ${space} is not in one`);
 }
 
 function resolveSpace(flags) {
@@ -139,13 +139,13 @@ function findOpenItem(todos, id) {
 // A Herdr terminal is an agent's, and the Board runs with no terminal set.
 function refuseAgentOnMine(item) {
   if (item.owner === 'mine' && callerIsAgent()) {
-    throw new HwsError(`to-do ${item.id} is the person's own, so change it on the Board`);
+    throw new HwsError(`to-do ${item.id} is the person's own, so change it in Tasks`);
   }
 }
 
 // Only the person assigns work, so the Board is the one place that can.
 function refuseAgentAssigning(id) {
-  if (callerIsAgent()) throw new HwsError(`to-do ${id} needs the person to press Allow on the Board`);
+  if (callerIsAgent()) throw new HwsError(`to-do ${id} needs the person to press Allow in Tasks`);
 }
 
 function findChangeableItem(todos, id) {
@@ -460,7 +460,22 @@ export function todoResume(flags) {
   return { data: changeOpenItem(board, id, { terminal }) };
 }
 
+// An agent leaves the person's own cards alone.
+function archiveDone(flags) {
+  if (flags.id !== undefined) throw new UsageError('pass --id or --done, not both');
+  const archived = updateTodos(resolveBoard(flags), (todos) => {
+    const done = todos.items.filter((item) => item.column === 'done' && !item.archived && !(item.owner === 'mine' && callerIsAgent()));
+    if (done.length === 0) return null;
+    const now = Date.now();
+    for (const item of done) Object.assign(item, { archived: true, updatedAt: now });
+    return done.map((item) => item.id);
+  });
+  const ids = archived ?? [];
+  return { data: { archived: ids }, text: `archived ${ids.length} done ${ids.length === 1 ? 'card' : 'cards'}` };
+}
+
 export function todoArchive(flags) {
+  if (flags.done) return archiveDone(flags);
   const id = requireFlag(flags, 'id');
   const item = updateTodos(resolveBoard(flags), (todos) => {
     const found = findItem(todos, id);

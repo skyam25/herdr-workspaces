@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos or the Board, asks what is in the workspace, what artifacts it has or where files should land, or asks to sketch, draw, write or review something in a pane. Explains how to read the workspace, use the space's task list and ask the user for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, or asks to sketch, draw, write or review something in a pane. Explains how to read the workspace, use the space's task list and ask the user for input through a surface.
 ---
 
 # Herdr workspace
@@ -29,7 +29,7 @@ Read the manifest before inferring anything from the folder or git state. If `$H
 |---|---|
 | `current` | The current note, with Goal, Now, Decisions in force, Open questions and Next |
 | `notes` | Notes written in a note surface |
-| `artifacts` | Boards, reviews and registered files |
+| `artifacts` | Sketches, reviews and registered files |
 | `scratch` | Working files and unsent drafts |
 | `decisions` | The decision log. Only `hws decision` writes it |
 | `history` | Earlier notes, the update log and demoted docs |
@@ -56,7 +56,7 @@ When the person lands a decision mid-session, such as "we're going with X", offe
 
 ## Task list
 
-All the spaces in a workspace share one task list. The person sees it on the Board. The task list and the Board exist only inside a workspace, so when `hws current --line` prints nothing, tell the person the Board needs a workspace and run none of these commands. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
+All the spaces in a workspace share one task list. The person sees it in Tasks. The task list exists only inside a workspace, so when `hws current --line` prints nothing, tell the person Tasks needs a workspace and run none of these commands. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
 
 | Command | Does |
 |---|---|
@@ -64,7 +64,7 @@ All the spaces in a workspace share one task list. The person sees it on the Boa
 | `hws todo status --json` | Prints what is ready, in flight and waiting, without the text of finished cards |
 | `hws todo add --title="..."` | Adds a card for follow-up work the person should see |
 
-A workspace starts with no Board, and cards still save without one. Run `hws board add` when the person asks for a Board or the work needs a place for agents to run from. It adds one Board space to this workspace, and running it again finds the same one.
+A workspace starts with no Tasks space, and cards still save without one. Run `hws board add` when the person asks for Tasks or the work needs a place for agents to run from. It adds one Tasks space to this workspace, and running it again finds the same one.
 
 Every card has an owner.
 
@@ -82,14 +82,14 @@ Do not take or move cards unless the person asks.
 |---|---|---|
 | Add | Types in the To do box, or + Add | `hws todo add --title="..."` |
 | Make it ready | Presses Allow, or Allow all on the To do column | Nothing. Only the person assigns a card |
-| Start | Presses Run N ready in the Board header | `hws orchestrator start --space S --folder F` when told to |
+| Start | Presses Run N ready in the Tasks header | `hws orchestrator start --space S --folder F` when told to |
 | Add more during a run | Adds and allows cards, then presses Run again | The orchestrator starts only what is new |
 
-Run starts one orchestrator for the board, or tells the live one to read it again. Cards in flight, waiting or done are not restarted.
+Run starts one orchestrator for the task list, or tells the live one to read it again. Cards in flight, waiting or done are not restarted.
 
 ### Finish a card
 
-The person reviews results on the Board, so a finished card must say what happened.
+The person reviews results in Tasks, so a finished card must say what happened.
 
 1. Move the card with a `--note` of up to two sentences that says what changed, where, and how you checked it.
 2. End the turn with your usual closing summary. A hook copies that message to every card you moved to Done or Waiting on you in that turn, so do not write it out twice.
@@ -116,7 +116,7 @@ Sort the context by where it lives.
 
 ## Ask the user through a surface
 
-A surface is a board, note or page tied to this terminal. A board opens in its own window, and a note or page opens in a pane beside this terminal. Open one only when the user asks for it. Never open a surface unasked.
+A surface is a sketch, note or page tied to this terminal. A sketch opens in its own window, and a note or page opens in a pane beside this terminal. Open one only when the user asks for it. Never open a surface unasked.
 
 ```bash
 hws surface open --type board|note|page --title X --terminal $HC_TERMINAL_ID
@@ -124,7 +124,7 @@ hws surface open --type board|note|page --title X --terminal $HC_TERMINAL_ID
 
 Pass `--file F` to open an existing file in a note or page.
 
-After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it. A user who closes a board early keeps it as a draft and resumes it from the pane header.
+After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it. A user who closes a sketch early keeps it as a draft and resumes it from the pane header.
 
 ## Send to the phone
 

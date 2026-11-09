@@ -43,6 +43,10 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Tidy | `hws tidy start` opens a Claude tab on a packet. The agent writes a proposal and opens it in a page. Done delivers feedback to the agent, which runs `hws tidy apply`. Only `hws` writes the note |
 | Freshness | Counted from the stream against `current.covers`, never from the clock. Only non-draft artifacts, commits and Done cards move the ring, because sessions and drafts are exploring |
 | Decisions and history | The note holds what is true now. `decisions.md` keeps each decision and what replaced it. Each pass saves the old note and adds to `updates.md` |
+| Names | A person reads Tasks for the kanban and Sketch for a `board` surface. The CLI and manifest keep `board` and `todo` |
+| Tasks and Agent Brief | Tasks shows only `hws` cards and never runs `agent-brief`. Outputs still reads Agent Brief sessions |
+| Spaces list | `hws-spaces`, a copy of Herdr's `spaces`, hides the spaces a workspace already lists and titles the rest Other spaces |
+| Plain space on a workspace's folder | `hws space match` finds the workspace. The panel offers Add this space to NAME and session start tells the agent once |
 | Throwaway scratch | Shells start in `<state>/workspaces/<id>/scratch`. Keep moves it under `~/Documents/Herdr Workspaces/<name>/`, Trash and purge trash it |
 
 ## Next steps, in order
@@ -165,3 +169,14 @@ Built 2026-11-09 by six Opus workers against fakes. Nothing has run in the real 
 - [ ] Judge how Current lines wrap and where the cite chips sit in a narrow pane.
 - [ ] Decide whether the stage pill should change the stage.
 
+### 12. Test the review changes by hand
+
+Built 2026-11-09 by four Opus workers against fakes, then installed. The lead saw each of these draw in the real window, and nobody has clicked them.
+
+- [ ] Press Add this space to NAME in the panel of a plain space on a workspace's folder, and check the space moves under the workspace.
+- [ ] Start a Claude session in such a space and read the session-start sentence.
+- [ ] Open the stage menu and the `···` menu in the panel header, and check where each popup lands.
+- [ ] Press the Tasks line in the panel, and Add tasks on a workspace with no Board.
+- [ ] Press Archive done in Tasks and confirm.
+- [ ] Drag a space in Other spaces while workspace spaces are hidden.
+- [ ] Make the Tasks badge in the tab bar follow the workspace on screen. It shows the count from the last Tasks pane that drew.

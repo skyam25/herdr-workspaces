@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -143,14 +143,14 @@ test('a manifest without a space list has its own space', (t) => {
   assert.deepEqual(box.json(['list'])[0].spaces, [manifest.id]);
 });
 
-test('board open makes one Board space with only the Board tab', (t) => {
+test('board add makes one Tasks space with only the Board tab', (t) => {
   const box = sandbox(t);
   const manifest = box.app('demo');
   const first = box.json(['board', 'add', '--workspace', manifest.id]);
   const second = box.json(['board', 'add', '--workspace', manifest.id]);
   assert.deepEqual(second, first);
   const space = box.state().spaces.find((item) => item.id === first.space);
-  assert.equal(space.name, 'Board');
+  assert.equal(space.name, 'Tasks');
   assert.deepEqual(space.tabs.map((tab) => tab.id), [first.tab]);
   assert.deepEqual(box.manifest(manifest.id).spaces, [manifest.id, first.space]);
 });
@@ -218,7 +218,7 @@ test('the Board space cannot leave its workspace', (t) => {
   const { space } = box.json(['board', 'add', '--workspace', manifest.id]);
   const removed = box.hws(['space', 'remove', '--space', space]);
   assert.equal(removed.code, 1);
-  assert.match(removed.stderr, /Board space stays/);
+  assert.match(removed.stderr, /Tasks space stays/);
   assert.equal(box.hws(['space', 'move', '--space', space, '--workspace', other.id]).code, 1);
 });
 
@@ -243,4 +243,86 @@ test('a space brings its ~space cards after the workspace it founded has closed'
   box.json(['space', 'move', '--space', id, '--workspace', manifest.id]);
   const items = box.json(['todo', 'list', '--space', manifest.id]).items.map((item) => item.id);
   assert.deepEqual(items, ['its-own']);
+});
+
+function plainSpaceAt(box, folder, id = 'sp-plain', extra = {}) {
+  const tab = { id: `tb-${id}`, name: '1', terminals: [{ terminal: `t-${id}`, pane: `p-${id}`, status: null, app: null, sub_agents: [] }] };
+  box.setState({ spaces: [...box.state().spaces, { id, name: id, folder, tabs: [tab], ...extra }] });
+  return id;
+}
+
+const matchIds = (box, space) => box.json(['space', 'match', '--space', space]).candidates.map((item) => item.id);
+
+test('space match finds the kept workspace whose folder a plain space shares', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app('demo');
+  const plain = plainSpaceAt(box, manifest.folder);
+  const before = box.manifest(manifest.id);
+
+  const result = box.json(['space', 'match', '--space', plain]);
+
+  assert.deepEqual(result, { space: plain, folder: manifest.folder, candidates: [{ id: manifest.id, name: 'demo', folder: manifest.folder, home: null }] });
+  assert.deepEqual(box.actions(), []);
+  assert.deepEqual(box.manifest(manifest.id), before);
+});
+
+test('space match finds a space inside the folder or the home, deepest first', (t) => {
+  const box = sandbox(t);
+  const outer = box.json(['new', 'workspace', '--name', 'outer', '--folder', box.folder('outer')]);
+  const inner = box.json(['new', 'workspace', '--name', 'inner', '--folder', box.folder('elsewhere'), '--home', box.folder('outer/inner')]);
+  box.folder('outer/inner/deep');
+  const plain = plainSpaceAt(box, join(box.dir, 'outer/inner/deep'));
+
+  const { candidates } = box.json(['space', 'match', '--space', plain]);
+
+  assert.deepEqual(candidates.map((item) => item.id), [inner.id, outer.id]);
+  assert.equal(candidates[0].home, join(box.dir, 'outer/inner'));
+});
+
+test('space match compares real paths', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app('demo');
+  symlinkSync(manifest.folder, join(box.dir, 'link'));
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, join(box.dir, 'link'))), [manifest.id]);
+});
+
+test('space match skips the inside rule for a workspace at home', (t) => {
+  const box = sandbox(t);
+  const manifest = box.json(['new', 'workspace', '--name', 'home', '--folder', box.homeDir]);
+  mkdirSync(join(box.homeDir, 'sub'));
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, join(box.homeDir, 'sub'), 'sp-sub')), []);
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, box.homeDir, 'sp-home')), [manifest.id]);
+});
+
+test('space match leaves out throwaways, archived workspaces and unrelated folders', (t) => {
+  const box = sandbox(t);
+  const scratch = box.throwaway();
+  const archived = box.app('old');
+  box.rewriteManifest(archived.id, (manifest) => ({ ...manifest, archived: { at: 1, spaces: [] }, spaces: [] }));
+  box.app('demo');
+
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, scratch.folder, 'sp-a')), []);
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, archived.folder, 'sp-b')), []);
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, box.folder('demo-two'), 'sp-c')), []);
+});
+
+test('space match gives no candidates for a member, a remote space or a space with no folder', (t) => {
+  const box = sandbox(t);
+  const { manifest, second } = workspaceWithTwoSpaces(box);
+  const other = box.app('other');
+  box.rewriteManifest(other.id, (draft) => ({ ...draft, folder: manifest.folder }));
+
+  assert.deepEqual(matchIds(box, second), []);
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, manifest.folder, 'studio/sp9', { machine: 'studio' })), []);
+  assert.deepEqual(matchIds(box, plainSpaceAt(box, undefined, 'sp-nofolder')), []);
+  assert.deepEqual(box.json(['space', 'match', '--space', 'sp-gone']), { space: 'sp-gone', folder: null, candidates: [] });
+});
+
+test('space match defaults to the calling terminal\'s space', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app('demo');
+  const plain = plainSpaceAt(box, manifest.folder);
+  const result = JSON.parse(box.hws(['space', 'match', '--json'], { HC_TERMINAL_ID: `t-${plain}` }).stdout);
+  assert.equal(result.space, plain);
+  assert.deepEqual(result.candidates.map((item) => item.id), [manifest.id]);
 });

@@ -15,8 +15,8 @@ function sandbox(t) {
   return box;
 }
 
-const PROMPT = 'Use the herdr-workspaces:orchestrate skill. Your board is space sp1.';
-const NOTE = 'The board changed. Run hws todo status and start whatever is ready.';
+const PROMPT = 'Use the herdr-workspaces:orchestrate skill. Your task list is in space sp1.';
+const NOTE = 'The task list changed. Run hws todo status and start whatever is ready.';
 
 function todoFile(box) {
   return join(box.root, 'todos', 'sp1.json');

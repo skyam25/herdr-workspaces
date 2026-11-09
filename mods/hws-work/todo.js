@@ -1,15 +1,15 @@
-// The Board's dialogs, shown by a copy of this mod.
-// Props are `{ view: "todo", space, id? }` for one card and `{ view: "add-several", space }` for many.
+// The Tasks dialogs, shown by a copy of this mod.
+// Props are `{ view: "todo", space, id? }` for one card, `{ view: "add-several", space }` for many and `{ view: "models" }`.
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, TextView } from "gpui-base";
 import { agents, closeOverlay, panes, props, setShared, shared, spaces, terminals, theme } from "herdr";
-import { COLUMNS, FORM, cardSessions, cardStory, cardTimes, describeSession, sendTargets, todoItems, todoLayout } from "./data.js";
+import { COLUMNS, FORM, OWNER_NAMES, SOME_AGENT, cardSessions, cardStory, cardTimes, describeSession, sendTargets, todoItems, todoLayout } from "./data.js";
 import { hws, openSession } from "./open.js";
 
 export const TODOS_CHANGED = "hws.todos.changed";
 
-const OWNERS = [{ key: "unassigned", name: "Unassigned" }, { key: "agent", name: "Agent" }, { key: "mine", name: "Mine" }];
+const OWNERS = ["mine", "unassigned", "agent"].map((key) => ({ key, name: OWNER_NAMES[key] }));
 const message = (e) => String(e?.message ?? e);
 const lineHeight = (px) => `${px}px`;
 
@@ -57,7 +57,7 @@ class DialogForm {
     closeOverlay(props().overlay);
   }
 
-  // Runs one change. The board reloads either way, because a failed step can follow a good one.
+  // Runs one change. Tasks reloads either way, because a failed step can follow a good one.
   submit(key, work, cx, afterClose = () => {}) {
     if (!this.ready()) return;
     this.busy = key;
@@ -417,7 +417,7 @@ export class TodoForm extends DialogForm {
       const canResume = !live && role === "Run by" && Boolean(this.item.session);
       const resume = canResume ? this.rowButton(t, `session-resume-${address}`, "Resume", (_e, cx) => this.resume(cx), enabled) : null;
       const open = live ? this.rowButton(t, `session-open-${address}`, "Open", (_e, cx) => this.openLinked(address, cx), enabled) : resume;
-      return this.row(t, `session-row-${address}`, `${role} ${name}`, [status, address].filter(Boolean).join(" · "), open);
+      return this.row(t, `session-row-${address}`, `${role} ${name ?? SOME_AGENT}`, [status, address].filter(Boolean).join(" · "), open);
     });
     return [this.labeled(t, "Session", v_flex().gap(FORM.sendGap).children(rows))];
   }
@@ -498,7 +498,7 @@ export class AddSeveralForm extends DialogForm {
 }
 
 const ROLES = [
-  { key: "orchestrator", name: "Orchestrator", line: "Reads the board and decides how to run the cards. Always Claude Code." },
+  { key: "orchestrator", name: "Orchestrator", line: "Reads Tasks and decides how to run the cards. Always Claude Code." },
   { key: "worker", name: "Workers", line: "Do the cards." },
 ];
 const MODEL_LABEL = 52;

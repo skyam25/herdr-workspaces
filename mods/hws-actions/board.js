@@ -32,6 +32,6 @@ export async function openBoard() {
   if (opened?.space) {
     run("space.select", { id: opened.space });
     run("tab.select", { id: opened.tab });
-  } else if (opened?.workspace) notify({ title: "This workspace has no Board", body: "Choose Add board under the workspace in the sidebar." });
-  else notify({ title: "The Board needs a workspace", body: "Add this space to a workspace to use the Board." });
+  } else if (opened?.workspace) notify({ title: "This workspace has no tasks", body: "Choose Add tasks under the workspace in the sidebar." });
+  else notify({ title: "Tasks needs a workspace", body: "Add this space to a workspace to use Tasks." });
 }

@@ -220,6 +220,54 @@ test('archiving twice leaves the item as it was', (t) => {
   assert.deepEqual(box.json(['todo', 'archive', '--id', item.id, '--space', 'sp1']), first);
 });
 
+test('todo archive --done archives every unarchived Done card and nothing else', (t) => {
+  const box = sandbox(t);
+  const done = add(box, 'shipped');
+  const other = add(box, 'also shipped', '--owner', 'mine');
+  const open = add(box, 'still open');
+  const old = add(box, 'archived already');
+  for (const item of [done, other, old]) box.json(['todo', 'move', '--id', item.id, '--column', 'done', '--space', 'sp1']);
+  box.json(['todo', 'archive', '--id', old.id, '--space', 'sp1']);
+  const oldBefore = readTodos(box).items.find((item) => item.id === old.id);
+
+  const result = box.json(['todo', 'archive', '--done', '--space', 'sp1']);
+
+  assert.deepEqual(result.archived.sort(), [done.id, other.id].sort());
+  const items = readTodos(box).items;
+  assert.deepEqual(items.filter((item) => item.archived).map((item) => item.id).sort(), [done.id, other.id, old.id].sort());
+  assert.equal(items.find((item) => item.id === open.id).archived, false);
+  assert.deepEqual(items.find((item) => item.id === old.id), oldBefore);
+});
+
+test('todo archive --done with no Done card archives nothing and writes nothing', (t) => {
+  const box = sandbox(t);
+  add(box, 'open');
+  const before = readFileSync(todoFile(box), 'utf8');
+  assert.deepEqual(box.json(['todo', 'archive', '--done', '--space', 'sp1']), { archived: [] });
+  assert.equal(readFileSync(todoFile(box), 'utf8'), before);
+});
+
+test('todo archive --done from an agent skips the person\'s own cards', (t) => {
+  const box = sandbox(t);
+  const mine = add(box, 'mine', '--owner', 'mine');
+  const theirs = add(box, 'unassigned');
+  for (const item of [mine, theirs]) box.json(['todo', 'move', '--id', item.id, '--column', 'done', '--space', 'sp1']);
+
+  const result = box.hws(['todo', 'archive', '--done', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7' });
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(JSON.parse(result.stdout), { archived: [theirs.id] });
+  assert.equal(readTodos(box).items.find((item) => item.id === mine.id).archived, false);
+});
+
+test('todo archive takes --id or --done, not both', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'x');
+  const result = box.hws(['todo', 'archive', '--done', '--id', item.id, '--space', 'sp1']);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /--id or --done/);
+});
+
 test('--space defaults to the selected space', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });

@@ -5,9 +5,10 @@ import { readStdin } from "./stdin.mjs";
 
 // Stdin (1s) and two rounds of hws calls stay under the 6s timeout in hooks.json.
 const HWS_MS = 2000;
+const NAMED_MATCHES = 3;
 
 const TASK_LIST = [
-  "This Herdr workspace has a shared task list that the person sees on the Board.",
+  "This Herdr workspace has a shared task list that the person sees in Tasks.",
   'Read it with `hws todo list --json`, and add follow-up work the person should see with `hws todo add --title="..."`.',
   "A card you add lands unassigned until the person presses Allow. A card marked mine is the person's, so you only read it. You do not take or move cards unless asked.",
   "Run `~/.local/bin/hws` if `hws` is not on PATH.",
@@ -85,6 +86,30 @@ function artifactsContext(scan) {
   return parts.join("\n\n");
 }
 
+const quoted = (name) => `"${oneLine(name)}"`;
+
+function listNames(names) {
+  if (names.length < 3) return names.join(" and ");
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+// Tells the agent once that this plain space shares a folder with a workspace it is not part of.
+function matchContext(match) {
+  const candidates = (Array.isArray(match?.candidates) ? match.candidates : []).filter((item) => typeof item?.name === "string" && item.name.trim());
+  if (candidates.length === 0) return "";
+  const names = candidates.slice(0, NAMED_MATCHES).map((item) => quoted(item.name));
+  const more = candidates.length - names.length;
+  const owner =
+    candidates.length === 1
+      ? `This folder belongs to the Herdr workspace ${names[0]}`
+      : `This folder belongs to the Herdr workspaces ${listNames(more > 0 ? [...names, `${more} more`] : names)}`;
+  return [
+    `${owner}, but this space is not part of ${candidates.length === 1 ? "it" : "any of them"}, so ${candidates.length === 1 ? "its" : "their"} instructions and task list do not apply here.`,
+    "The person can add this space from the Workspace panel.",
+    "Mention this to the person once, and do not act on it yourself.",
+  ].join(" ");
+}
+
 async function main() {
   const input = JSON.parse(await readStdin());
   const sessionId = input.session_id;
@@ -100,12 +125,16 @@ async function main() {
   ]);
 
   // Places and freshness only exist inside a workspace. Reading them never creates a folder.
-  const [status, scan] = line ? (await Promise.all([hws(["tidy", "status", "--json"]), hws(["artifact", "scan", "--json"])])).map(parse) : [null, null];
+  // Outside one, the same round asks which workspace owns this folder. A failed current asks nothing.
+  const outside = line === "" && Boolean(terminal);
+  const [status, scan, match] = line
+    ? [...(await Promise.all([hws(["tidy", "status", "--json"]), hws(["artifact", "scan", "--json"])])).map(parse), null]
+    : [null, null, outside ? parse(await hws(["space", "match", "--json"])) : null];
   const freshness = typeof status?.line === "string" ? status.line.trim() : "";
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

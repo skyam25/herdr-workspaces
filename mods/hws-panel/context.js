@@ -7,7 +7,7 @@ export const ROLES = ["current", "notes", "artifacts", "scratch", "decisions", "
 export const ROLE_DEFAULTS = {
   current: "CURRENT.md",
   notes: "Written notes, in the workspace files",
-  artifacts: "Boards and reviews, in the workspace files",
+  artifacts: "Sketches and reviews, in the workspace files",
   scratch: "Working files and unsent drafts",
   decisions: "Decision log, in the workspace files",
   history: "Earlier notes and archived docs",
@@ -17,7 +17,16 @@ export const ROLE_DEFAULTS = {
 // Above this many items behind, the dot reads stale.
 const STALE_ABOVE = 5;
 
-export const FRESHNESS_COLOR = { fresh: "ansi2", behind: "ansi3", stale: "ansi1" };
+export const FRESHNESS_COLOR = { fresh: "ansi2", behind: "ansi3", stale: "ansi1", unwritten: "dim" };
+
+export const STAGES = ["discovery", "deciding", "building", "settled"];
+
+// The open columns of a task list, in the order the Tasks line names them.
+const TASK_COLUMNS = [
+  { key: "todo", label: "to do" },
+  { key: "doing", label: "in progress" },
+  { key: "waiting", label: "waiting on you" },
+];
 
 const SOURCES = [
   { key: "sessions", one: "session" },
@@ -48,13 +57,35 @@ export const validStatus = (status) => (status && typeof status === "object" && 
 
 const behindCount = (status) => SOURCES.reduce((sum, s) => sum + (Number(status?.behind?.[s.key]) || 0), 0);
 
-// Fresh at zero, behind up to five, stale above. Only what landed counts, so exploring leaves the ring alone.
+// Unwritten with no tidy yet. Otherwise fresh at zero, behind up to five and
+// stale above. Only what landed counts, so exploring leaves the ring alone.
 export function freshness(status) {
   if (!validStatus(status)) return null;
+  if (!status.tidiedAt) return "unwritten";
   const count = status.landed ? Number(status.landed.total) || 0 : behindCount(status);
   if (count > STALE_ABOVE) return "stale";
   return count > 0 ? "behind" : "fresh";
 }
+
+// Open cards per column. Anything that is not a list counts as none.
+export function taskCounts(items) {
+  const list = Array.isArray(items) ? items : [];
+  return Object.fromEntries(TASK_COLUMNS.map(({ key }) => [key, list.filter((item) => item?.column === key && !item.archived).length]));
+}
+
+export function tasksLine(counts) {
+  const parts = TASK_COLUMNS.filter(({ key }) => counts?.[key] > 0).map(({ key, label }) => `${counts[key]} ${label}`);
+  return parts.length > 0 ? parts.join(" · ") : "Nothing open";
+}
+
+// "A", "A and B", "A, B and C".
+export function nameList(names) {
+  if (names.length < 2) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+// The sketch surface and artifact keep the type `board`, but a person reads `sketch`.
+export const typeLabel = (type) => (type === "board" ? "sketch" : (type ?? ""));
 
 export const countsLine = (behind) => SOURCES.map((s) => plural(Number(behind?.[s.key]) || 0, s.one)).join(" · ");
 

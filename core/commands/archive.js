@@ -65,7 +65,7 @@ function afterTheFact(manifest) {
     .sort((a, b) => (modifiedAt(transcriptPath(manifest.folder, b)) ?? 0) - (modifiedAt(transcriptPath(manifest.folder, a)) ?? 0))
     .slice(0, RESTORED_SESSIONS);
   const tabs = newest.map((id) => ({ name: null, folder: null, session: { tool: 'claude', id } }));
-  return [{ name: manifest.name, folder: null, board: false, tabs }, ...(manifest.board ? [{ name: 'Board', folder: null, board: true, tabs: [] }] : [])];
+  return [{ name: manifest.name, folder: null, board: false, tabs }, ...(manifest.board ? [{ name: 'Tasks', folder: null, board: true, tabs: [] }] : [])];
 }
 
 // A kept workspace whose spaces all closed stays restorable.

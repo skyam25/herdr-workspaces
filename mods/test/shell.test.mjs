@@ -312,14 +312,14 @@ const spacesOn = (active, tabs = [...SPACES[0].tabs, BOARD_TAB]) => [{ ...SPACES
 const boardWorld = (active, overrides = {}) => tabWorld({ spaces: spacesOn(active), panes: [boardPane()], terminals: [], ...overrides });
 const selected = (view) => byId(view, "panel-tasks").bg === "color:selected";
 
-test("Tasks in a plain space opens nothing and says the Board needs a workspace", async () => {
+test("Tasks in a plain space opens nothing and says Tasks needs a workspace", async () => {
   const H = tabWorld();
   H.notices = [];
   const view = await mount("hws-tabs");
   assert.equal(selected(view), false);
   await view.click("panel-tasks");
   assert.deepEqual(H.runs, []);
-  assert.match(H.notices.at(-1).title, /needs a workspace/);
+  assert.deepEqual(H.notices.at(-1), { title: "Tasks needs a workspace", body: "Add this space to a workspace to use Tasks." });
 });
 
 test("Tasks in a workspace shows its Board space and adds no tab", async () => {
@@ -337,7 +337,7 @@ test("Tasks in a workspace with no Board adds nothing and says where to add one"
   const view = await mount("hws-tabs");
   await view.click("panel-tasks");
   assert.deepEqual(H.runs, []);
-  assert.match(H.notices.at(-1).title, /no Board/);
+  assert.deepEqual(H.notices.at(-1), { title: "This workspace has no tasks", body: "Choose Add tasks under the workspace in the sidebar." });
 });
 
 test("the tab bar hides a workspace's Board tab and keeps agents beside it", async () => {
@@ -426,7 +426,7 @@ test("a Board that is the space's only tab stays put", async () => {
   assert.deepEqual(H.runs, []);
 });
 
-test("a Board tab reads its name, not an agent's", async () => {
+test("a Board tab reads its name, not an agent's, and Tasks when unnamed", async () => {
   const agent = paneOf(listed("t1", "tb9", "spc1"));
   boardWorld("tb1", { panes: [boardPane(), agent] });
   const view = await mount("hws-tabs");
@@ -438,7 +438,7 @@ test("a Board tab reads its name, not an agent's", async () => {
   const unnamed = { ...BOARD_TAB, name: "tb9" };
   boardWorld("tb1", { spaces: spacesOn("tb1", [...SPACES[0].tabs, unnamed]), panes: [boardPane(), agent] });
   const cleared = await mount("hws-tabs");
-  assert.match(textOf(byId(cleared, "tab-tb9")), /Board/);
+  assert.match(textOf(byId(cleared, "tab-tb9")), /Tasks/);
 });
 
 test("an old saved tasks choice reads as none", async () => {
@@ -460,6 +460,112 @@ test("switching to a space saved on tasks closes the panel and selects nothing",
   H.spaces = [{ ...SPACES[0], active: false }, { ...SPACES[1], active: true }];
   view.render();
   assert.deepEqual(H.runs, [{ name: "layout.hide", args: { id: "panel" } }]);
+});
+
+// hws-spaces
+
+const WORKSPACE_SPACES = "hws.workspace.spaces";
+const space = (id, name, extra = {}) => ({ id, name, active: false, machine: null, folder: `/w/${name}`, status: null, tabs: [{ id: `tb-${id}`, name: "1", index: 1, active: true, status: null }], ...extra });
+const THREE = [space("spc1", "alpha"), space("spc2", "beta"), space("spc3", "gamma", { active: true })];
+const spaceWorld = (overrides = {}) => shell({ spaces: THREE, panes: [], sharedValues: {}, sharedSets: [], ...overrides });
+const spaceRows = (view) => nodes(view.render()).map((n) => n.id).filter((id) => /^space-spc/.test(id ?? ""));
+const heading = (view) => textOf(view.render()).split(" | ")[0];
+
+test("with the key unset, every space shows under Spaces", async () => {
+  spaceWorld();
+  const view = await mount("hws-spaces");
+  assert.deepEqual(spaceRows(view), ["space-spc1", "space-spc2", "space-spc3"]);
+  assert.equal(heading(view), "Spaces");
+});
+
+test("a space in an open workspace is hidden and the heading reads Other spaces", async () => {
+  spaceWorld({ sharedValues: { [WORKSPACE_SPACES]: ["spc2"] } });
+  const view = await mount("hws-spaces");
+  assert.deepEqual(spaceRows(view), ["space-spc1", "space-spc3"]);
+  assert.equal(heading(view), "Other spaces");
+});
+
+test("an id that matches no local space hides nothing and keeps the heading", async () => {
+  spaceWorld({ sharedValues: { [WORKSPACE_SPACES]: ["gone"] } });
+  const view = await mount("hws-spaces");
+  assert.equal(spaceRows(view).length, 3);
+  assert.equal(heading(view), "Spaces");
+});
+
+test("a remote space stays listed even when its id is shared", async () => {
+  const remote = space("spc2", "beta", { machine: "box" });
+  spaceWorld({ spaces: [THREE[0], remote], machines: [{ name: null, layout: "ready" }, { name: "box", layout: "ready" }], sharedValues: { [WORKSPACE_SPACES]: ["spc2"] } });
+  const view = await mount("hws-spaces");
+  assert.deepEqual(spaceRows(view), ["space-spc1", "space-spc2"]);
+  assert.equal(heading(view), "Spaces");
+});
+
+test("with every local space hidden the heading and + remain", async () => {
+  const H = spaceWorld({ sharedValues: { [WORKSPACE_SPACES]: ["spc1", "spc2", "spc3"] } });
+  const view = await mount("hws-spaces");
+  assert.deepEqual(spaceRows(view), []);
+  assert.equal(heading(view), "Other spaces");
+  await view.click("space-new");
+  assert.deepEqual(H.runs.at(-1), { name: "space.new", args: undefined });
+});
+
+test("dragging past a hidden space moves by its place among all spaces", async () => {
+  const H = spaceWorld({ sharedValues: { [WORKSPACE_SPACES]: ["spc2"] } });
+  const view = await mount("hws-spaces");
+  byId(view, "space-spc1").handlers.on_mouse_down_left({}, view.cx);
+  view.view.over = "spc3";
+  byId(view, "space-spc3").handlers.on_mouse_up_left({}, view.cx);
+  assert.deepEqual(H.runs, [{ name: "space.move", args: { id: "spc1", index: 3 } }]);
+});
+
+test("pressing and releasing a row selects that space, and the active one is highlighted", async () => {
+  const H = spaceWorld({ sharedValues: { [WORKSPACE_SPACES]: ["spc2"] } });
+  const view = await mount("hws-spaces");
+  assert.equal(byId(view, "space-spc3").bg, "color:selected");
+  assert.equal(byId(view, "space-spc1").bg, undefined);
+  byId(view, "space-spc1").handlers.on_mouse_down_left({}, view.cx);
+  byId(view, "space-spc1").handlers.on_mouse_up_left({}, view.cx);
+  assert.deepEqual(H.runs, [{ name: "space.select", args: { id: "spc1" } }]);
+});
+
+test("the rail numbers each space by its place among all spaces, as space.select:N does", async () => {
+  const H = spaceWorld({ sharedValues: { [WORKSPACE_SPACES]: ["spc2"] }, layout: { id: "root", children: [{ id: "sidebar", size: { px: 44 } }] } });
+  const view = await mount("hws-spaces");
+  assert.deepEqual(spaceRows(view), ["space-spc1", "space-spc3"]);
+  assert.match(textOf(byId(view, "space-spc3")), /^3\b/);
+  await view.click("space-spc3");
+  assert.deepEqual(H.runs, [{ name: "space.select", args: { id: "spc3" } }]);
+});
+
+test("ordering a worktree under its checkout still counts hidden spaces", async () => {
+  const order = [space("spc2", "beta"), space("spc1", "alpha"), space("spc4", "delta"), space("spc3", "gamma")];
+  const H = spaceWorld({ spaces: order, sharedValues: { [WORKSPACE_SPACES]: ["spc2"] } });
+  const view = await mount("hws-spaces");
+  const repo = JSON.stringify([null, "/w/alpha/.git"]);
+  view.view.git[JSON.stringify([null, "/w/alpha"])] = { name: "alpha", branch: "main", ahead: 0, behind: 0, repo, linked: false };
+  view.view.git[JSON.stringify([null, "/w/gamma"])] = { name: "alpha", branch: "gamma", ahead: 0, behind: 0, repo, linked: true };
+  assert.deepEqual(spaceRows(view), ["space-spc1", "space-spc3", "space-spc4"]);
+  assert.deepEqual(H.runs, [{ name: "space.move", args: { id: "spc3", index: 3 } }]);
+});
+
+test("a worktree whose checkout is hidden stands alone, and the last shown worktree closes its group", async () => {
+  const { visible } = await import("../hws-spaces/main.js");
+  const rows = [
+    { w: { id: "a" }, tree: null }, { w: { id: "a1" }, tree: "├─" }, { w: { id: "a2" }, tree: "└─" },
+    { w: { id: "b" }, tree: null }, { w: { id: "b1" }, tree: "└─" },
+  ];
+  const shape = (hide) => visible(rows, (w) => hide.includes(w.id)).map((r) => [r.w.id, r.tree]);
+  assert.deepEqual(shape([]), [["a", null], ["a1", "├─"], ["a2", "└─"], ["b", null], ["b1", "└─"]]);
+  assert.deepEqual(shape(["a2"]), [["a", null], ["a1", "└─"], ["b", null], ["b1", "└─"]]);
+  assert.deepEqual(shape(["b"]), [["a", null], ["a1", "├─"], ["a2", "└─"], ["b1", null]]);
+  assert.deepEqual(shape(["a"]), [["a1", null], ["a2", null], ["b", null], ["b1", "└─"]]);
+});
+
+test("hws-spaces draws with workspace-chrome's icons and never reaches into the stock spaces mod", () => {
+  const source = read("hws-spaces/main.js");
+  for (const [, file] of source.matchAll(/mods\/workspace-chrome\/([\w-]+)\.svg/g)) assert.ok(/^(server|monitor|chevron-down|chevron-right|plus|branch)$/.test(file), file);
+  assert.equal(/mods\/spaces\//.test(source), false);
+  assert.equal(JSON.parse(read("hws-spaces/mod.json")).title, "Spaces");
 });
 
 test("the two board.js copies are identical", () => {
@@ -492,9 +598,9 @@ test("the layout is valid and installs what it references", () => {
   assert.equal(new Set(ids).size, ids.length, "ids are unique");
 
   const installs = new Set(readdirSync(new URL("../", import.meta.url)).filter((name) => name.startsWith("hws-")));
-  const shipped = new Set(["workspace-chrome", "spaces", "files", "changes", "workspace-status"]);
+  const shipped = new Set(["workspace-chrome", "files", "changes", "workspace-status"]);
   for (const mod of mods) assert.ok(shipped.has(mod) || installs.has(mod), `${mod} is shipped or installed`);
-  for (const mod of ["hws-actions", "hws-work", "hws-tabs", "hws-agents"]) assert.ok(installs.has(mod), mod);
+  for (const mod of ["hws-actions", "hws-work", "hws-tabs", "hws-agents", "hws-spaces"]) assert.ok(installs.has(mod), mod);
 
   const block = (id) => {
     let hit = null;
@@ -504,6 +610,7 @@ test("the layout is valid and installs what it references", () => {
   };
   assert.equal(block("tabs").content.mod, "hws-tabs");
   assert.equal(block("agents").content.mod, "hws-agents");
+  assert.equal(block("spaces").content.mod, "hws-spaces");
   assert.deepEqual(block("panel-body").children.map((c) => c.id), ["files", "changes", "outputs"]);
   assert.equal(block("tasks"), null);
   assert.deepEqual(block("outputs").content, { mod: "hws-work", props: { view: "outputs" } });

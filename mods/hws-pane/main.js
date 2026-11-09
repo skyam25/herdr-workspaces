@@ -57,7 +57,7 @@ async function resumeBoard(id) {
     const r = await hws(["surface", "resume", "--id", id]);
     if (r.code !== 0) throw new Error(r.stdout.trim() || r.stderr.trim());
   } catch (e) {
-    toast({ title: "Board didn't open", body: plainError(e), level: "error" });
+    toast({ title: "Sketch didn't open", body: plainError(e), level: "error" });
   }
   resuming = false;
   lastBoards = 0;
@@ -187,7 +187,7 @@ export default class Pane extends View {
   boardButton(boards, pane) {
     const board = boards.at(-1);
     const more = boards.length > 1 ? ` +${boards.length - 1}` : "";
-    return uiButton(`ph-board-${pane}`, `${board.open ? "Show" : "Resume"} board${more}`, { onClick: () => resumeBoard(board.id) });
+    return uiButton(`ph-board-${pane}`, `${board.open ? "Show" : "Resume"} sketch${more}`, { onClick: () => resumeBoard(board.id) });
   }
 
   toChat(p, cx) {
@@ -278,7 +278,7 @@ export default class Pane extends View {
     const p = (agent && parked(agent)) ?? self;
     const prog = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "Shell";
     const board = self.mod === BOARD;
-    const name = self.mod === "hws-panel" ? "Workspace" : board ? "Board" : chatMode && !agent ? "Chat" : prog;
+    const name = self.mod === "hws-panel" ? "Workspace" : board ? "Tasks" : chatMode && !agent ? "Chat" : prog;
     const pic = icon(p.program, 14, t.dim);
     const pane = self.pane;
     const canSwitch = chatMode ? Boolean(agent) : chatty(self);

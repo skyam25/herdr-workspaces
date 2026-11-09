@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import { freeName, moveDir } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
@@ -21,7 +22,8 @@ import { checkDecisionShape, planDecisions, readDecisions, recordDecisions } fro
 import { readTodos, spaceOfTerminal, updateTodos } from './todo.js';
 
 const TITLE_CHARS = 200;
-const HEAD_BYTES = 256 * 1024;
+const CHUNK_BYTES = 256 * 1024;
+const TITLE_SCAN_BYTES = 8 * 1024 * 1024;
 const GIT_BUFFER = 32 * 1024 * 1024;
 const PACKET_CHANGED = 'The workspace changed. Read the tidy packet again at';
 const PARTS = ['current', 'decisions', 'demote', 'artifacts', 'cards'];
@@ -39,33 +41,71 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 const packetPath = (id) => join(workspaceDir(id), 'tidy', 'packet.json');
 
-function readHead(path) {
-  const buffer = Buffer.alloc(HEAD_BYTES);
+const IMAGE_MARKER = /\[Image[^\]]*\]/gi;
+const PATH_WORD = /^@\S+$|[/\\]|^[\w.-]+\.[A-Za-z0-9]{1,8}$/;
+
+// A prompt made only of @paths, bare paths and image markers names no work.
+function hasRealWords(text) {
+  return text.replace(IMAGE_MARKER, ' ').split(/\s+/).some((word) => word && !PATH_WORD.test(word) && /\p{L}/u.test(word));
+}
+
+// Yields whole lines and stops after `limit` bytes.
+function* linesOf(path, limit) {
+  const buffer = Buffer.alloc(CHUNK_BYTES);
+  const decoder = new StringDecoder('utf8');
   const fd = openSync(path, 'r');
   try {
-    return buffer.toString('utf8', 0, readSync(fd, buffer, 0, HEAD_BYTES, 0));
+    let carry = '';
+    for (let offset = 0; offset < limit; ) {
+      const read = readSync(fd, buffer, 0, CHUNK_BYTES, offset);
+      if (read === 0) break;
+      offset += read;
+      const lines = (carry + decoder.write(buffer.subarray(0, read))).split('\n');
+      carry = lines.pop();
+      yield* lines;
+    }
+    if (carry) yield carry;
   } finally {
     closeSync(fd);
   }
 }
 
-// The first typed prompt sits near the start, so a long transcript is never read whole.
-function firstPrompt(path) {
+function entryOf(line) {
   try {
-    for (const line of readHead(path).split('\n')) {
-      if (!line.includes('"user"')) continue;
-      try {
-        const entry = JSON.parse(line);
-        const text = entry.type === 'user' ? typedPrompt(entry).trim() : '';
-        if (text) return text.slice(0, TITLE_CHARS);
-      } catch {
-        // A damaged or cut line says nothing about the session.
+    return JSON.parse(line);
+  } catch {
+    // A damaged or cut line says nothing about the session.
+    return null;
+  }
+}
+
+// The first typed prompt, when it has real words. Otherwise Claude's own title,
+// then the first typed prompt with real words. The first prompt sits near the
+// start, so most transcripts are read only that far.
+function sessionTitle(path) {
+  let seenPrompt = false;
+  let aiTitle = null;
+  let fallback = null;
+  try {
+    for (const line of linesOf(path, TITLE_SCAN_BYTES)) {
+      if (!/"(ai-title|user)"/.test(line)) continue;
+      const entry = entryOf(line);
+      if (entry?.type === 'ai-title' && entry.aiTitle?.trim()) {
+        aiTitle ??= entry.aiTitle.trim();
+        if (seenPrompt) break;
+        continue;
       }
+      const text = entry?.type === 'user' ? typedPrompt(entry).trim() : '';
+      if (!text) continue;
+      if (!seenPrompt && hasRealWords(text)) return text.slice(0, TITLE_CHARS);
+      seenPrompt = true;
+      if (aiTitle) break;
+      if (hasRealWords(text)) fallback ??= text;
     }
   } catch {
     // An unreadable transcript still counts by its modified time.
   }
-  return null;
+  return (aiTitle ?? fallback)?.slice(0, TITLE_CHARS) ?? null;
 }
 
 function trackedSessions(manifest) {
@@ -79,7 +119,7 @@ function trackedSessions(manifest) {
 function sessionsSince(manifest, through) {
   return trackedSessions(manifest)
     .filter((item) => through == null || item.modifiedAt > through)
-    .map((item) => ({ ...item, title: firstPrompt(item.transcript) }));
+    .map((item) => ({ ...item, title: sessionTitle(item.transcript) }));
 }
 
 // An artifact counts once when it is created and again each time its file changes.

@@ -12,7 +12,7 @@ import { phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop
 import { find, reopen } from './commands/retired.js';
 import { decisionAdd, decisionList } from './commands/decision.js';
 import { tidyApply, tidyStart, tidyStatus, tidyStop } from './commands/tidy.js';
-import { boardAdd, boardOpen, spaceAdd, spaceMove, spaceRemove } from './commands/spaces.js';
+import { boardAdd, boardOpen, spaceAdd, spaceMatch, spaceMove, spaceRemove } from './commands/spaces.js';
 import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceOpen, surfaceResume, surfaceSocket } from './commands/surface.js';
 import {
   todoAdd,
@@ -51,6 +51,7 @@ const ROUTES = [
   { path: ['space', 'add'], run: spaceAdd, options: { workspace: text, name: text, folder: text } },
   { path: ['space', 'move'], run: spaceMove, options: { space: text, workspace: text } },
   { path: ['space', 'remove'], run: spaceRemove, options: { space: text } },
+  { path: ['space', 'match'], run: spaceMatch, options: { space: text } },
   { path: ['current'], run: current, prunes: true, options: { terminal: text, line: flag } },
   { path: ['list'], run: list, prunes: true, options: { archived: flag } },
   { path: ['register'], run: register, options: { terminal: text, session: text, role: text } },
@@ -107,7 +108,7 @@ const ROUTES = [
   { path: ['todo', 'claim'], run: todoClaim, options: { id: text, terminal: text, space: text } },
   { path: ['todo', 'send'], run: todoSend, options: { id: text, terminal: text, space: text } },
   { path: ['todo', 'reply'], run: todoReply, options: { id: text, text, space: text } },
-  { path: ['todo', 'archive'], run: todoArchive, options: { id: text, space: text } },
+  { path: ['todo', 'archive'], run: todoArchive, options: { id: text, done: flag, space: text } },
   { path: ['orchestrator', 'start'], run: orchestratorStart, options: { space: text, folder: text } },
   { path: ['models', 'set'], run: modelsSet, options: { role: text, tool: text, model: text, effort: text } },
   { path: ['models'], run: modelsShow, options: {} },

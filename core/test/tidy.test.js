@@ -75,6 +75,38 @@ test('sessions count when their transcript changed after sessionsThrough', (t) =
   assert.deepEqual({ ...session, at: typeof session.at }, { kind: 'session', id: 'new', title: 'plan the release', at: 'number', path: fresh });
 });
 
+function sessionTitleOf(box, users, title) {
+  const manifest = box.app();
+  const path = box.transcript(manifest, 's1', { users, title });
+  if (title === null) writeFileSync(path, readFileSync(path, 'utf8').replace(/.*"ai-title".*\n/, ''));
+  const items = status(box, manifest).items.filter((item) => item.kind === 'session');
+  const { packet } = box.json(['tidy', 'start', '--here'], { HC_TERMINAL_ID: manifest.terminals[0].terminal });
+  return { status: items[0].title, packet: JSON.parse(readFileSync(packet, 'utf8')).since.sessions[0].title };
+}
+
+const typed = (content) => ({ type: 'user', message: { content } });
+
+test('a session whose first prompt is only a path or an image takes the ai-title', (t) => {
+  for (const prompt of ['@docs/plan.md', '/Users/me/shot.png', '[Image #1]', '@a.md [Image #2] notes.txt']) {
+    const box = sandbox(t);
+    const titles = sessionTitleOf(box, [typed(prompt), typed('then fix the login')], 'Login fix');
+    assert.equal(titles.status, 'Login fix', prompt);
+    assert.equal(titles.packet, 'Login fix', prompt);
+  }
+});
+
+test('a session with no ai-title takes the first prompt with real words, else null', (t) => {
+  const box = sandbox(t);
+  assert.equal(sessionTitleOf(box, [typed('@docs/plan.md'), typed('read it and plan')], null).status, 'read it and plan');
+  const empty = sandbox(t);
+  assert.equal(sessionTitleOf(empty, [typed('[Image #1]')], null).status, null);
+});
+
+test('a first prompt with real words stays the title', (t) => {
+  const box = sandbox(t);
+  assert.equal(sessionTitleOf(box, [typed('look at @docs/plan.md please')], 'Other').status, 'look at @docs/plan.md please');
+});
+
 test('a session without a transcript and the tidy pass session are left out', (t) => {
   const box = sandbox(t);
   const manifest = box.app();

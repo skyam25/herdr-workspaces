@@ -137,7 +137,7 @@ The note has five fixed headings, in this order.
 - Customers get a receipt they can keep [file:README.md]
 
 ## Now
-- Boards open in their own window and notes stay in a pane [commit:ba7d965]
+- Sketches open in their own window and notes stay in a pane [commit:ba7d965]
 
 ## Decisions in force
 - 2026-11-06 The task list is separate from orchestration [commit:2a12556]

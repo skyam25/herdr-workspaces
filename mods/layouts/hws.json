@@ -68,7 +68,7 @@
               },
               "min": 90,
               "content": {
-                "mod": "spaces"
+                "mod": "hws-spaces"
               }
             },
             {
