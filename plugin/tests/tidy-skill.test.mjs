@@ -39,8 +39,8 @@ describe("tidy skill", () => {
     }
   });
 
-  it("names the three headings in order and every cite", () => {
-    const order = ["## Now", "## Decisions in force", "## Next"].map((heading) => skill.indexOf(heading));
+  it("names the five headings in order and every cite", () => {
+    const order = ["## Goal", "## Now", "## Decisions in force", "## Open questions", "## Next"].map((heading) => skill.indexOf(heading));
 
     assert.ok(order.every((index) => index > 0), "missing a heading");
     assert.deepEqual([...order].sort((a, b) => a - b), order);
@@ -51,8 +51,21 @@ describe("tidy skill", () => {
     assert.match(skill, /Rewrite the whole note\. Never append/);
   });
 
-  it("states the Trash fallback for history", () => {
-    assert.match(skill, /`places\.history` is `null`, `hws` sends a `history` demotion to the Trash/);
+  it("keeps history as the default and the note free of the past", () => {
+    assert.match(skill, /`history`, which is the default place for anything outdated/);
+    assert.match(skill, /Never write "previously"/);
+  });
+
+  it("asks before proposing, and only what the evidence does not settle", () => {
+    assert.ok(skill.indexOf("Ask what is unclear") < skill.indexOf("## Write the proposal"));
+    assert.match(skill, /AskUserQuestion/);
+    assert.match(skill, /Ask at most four questions/);
+  });
+
+  it("keeps exploring out of the decision log", () => {
+    assert.match(skill, /Exploring is not deciding/);
+    assert.match(skill, /A draft artifact \| Open questions, never Now/);
+    assert.match(skill, /`decidedAt`.*source's own timestamp/);
   });
 
   it("opens the page, ends the turn and applies on Done", () => {
@@ -67,7 +80,7 @@ describe("tidy skill", () => {
     for (const [, verb] of skill.matchAll(/hws tidy ([a-z]+)/g)) {
       assert.ok(design.includes(`hws tidy ${verb}`), `hws tidy ${verb} is not in the design`);
     }
-    assert.ok(design.includes("--skip current,demote,artifacts,cards"));
+    assert.ok(design.includes("--skip current,decisions,demote,artifacts,cards"));
   });
 });
 
@@ -81,6 +94,8 @@ describe("herdr-workspace skill places", () => {
 
   it("allows one dated decision line and leaves the rewrite to the tidy pass", () => {
     assert.match(workspaceSkill, /one dated line with a cite under Decisions in force/);
+    assert.match(workspaceSkill, /log nothing without their yes/);
+    assert.ok(workspaceSkill.includes("hws decision add"));
     assert.match(workspaceSkill, /tidy pass rewrites the whole note/);
     for (const cite of CITES) assert.ok(workspaceSkill.includes(cite), cite);
   });

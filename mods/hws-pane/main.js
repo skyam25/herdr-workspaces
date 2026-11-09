@@ -258,7 +258,7 @@ export default class Pane extends View {
     const p = (agent && parked(agent)) ?? self;
     const prog = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "Shell";
     const board = self.mod === BOARD;
-    const name = board ? "Board" : chatMode && !agent ? "Chat" : prog;
+    const name = self.mod === "hws-panel" ? "Workspace" : board ? "Board" : chatMode && !agent ? "Chat" : prog;
     const pic = icon(p.program, 14, t.dim);
     const pane = self.pane;
     const canSwitch = chatMode ? Boolean(agent) : chatty(self);

@@ -4,6 +4,8 @@ import { resumeArgv, sessionOfTerminal } from '../agent-session.js';
 import { HwsError } from '../errors.js';
 import { act, keepingSelection, killTerminal, requireLive, terminalInfo } from '../herdr.js';
 import { TIDY_ROLE, updateManifest } from '../manifest.js';
+import { transcriptPath } from '../paths.js';
+import { modifiedAt } from '../retired.js';
 import { isKept } from '../places.js';
 import { callerIsAgent, requireFlag, resolveWorkspace, workspaceByRef } from '../resolve.js';
 import { requireFolder } from '../settings.js';
@@ -51,6 +53,27 @@ function snapshot(manifest, spaces) {
     board: space.id === manifest.board?.space,
     tabs: (space.tabs ?? []).filter((tab) => tab.id !== manifest.board?.tab).flatMap((tab) => savedTabs(manifest, tab)),
   }));
+}
+
+const RESTORED_SESSIONS = 4;
+
+// What a kept workspace can reopen with once its spaces are already gone. Tab
+// names went with them, so each recent agent session becomes one tab.
+function afterTheFact(manifest) {
+  const seen = manifest.terminals.filter((item) => item.sessionId && item.role !== TIDY_ROLE).map((item) => item.sessionId);
+  const newest = [...new Set(seen)]
+    .sort((a, b) => (modifiedAt(transcriptPath(manifest.folder, b)) ?? 0) - (modifiedAt(transcriptPath(manifest.folder, a)) ?? 0))
+    .slice(0, RESTORED_SESSIONS);
+  const tabs = newest.map((id) => ({ name: null, folder: null, session: { tool: 'claude', id } }));
+  return [{ name: manifest.name, folder: null, board: false, tabs }, ...(manifest.board ? [{ name: 'Board', folder: null, board: true, tabs: [] }] : [])];
+}
+
+// A kept workspace whose spaces all closed stays restorable.
+export function archiveClosed(manifest) {
+  updateManifest(manifest.id, (draft) => {
+    draft.archived = { at: Date.now(), spaces: afterTheFact(draft) };
+    draft.spaces = [];
+  });
 }
 
 // The flag goes on disk before anything closes, because a caller inside the

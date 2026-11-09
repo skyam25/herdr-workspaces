@@ -173,7 +173,7 @@ test('with no current note every item is behind', (t) => {
   const result = status(box, manifest);
 
   assert.equal(result.tidiedAt, null);
-  assert.equal(result.stage, null);
+  assert.equal(result.stage, 'discovery');
   assert.equal(result.live, null);
   assert.deepEqual(result.behind, { sessions: 1, artifacts: 1, commits: 1, cards: 1 });
   assert.equal(line(box, ['--workspace', manifest.id]), 'No current note yet');
@@ -195,7 +195,7 @@ test('status carries the resolved places and the line, and creates no folder', (
     artifacts: join(own, 'artifacts'),
     scratch: join(own, 'scratch'),
     decisions: join(manifest.folder, 'decisions'),
-    history: null,
+    history: join(own, 'history'),
     meetings: null,
   });
   assert.deepEqual(result.writers, { current: null, artifacts: null, scratch: null, decisions: 'pmos', history: null, meetings: null });
@@ -222,10 +222,13 @@ test('the line names each source behind and leaves out zero sources', (t) => {
   writeCards(box, manifest, [card('c1', 'done')]);
   setCurrent(box, manifest, { sessionsThrough: tidiedAt, artifactsThrough: tidiedAt }, tidiedAt);
 
-  assert.equal(line(box, ['--workspace', manifest.id]), `Current is 1 session, 2 artifacts and 1 card behind, last tidied ${shortDate(tidiedAt)}`);
+  assert.equal(line(box, ['--workspace', manifest.id]), `Current is 2 artifacts and 1 card behind, last tidied ${shortDate(tidiedAt)}`);
 
   writeCards(box, manifest, []);
-  assert.equal(line(box, ['--workspace', manifest.id]), `Current is 1 session and 2 artifacts behind, last tidied ${shortDate(tidiedAt)}`);
+  assert.equal(line(box, ['--workspace', manifest.id]), `Current is 2 artifacts behind, last tidied ${shortDate(tidiedAt)}`);
+
+  box.rewriteManifest(manifest.id, (draft) => ({ ...draft, artifacts: draft.artifacts.map((item) => ({ ...item, status: 'draft' })) }));
+  assert.equal(line(box, ['--workspace', manifest.id]), `Nothing has landed since ${shortDate(tidiedAt)}`);
 
   box.rewriteManifest(manifest.id, (draft) => ({ ...draft, artifacts: [], terminals: draft.terminals.map((item) => ({ ...item, sessionId: null })) }));
   assert.equal(line(box, ['--workspace', manifest.id]), `Current is up to date, last tidied ${shortDate(tidiedAt)}`);
@@ -270,7 +273,7 @@ test('start writes the packet, opens a Tidy tab and records the pass', (t) => {
   const selected = box.state().selected;
   box.transcript(manifest, 's1');
   addArtifacts(box, manifest, [artifact('a1', 5)]);
-  writeCards(box, manifest, [card('c1', 'done', { note: 'n', report: 'r' })]);
+  writeCards(box, manifest, [card('c1', 'done', { note: 'n', report: 'r' }), card('c2', 'todo')]);
   git(manifest.folder, 'init', '-q');
   const head = commit(manifest.folder, 'first');
   box.json(['set', '--workspace', manifest.id, '--stage', 'deciding', '--instructions', 'Be brief']);
@@ -300,7 +303,11 @@ test('start writes the packet, opens a Tidy tab and records the pass', (t) => {
   assert.equal(packet.stage, 'deciding');
   assert.equal(packet.instructions, 'Be brief');
   assert.equal(packet.places.current, join(manifest.folder, 'CURRENT.md'));
-  assert.equal(packet.places.history, null);
+  assert.equal(packet.places.history, join(manifest.folder, '.herdr-workspace', `demo-${manifest.id.slice(-6)}`, 'history'));
+  assert.deepEqual(packet.live.artifacts.map((item) => item.id), ['a1']);
+  assert.deepEqual(packet.live.decisions.inForce, []);
+  assert.deepEqual(packet.live.cards, [{ id: 'c2', title: 'Card c2', column: 'todo' }]);
+  assert.equal(packet.writers.decisions, null);
   assert.deepEqual(packet.current, { path: join(manifest.folder, 'CURRENT.md'), exists: false, hash: null, tidiedAt: null, covers: null });
   assert.deepEqual(packet.since.sessions.map((item) => item.id), ['s1']);
   assert.deepEqual(packet.since.artifacts, [{ id: 'a1', title: 'Artifact a1', path: '/tmp/a1', status: 'current', createdAt: 5 }]);
@@ -404,8 +411,13 @@ test('apply writes the note, demotes, marks artifacts, archives cards and stamps
   const result = box.json(['tidy', 'apply', '--file', file, '--workspace', manifest.id]);
 
   const history = join(folder, 'docs', 'history', 'plan.md');
+  const snapshot = result.snapshot;
+  assert.equal(readFileSync(snapshot, 'utf8'), '# Old\n');
   assert.deepEqual(result, {
     wrote: join(folder, 'CURRENT.md'),
+    snapshot,
+    updates: join(folder, 'docs', 'history', 'updates.md'),
+    decisions: [],
     demoted: [{ path: join(folder, 'docs', 'plan.md'), to: history }, { path: join(folder, 'docs', 'scrap.md'), to: 'trash' }],
     artifacts: [{ id: 'a1', status: 'superseded', supersedes: null }, { id: 'a2', status: 'current', supersedes: 'a1' }],
     archived: ['c1', 'c2'],
@@ -432,7 +444,8 @@ test('the proposal names its workspace, so apply needs no flag', (t) => {
 
   const result = box.json(['tidy', 'apply', '--file', file]);
 
-  assert.deepEqual(result, { wrote: join(manifest.folder, 'CURRENT.md'), demoted: [], artifacts: [], archived: [], skipped: [] });
+  assert.equal(result.wrote, join(manifest.folder, 'CURRENT.md'));
+  assert.deepEqual([result.demoted, result.artifacts, result.archived, result.skipped], [[], [], [], []]);
 });
 
 for (const part of ['current', 'demote', 'artifacts', 'cards']) {
@@ -501,16 +514,16 @@ test('apply writes a first note when the packet had none', (t) => {
   assert.equal(readFileSync(join(manifest.folder, 'docs', 'NOW.md'), 'utf8'), '# Current\n');
 });
 
-test('a history demotion goes to the Trash when history is unset', (t) => {
+test('a history demotion goes to the default history place', (t) => {
   const box = sandbox(t);
   const { manifest, folder, packet } = applyFixture(box, { history: false });
   const file = writeProposal(box, manifest, packet, { demote: [{ path: join(folder, 'docs', 'plan.md'), to: 'history', reason: 'Decided' }] });
 
   const result = box.json(['tidy', 'apply', '--file', file]);
 
-  assert.deepEqual(result.demoted, [{ path: join(folder, 'docs', 'plan.md'), to: 'trash' }]);
-  assert.equal(readFileSync(join(box.trashDir, '0-plan.md'), 'utf8'), 'plan');
-  assert.equal(existsSync(join(folder, 'docs', 'history')), false);
+  const target = join(folder, '.herdr-workspace', `demo-${manifest.id.slice(-6)}`, 'history', 'plan.md');
+  assert.deepEqual(result.demoted, [{ path: join(folder, 'docs', 'plan.md'), to: target }]);
+  assert.equal(readFileSync(target, 'utf8'), 'plan');
 });
 
 test('a history demotion never replaces a file already there', (t) => {
@@ -626,4 +639,127 @@ test('stop clears a pass whose terminal already ended without killing anything',
   assert.deepEqual(box.json(['tidy', 'stop', '--workspace', manifest.id]), { stopped: true, terminal: 't9' });
   assert.deepEqual(box.actions(), []);
   assert.equal(box.manifest(manifest.id).tidy, undefined);
+});
+
+// Decisions, history and the pane
+
+function decision(title, change = {}) {
+  return { title, why: `Because of ${title}`, decidedAt: '2026-11-04', cites: ['card:c1'], ...change };
+}
+
+function freshPass(box, manifest) {
+  return box.json(['tidy', 'start', '--workspace', manifest.id]).packet;
+}
+
+test('apply logs decisions, and a later pass replaces one and keeps both records', (t) => {
+  const box = sandbox(t);
+  const { manifest, folder, packet } = applyFixture(box);
+  const first = writeProposal(box, manifest, packet, { demote: [], artifacts: [], cards: [], decisions: [decision('Use PDF')], summary: 'First pass' });
+
+  const applied = box.json(['tidy', 'apply', '--file', first]);
+
+  assert.deepEqual(applied.decisions, [{ id: 'D-001', decidedAt: '2026-11-04', title: 'Use PDF', replaces: [] }]);
+  const log = join(folder, '.herdr-workspace', `demo-${manifest.id.slice(-6)}`, 'decisions', 'decisions.md');
+  box.json(['tidy', 'stop', '--workspace', manifest.id]);
+
+  const again = freshPass(box, manifest);
+  assert.deepEqual(packetOf(box, manifest).live.decisions.inForce, [{ id: 'D-001', decidedAt: '2026-11-04', title: 'Use PDF' }]);
+  const second = writeProposal(box, manifest, again, { demote: [], artifacts: [], cards: [], current: '# Current\n\n## Now\n- HTML [card:c1]\n', decisions: [decision('Use HTML', { decidedAt: '2026-11-08', replaces: ['D-001'] })], summary: 'We pivoted to HTML' });
+  box.json(['tidy', 'apply', '--file', second]);
+
+  const text = readFileSync(log, 'utf8');
+  assert.match(text, /## D-001 · 2026-11-04 · Use PDF\n\nReplaced by D-002\.\n\nBecause of Use PDF/);
+  assert.match(text, /## D-002 · 2026-11-08 · Use HTML\n\nReplaces D-001\./);
+  assert.deepEqual(box.json(['decision', 'list', '--workspace', manifest.id]).decisions.map((item) => [item.id, item.replacedBy]), [['D-001', 'D-002'], ['D-002', null]]);
+
+  const updates = readFileSync(join(folder, 'docs', 'history', 'updates.md'), 'utf8');
+  assert.ok(updates.indexOf('We pivoted to HTML') < updates.indexOf('First pass'));
+  assert.match(updates, /Decided D-002, Use HTML, replacing D-001/);
+  assert.equal(status(box, manifest).record.decisions.inForce, 1);
+  assert.equal(status(box, manifest).record.decisions.replaced, 1);
+});
+
+test('two passes on one day keep both earlier notes', (t) => {
+  const box = sandbox(t);
+  const { manifest, packet } = applyFixture(box);
+  const first = box.json(['tidy', 'apply', '--file', writeProposal(box, manifest, packet, { demote: [], artifacts: [], cards: [] })]);
+  const second = box.json(['tidy', 'apply', '--file', writeProposal(box, manifest, freshPass(box, manifest), { demote: [], artifacts: [], cards: [], current: '# Current\n\n## Now\n- Second [commit:abc]\n' })]);
+
+  assert.notEqual(first.snapshot, second.snapshot);
+  assert.equal(readFileSync(first.snapshot, 'utf8'), '# Old\n');
+  assert.equal(readFileSync(second.snapshot, 'utf8'), NEW_NOTE);
+});
+
+test('apply refuses a bad decision or an unknown replacement and changes nothing', (t) => {
+  const box = sandbox(t);
+  const { manifest, folder, packet } = applyFixture(box);
+  const rest = { demote: [], artifacts: [], cards: [] };
+
+  const badDate = box.hws(['tidy', 'apply', '--file', writeProposal(box, manifest, packet, { ...rest, decisions: [decision('X', { decidedAt: 'soon' })] })]);
+  assert.equal(badDate.code, 2);
+  assert.match(badDate.stderr, /decisions\[0\]\.decidedAt/);
+
+  const unknown = box.hws(['tidy', 'apply', '--file', writeProposal(box, manifest, packet, { ...rest, decisions: [decision('X', { replaces: ['D-009'] })] })]);
+  assert.equal(unknown.code, 1);
+  assert.match(unknown.stderr, /no decision D-009/);
+  assert.equal(readFileSync(join(folder, 'CURRENT.md'), 'utf8'), '# Old\n');
+});
+
+test('apply refuses decisions when another tool owns the log, and --skip decisions leaves it alone', (t) => {
+  const box = sandbox(t);
+  const { manifest, packet } = applyFixture(box);
+  box.json(['set', '--workspace', manifest.id, '--place', 'decisions=decisions', '--writer', 'decisions=pmos']);
+  const file = writeProposal(box, manifest, packet, { demote: [], artifacts: [], cards: [], decisions: [decision('X')] });
+
+  assert.match(box.hws(['tidy', 'apply', '--file', file]).stderr, /belongs to pmos/);
+  assert.deepEqual(box.json(['tidy', 'apply', '--file', file, '--skip', 'decisions']).decisions, []);
+});
+
+test('decision add logs one mid-session and a replaced decision cannot be replaced again', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+
+  const first = box.json(['decision', 'add', '--workspace', manifest.id, '--title', 'Use PDF', '--why', 'Prints well', '--decided-at', '2026-11-01', '--cites', 'card:c1,commit:abc']);
+  assert.deepEqual(first, { id: 'D-001', decidedAt: '2026-11-01', title: 'Use PDF', replaces: [] });
+  box.json(['decision', 'add', '--workspace', manifest.id, '--title', 'Use HTML', '--why', 'Phones', '--replaces', 'D-001']);
+
+  const again = box.hws(['decision', 'add', '--workspace', manifest.id, '--title', 'Use text', '--why', 'Simple', '--replaces', 'D-001']);
+  assert.equal(again.code, 1);
+  assert.match(again.stderr, /already replaced by D-002/);
+});
+
+test('sessions and drafts never count as landed, and an edited artifact does', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const tidiedAt = Date.now() - HOUR;
+  const file = join(manifest.folder, 'deck.md');
+  writeFileSync(file, 'deck');
+  box.transcript(manifest, 's1');
+  addArtifacts(box, manifest, [{ ...artifact('old', tidiedAt - HOUR), path: file }, { ...artifact('idea', Date.now()), status: 'draft' }]);
+  setCurrent(box, manifest, { sessionsThrough: tidiedAt, artifactsThrough: tidiedAt }, tidiedAt);
+
+  const result = status(box, manifest);
+
+  assert.deepEqual(result.behind, { sessions: 1, artifacts: 2, commits: 0, cards: 0 });
+  assert.deepEqual(result.landed, { artifacts: 1, commits: 0, cards: 0, total: 1 });
+  assert.deepEqual(result.items.find((item) => item.id === 'old').edited, true);
+});
+
+test('from the panel the pass opens in a terminal below it, in the workspace folder', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  box.clearCalls();
+
+  const pane = box.state().spaces[0].tabs[0].terminals[0].pane;
+  const { packet } = box.json(['tidy', 'start', '--workspace', manifest.id, '--pane', pane]);
+
+  const [call] = box.actions();
+  assert.deepEqual(call.slice(0, 8), ['herdr-app', 'do', 'pane.split', '--pane', pane, '--direction', 'down', '--argv']);
+  assert.deepEqual(JSON.parse(call[8]), ['sh', '-c', 'cd "$0" && exec "$@"', manifest.folder, 'claude', '--model', 'opus', '--effort', 'high', `Use the herdr-workspaces:tidy skill. The packet is at ${packet}.`]);
+  assert.equal(box.actions().some((item) => item.includes('tab.new')), false);
+});
+
+test('a new kept workspace starts in discovery', (t) => {
+  const box = sandbox(t);
+  assert.equal(box.app().stage, 'discovery');
 });

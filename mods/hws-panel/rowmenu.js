@@ -2,7 +2,7 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { closeOverlay, openOverlay, props } from "herdr";
+import { closeOverlay, openOverlay, panes, props, run, spaces } from "herdr";
 import { hws, submitDialog, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, button, problemLine } from "./hws.js";
 
 const MOD = "hws-panel";
@@ -16,7 +16,6 @@ const CONFIRM_DIALOG = { width: 440, height: 176 };
 const openDialog = ({ width, height }, dialogProps) => openOverlay({ mod: MOD, kind: "dialog", modal: true, width, height, props: dialogProps });
 
 const CLOSE_BODY = {
-  kept: "Its spaces and terminals close and it leaves this list for good. Its files stay in its folder.",
   throwaway: "Its spaces and terminals close. Find throwaway can bring it back for 30 days.",
 };
 
@@ -33,12 +32,28 @@ export const openConfirm = (action, target) => openDialog(CONFIRM_DIALOG, { ...t
 
 const openRename = (target) => openDialog(RENAME_DIALOG, { ...target, view: "rename" });
 
+// Opens on the space's shown tab and never closes a panel already there, so
+// it reads the tab from `spaces()` and does not wait for the switch to land.
+function openPanel(spaceId) {
+  const tab = spaces().find((s) => s.id === spaceId)?.tabs.find((c) => c.active);
+  run("space.select", { id: spaceId });
+  const inTab = panes().filter((p) => p.tab === tab?.id);
+  const seated = inTab.find((p) => p.mod === MOD);
+  if (seated) {
+    run("pane.focus", { pane: seated.pane });
+    return;
+  }
+  const anchor = inTab.find((p) => p.terminal) ?? inTab[0];
+  if (anchor) run("pane.split", { direction: "right", pane: anchor.pane, mod: MOD, props: anchor.terminal ? { terminal: anchor.terminal } : {} });
+}
+
 function menuItems(target) {
+  const panel = target.space ? [{ id: "panel", label: "Open panel", open: () => openPanel(target.space) }] : [];
   const rename = { id: "rename", label: "Rename…", open: () => openRename(target) };
   const confirm = (id, label) => ({ id, label, open: () => openConfirm(id, target) });
   if (target.archived) return [confirm("restore", "Restore…"), rename, confirm("remove", "Remove…")];
-  if (target.kind === "throwaway") return [rename, confirm("close", "Close…")];
-  return [rename, confirm("archive", "Archive…"), confirm("close", "Close…")];
+  if (target.kind === "throwaway") return [...panel, rename, confirm("close", "Close…")];
+  return [...panel, rename, confirm("archive", "Archive…")];
 }
 
 // `target` is `{ workspace, name, kind, archived }`.

@@ -41,7 +41,8 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Context lifecycle | Working context stays messy in the stream. A tidy pass the person triggers rewrites one current note and demotes the rest. `docs/CONTRACT.md` holds the Tidy section |
 | Places | `hws` speaks in roles (`current`, `artifacts`, `scratch`, `decisions`, `history`, `meetings`). Folder names belong to the user and live in the manifest `places` map |
 | Tidy | `hws tidy start` opens a Claude tab on a packet. The agent writes a proposal and opens it in a page. Done delivers feedback to the agent, which runs `hws tidy apply`. Only `hws` writes the note |
-| Freshness | Counted from the stream against `current.covers`, never from the clock. Sessions, artifacts, commits and Done cards |
+| Freshness | Counted from the stream against `current.covers`, never from the clock. Only non-draft artifacts, commits and Done cards move the ring, because sessions and drafts are exploring |
+| Decisions and history | The note holds what is true now. `decisions.md` keeps each decision and what replaced it. Each pass saves the old note and adds to `updates.md` |
 | Throwaway scratch | Shells start in `<state>/workspaces/<id>/scratch`. Keep moves it under `~/Documents/Herdr Workspaces/<name>/`, Trash and purge trash it |
 
 ## Next steps, in order
@@ -98,7 +99,7 @@ The audit found these from reading code.
 
 ### 6. Tidy
 
-- [ ] Decide whether General, App and Deliverable stay. They only change how a workspace is described to agents.
+- [x] Take General, App and Deliverable out of the panel. They only change how a workspace is described to agents, and `hws set --kind` still changes them.
 - [ ] Make closing a workspace remove its folder under `~/.local/state/herdr-workspaces/workspaces/`. Closed workspaces leave one behind.
 - [x] Add `install.sh`, `hws doctor`, CI and a release workflow.
 - [ ] Confirm that Pixel draws correctly in a real Herdr window on Linux. CI covers the install and tests but has no Herdr window.
@@ -152,9 +153,11 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 Built 2026-11-09 by six Opus workers against fakes. Nothing has run in the real window.
 
 - [x] Open the workspace panel on this repo and read the header line. It should say "No current note yet" until a pass runs. `hws tidy status --line` said that on 2026-11-09, and the first pass wrote a proposal with a note, 17 cards to archive and one artifact superseded.
-- [ ] Press Open current. The note should open in a pane. The default place is `CURRENT.md`. Decide whether this file should become the current note instead, knowing a tidy pass rewrites the whole note.
-- [ ] Press Tidy. A Tidy tab should open, write a proposal and open it in a page. Press Done and check the note, the Trash and the archived cards.
-- [ ] Read the Since last tidy rows after a commit and after a card moves to Done.
+- [ ] Press Open note. The note should open in a pane. The default place is `CURRENT.md`. Decide whether this file should become the current note instead, knowing a tidy pass rewrites the whole note.
+- [ ] Press Tidy. A terminal should open below the panel, ask anything unclear, write a proposal and open it in a page. Press Done and check the note, the Trash and the archived cards.
+- [ ] Read the Not in the note yet rows after a commit and after a card moves to Done.
+- [ ] Close a kept workspace, then open Find past work in the launcher and restore it.
+- [ ] Press Workspace in the top bar, then right-click another workspace in the sidebar and press Open panel. The panel should open beside a terminal in each case.
 - [ ] Edit a Places row, clear one, and press Suggest from folder.
 - [ ] Open a throwaway, make a scratch file, close it, and check the Keep or Trash dialog lists the scratch folder.
 - [ ] Start a Claude session in a kept workspace and read the three session-start sentences.

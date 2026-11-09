@@ -1,10 +1,11 @@
 // The Herdr Workspaces launcher. A key opens the menu. New workspace and Find
-// throwaway each open a second dialog, because they need different sizes.
+// past work each open a second dialog, because they need different sizes.
 
 import { View, div } from "gpui-kit";
-import { v_flex } from "gpui-base";
+import { v_flex, h_flex } from "gpui-base";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const RETIRED_KEEP_DAYS = 30;
 
 function closedWhen(time) {
   const days = Math.floor((Date.now() - time) / DAY_MS);
@@ -33,7 +34,7 @@ export default class Launcher extends View {
     if (this.isFind) {
       this.results = null;
       this.searchId = 0;
-      makeInput(this, "query", { placeholder: "What was it about?", submit: (cx) => this.reopenSelected(cx), change: (cx) => this.search(cx) });
+      makeInput(this, "query", { placeholder: "Search by name or what it was about", submit: (cx) => this.reopenSelected(cx), change: (cx) => this.search(cx) });
       this.search(cx);
       focusField(this, "query", cx);
       return;
@@ -146,7 +147,7 @@ export default class Launcher extends View {
       { id: "new-terminal", name: "New terminal", line: "A plain tab with no workspace.", go: (cx) => this.newTerminal(cx) },
       { id: "new-workspace", name: "New workspace…", line: "A named place with its spaces, instructions and kept work.", go: () => this.openForm() },
       { id: "new-throwaway", name: "Throwaway", line: "Claude in a scratch workspace.", go: (cx) => this.launch("new-throwaway", ["new", "throwaway"], cx) },
-      { id: "find-throwaway", name: "Find throwaway…", line: "Reopen one that closed or went idle.", go: () => this.openFind() },
+      { id: "find-past", name: "Find past work…", line: "Bring back an archived workspace or a closed throwaway.", go: () => this.openFind() },
       { id: "new-board", name: "New board", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled board", "--standalone"], cx) },
       { id: "new-note", name: "New note", line: "A prompt, template or note on its own.", go: (cx) => this.launch("new-note", ["surface", "open", "--type", "note", "--title", "Untitled note", "--standalone"], cx) },
       this.orchestrateRow(),
@@ -223,26 +224,31 @@ export default class Launcher extends View {
   }
 
   renderResult(t, item, index) {
-    const title = item.sessions[0]?.title || item.name;
+    const title = item.archived ? item.name : item.sessions[0]?.title || item.name;
     const artifacts = item.artifacts.length > 0 ? plural(item.artifacts.length, "artifact") : null;
-    const detail = [title === item.name ? null : item.name, closedWhen(item.closedAt), artifacts].filter(Boolean).join(" · ");
-    return v_flex()
+    const daysLeft = Math.max(0, RETIRED_KEEP_DAYS - Math.floor((Date.now() - item.closedAt) / DAY_MS));
+    const kind = item.archived ? `Workspace, archived ${closedWhen(item.closedAt).toLowerCase()}` : `Throwaway, closed ${closedWhen(item.closedAt).toLowerCase()}`;
+    const detail = [kind, title === item.name ? null : item.name, item.archived ? null : `${plural(daysLeft, "day")} left`, artifacts].filter(Boolean).join(" · ");
+    const isReopening = this.busy === `reopen-${item.id}`;
+    return h_flex()
       .id(`retired-${item.id}`)
       .flex_none()
       .px(10)
       .py(7)
+      .gap(10)
+      .items_center()
       .rounded(7)
       .cursor_pointer()
       .when(index === this.at, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.selected))
       .on_click((_e, cx) => this.reopen(item, cx))
-      .child(div().truncate().font_medium().child(this.busy === `reopen-${item.id}` ? "Reopening…" : title))
-      .child(div().truncate().text_size(11.5).text_color(t.dim).child(detail));
+      .child(v_flex().flex_1().min_w(0).child(div().truncate().font_medium().child(title)).child(div().truncate().text_size(11.5).text_color(t.dim).child(detail)))
+      .child(div().flex_none().text_size(11.5).text_color(t.muted).child(isReopening ? "Restoring…" : "Restore"));
   }
 
   findEmptyLine() {
     if (this.results === null) return "Searching…";
-    return this.values.query.trim() ? "Nothing matches." : "Throwaways you close or that go idle appear here.";
+    return this.values.query.trim() ? "Nothing matches." : "Archived workspaces and closed throwaways appear here.";
   }
 
   renderFind(t) {
@@ -256,7 +262,7 @@ export default class Launcher extends View {
           .p(18)
           .pb(10)
           .gap(12)
-          .child(div().text_size(15).font_semibold().child("Find throwaway"))
+          .child(div().text_size(15).font_semibold().child("Find past work"))
           .child(field(t, this, "query"))
           .when(Boolean(this.problem), (el) => el.child(problemLine(t, this.problem))),
       )

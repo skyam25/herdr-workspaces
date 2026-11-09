@@ -26,16 +26,16 @@ Read the manifest before inferring anything from the folder or git state. If `$H
 
 | Role | Holds |
 |---|---|
-| `current` | The current note, with Now, Decisions in force and Next |
+| `current` | The current note, with Goal, Now, Decisions in force, Open questions and Next |
 | `artifacts` | Done bundles and registered files |
 | `scratch` | Drafts and working files |
-| `decisions` | An append-only decision log, when set |
-| `history` | Demoted docs, when set |
+| `decisions` | The decision log. Only `hws decision` writes it |
+| `history` | Earlier notes, the update log and demoted docs |
 | `meetings` | Transcribed meeting notes, when set |
 
 Session start names the current, artifacts and scratch paths. Run `hws place ROLE` before you write into a place. It prints the absolute path, creates the `artifacts` or `scratch` folder on first use, and prints nothing when the role is unset.
 
-When you land a decision mid-session, you may add one dated line with a cite under Decisions in force in the current note, such as `- 2026-11-08 Notes stay in a pane [commit:ba7d965]`. A cite is `[card:ID]`, `[session:ID]`, `[commit:SHA]`, `[artifact:ID]` or `[file:PATH]`. Change nothing else in the note, because the tidy pass rewrites the whole note when the person runs it. A throwaway has no current note, so `hws place current` prints nothing there.
+When the person lands a decision mid-session, such as "we're going with X", offer to log it. Exploring is not deciding, so never log an option they are still weighing, and log nothing without their yes. On yes, run `hws decision add --title X --why Y [--decided-at YYYY-MM-DD] [--cites card:ID,commit:SHA] [--replaces D-001]`, and find what it replaces with `hws decision list`. Then you may add one dated line with a cite under Decisions in force in the current note, such as `- 2026-11-08 Notes stay in a pane [commit:ba7d965]`, and remove any line the decision replaced. A cite is `[card:ID]`, `[session:ID]`, `[commit:SHA]`, `[artifact:ID]` or `[file:PATH]`. Change nothing else in the note, because the tidy pass rewrites the whole note when the person runs it. A throwaway has no current note, so `hws place current` prints nothing there.
 
 ## Kinds
 

@@ -161,10 +161,10 @@ const RETIRED = [
   { id: "sp2", name: "plain", closedAt: Date.now(), sessions: [], artifacts: [] },
 ];
 
-test("the menu opens Find throwaway as its own dialog", async () => {
+test("the menu opens Find past work as its own dialog", async () => {
   const H = setup();
   const m = await mount("hws-new", { overlay: "ov0" });
-  await m.click("find-throwaway");
+  await m.click("find-past");
   assert.deepEqual(H.closed, ["ov0"]);
   assert.equal(H.overlays[0].mod, "hws-new");
   assert.equal(H.overlays[0].props.step, "find");
@@ -175,10 +175,20 @@ test("find lists retired throwaways and reopens a clicked one", async () => {
   const m = await mount("hws-new", { overlay: "ov1", step: "find" });
   await settle();
   assert.deepEqual(args(H), [["find", "--", "--json"]]);
-  assert.match(m.text(), /Fix login.*throwaway-1c26.*3 days ago.*1 artifact.*plain.*Today/);
+  assert.match(m.text(), /Fix login.*Throwaway, closed 3 days ago · throwaway-1c26 · 27 days left · 1 artifact.*Restore.*plain.*today/);
   await m.click("retired-sp2");
   assert.deepEqual(args(H).at(-1), ["reopen", "sp2", "--json"]);
   assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("find shows an archived workspace by name and restores it", async () => {
+  const H = setup({ hws: { find: [{ id: "spa", name: "Cafe loyalty", archived: true, closedAt: Date.now(), sessions: [], artifacts: [{ id: "a1" }, { id: "a2" }] }], reopen: { id: "spa" } } });
+  const m = await mount("hws-new", { overlay: "ov1", step: "find" });
+  await settle();
+  assert.match(m.text(), /Cafe loyalty.*Workspace, archived today · 2 artifacts.*Restore/);
+  assert.doesNotMatch(m.text(), /days? left/);
+  await m.click("retired-spa");
+  assert.deepEqual(args(H).at(-1), ["reopen", "spa", "--json"]);
 });
 
 test("find searches as you type and the keyboard picks a row", async () => {
@@ -209,7 +219,7 @@ test("find explains an empty list and shows a failure", async () => {
   const H = setup({ hws: { find: [] } });
   const m = await mount("hws-new", { overlay: "ov1", step: "find" });
   await settle();
-  assert.match(m.text(), /Throwaways you close or that go idle appear here/);
+  assert.match(m.text(), /Archived workspaces and closed throwaways appear here/);
   m.view.inputs.query.type("zzz", m.cx);
   await settle();
   assert.match(m.text(), /Nothing matches/);
@@ -316,13 +326,38 @@ test("Tab moves between fields", async () => {
 
 const ROW = { view: "row-menu", workspace: "spc1", name: "demo", kind: "app", archived: false };
 
-test("a kept row's menu offers Rename, Archive and Close", async () => {
+test("a kept row's menu offers Rename and Archive, with no way to lose it", async () => {
   const H = setup({ hws: { list: [] } });
   const m = await mount("hws-panel", { ...ROW, overlay: "ov1" }, H);
-  assert.match(m.text(), /Rename.*Archive.*Close/);
+  assert.match(m.text(), /Rename.*Archive/);
+  assert.doesNotMatch(m.text(), /Close/);
   await m.click("row-menu-archive");
   assert.deepEqual(H.closed, ["ov1"]);
   assert.deepEqual(H.overlays.at(-1).props, { view: "confirm", action: "archive", workspace: "spc1", name: "demo", kind: "app", archived: false });
+});
+
+test("Open panel switches to the space and opens beside its terminal", async () => {
+  const H = setup({ hws: { list: [] }, spaces: [{ id: "spc2", active: false, tabs: [{ id: "tb2", active: true }] }], panes: [{ pane: "p5", terminal: "t5", tab: "tb2" }] });
+  const m = await mount("hws-panel", { ...ROW, space: "spc2", overlay: "ov1" }, H);
+  assert.match(m.text(), /Open panel.*Rename.*Archive/);
+  await m.click("row-menu-panel");
+  assert.deepEqual(H.runs, [
+    { name: "space.select", args: { id: "spc2" } },
+    { name: "pane.split", args: { direction: "right", pane: "p5", mod: "hws-panel", props: { terminal: "t5" } } },
+  ]);
+});
+
+test("Open panel focuses a panel that is already open", async () => {
+  const H = setup({ hws: { list: [] }, spaces: [{ id: "spc2", active: false, tabs: [{ id: "tb2", active: true }] }], panes: [{ pane: "p5", terminal: "t5", tab: "tb2" }, { pane: "p6", terminal: null, mod: "hws-panel", tab: "tb2" }] });
+  const m = await mount("hws-panel", { ...ROW, space: "spc2", overlay: "ov1" }, H);
+  await m.click("row-menu-panel");
+  assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { pane: "p6" } });
+});
+
+test("a row with no open space has no Open panel", async () => {
+  const H = setup({ hws: { list: [] } });
+  const m = await mount("hws-panel", { ...ROW, archived: true, overlay: "ov1" }, H);
+  assert.equal(m.has("row-menu-panel"), false);
 });
 
 test("a throwaway's menu has no Archive and an archived row offers Restore", async () => {
@@ -390,12 +425,10 @@ test("the panel edits the workspace instructions in a dialog", async () => {
   assert.deepEqual(H.closed, ["ov9"]);
 });
 
-test("the panel changes a kept workspace's kind and hides the setting on a throwaway", async () => {
-  const H = inWorkspace();
+test("the panel leaves the kind out of its header", async () => {
+  inWorkspace();
   const m = await mount("hws-panel", {});
-  await m.click("kind-deliverable");
-  await m.settle();
-  assert.deepEqual(hwsCalls(H).find((c) => c.args[0] === "set").args, ["set", "--workspace", "spc1", "--kind", "deliverable", "--json"]);
+  assert.doesNotMatch(m.text(), /General|Deliverable|Tells agents/);
 });
 
 test("panel shows the workspace, live status, surfaces and artifacts newest first", async () => {
@@ -404,14 +437,45 @@ test("panel shows the workspace, live status, surfaces and artifacts newest firs
   H.panes.push({ pane: "p9", terminal: null, tab: "tb1" });
   const m = await mount("hws-panel", {});
   const text = m.text();
-  assert.match(text, /checkout demo.*Ship the demo.*~\/Projects\/checkout.*General.*App.*Deliverable/);
-  assert.match(text, /Plan.*Working.*Claude Code · planner · t13.*Working/);
-  assert.match(text, /flow.*board · t13/);
+  assert.match(text, /checkout demo.*Ship the demo.*~\/Projects\/checkout/);
+  assert.match(text, /Agents.*Claude Code · planner.*Working/);
+  assert.match(text, /Open now.*flow.*board · Claude Code/);
+  assert.doesNotMatch(text, /t13/);
   assert.ok(text.indexOf("newer") < text.indexOf("older"));
   await m.click("agent-t13");
   assert.deepEqual(H.runs.at(-1), { name: "agent.focus", args: { terminal: "t13" } });
   await m.click("surface-s1");
   assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { pane: "p9" } });
+});
+
+test("the agent list shows tab headings only when they tell agents apart", async () => {
+  const H = inWorkspace();
+  H.spaces = [{ id: "spc1", machine: null, tabs: [{ id: "tb1", name: "1", named: false, status: "working" }, { id: "tb2", name: "Review", named: true }, { id: "tb3", name: "Empty", named: true }] }];
+  const one = await mount("hws-panel", {});
+  assert.equal(one.has("tab-tb1"), false);
+  assert.equal(one.has("tab-tb3"), false);
+  H.agents = [AGENT, { ...AGENT, address: "t14", tab: "tb2", focused: false }];
+  const two = await mount("hws-panel", {});
+  assert.match(two.text(), /Agents.*Tab 1.*Working.*Claude Code.*Review.*Claude Code/);
+  assert.equal(two.has("tab-tb3"), false);
+  H.agents = [];
+  const none = await mount("hws-panel", {});
+  assert.match(none.text(), /Agents.*None running in this space\./);
+});
+
+test("where files go starts folded and resets with the space", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /Where files go/);
+  assert.equal(m.has("place-current"), false);
+  assert.equal(m.has("suggest-places"), false);
+  await m.click("places-toggle");
+  assert.equal(m.has("place-current"), true);
+  H.focused = { ...H.focused, space: "spc9" };
+  m.render();
+  H.focused = { ...H.focused, space: "spc1" };
+  m.render();
+  assert.equal(m.view.showPlaces, false);
 });
 
 test("live status follows agents() without another hws call", async () => {
@@ -440,9 +504,9 @@ test("artifact actions call the right commands and copy through pbcopy", async (
   assert.equal(copy.command, "sh");
   assert.deepEqual(copy.args.slice(2), ["sh", "@/art/new/prompt.md"]);
   assert.match(copy.args[1], /pbcopy/);
-  assert.match(m.text(), /Link copied/);
+  assert.match(m.text(), /Copied\. Paste it into Claude\./);
   await m.click("folder-new");
-  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/art/new"] });
+  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["-R", "/art/new/prompt.md"] });
 });
 
 test("on Linux, artifact actions copy through the desktop's clipboard tool and xdg-open", async () => {
@@ -473,7 +537,7 @@ test("the agent stays the target when the panel takes focus", async () => {
   m.render();
   H.focused = { ...H.focused, pane: "p2", terminal: null };
   H.agents = [{ ...AGENT, focused: false }];
-  assert.match(m.text(), /opens beside t13/);
+  assert.match(m.text(), /Boards and notes open beside Claude Code/);
   await m.click("new-board");
   assert.ok(args(H).some((a) => a.includes("--terminal") && a.includes("t13")));
 });
@@ -483,22 +547,22 @@ test("with no known agent the buttons are off and nothing is guessed", async () 
   const m = await mount("hws-panel", {});
   assert.equal(m.clickable("new-board"), false);
   assert.equal(m.clickable("new-note"), false);
-  assert.match(m.text(), /focus an agent/);
+  assert.match(m.text(), /Boards and notes need an agent\. Click one first\./);
   assert.equal(args(H).some((a) => a[0] === "surface"), false);
 });
 
 test("the terminal the toggle saw seeds the target", async () => {
   inWorkspace(APP, { agents: [{ ...AGENT, focused: false }], focused: { space: "spc1", tab: "tb1", pane: "p2", terminal: null } });
   const m = await mount("hws-panel", { terminal: "t13" });
-  assert.match(m.text(), /opens beside t13/);
+  assert.match(m.text(), /Boards and notes open beside Claude Code/);
 });
 
-test("Close asks first, then closes a workspace with no decision needed", async () => {
+test("Archive asks first, then archives a kept workspace with no decision needed", async () => {
   const H = inWorkspace(APP, { hws: { list: [APP], close: { closed: true } } });
   const m = await mount("hws-panel", {});
   await m.click("close");
   assert.equal(args(H).some((a) => a[0] === "close"), false);
-  assert.match(m.text(), /Close this workspace and its terminals/);
+  assert.match(m.text(), /Archive this and close its terminals\? You can restore it later\./);
   await m.click("close-cancel");
   assert.equal(args(H).some((a) => a[0] === "close"), false);
   await m.click("close");
@@ -722,7 +786,9 @@ function kept(extra = {}, answers = {}) {
 test("freshness is fresh at zero, behind up to five and stale above", () => {
   const at = (n, tidiedAt = 1) => ctx.freshness({ tidiedAt, behind: { sessions: n, artifacts: 0, commits: 0, cards: 0 } });
   assert.deepEqual([at(0), at(1), at(5), at(6)], ["fresh", "behind", "behind", "stale"]);
-  assert.equal(at(0, null), "behind");
+  assert.equal(at(0, null), "fresh");
+  assert.equal(ctx.freshness({ tidiedAt: 1, behind: { sessions: 9, artifacts: 0, commits: 0, cards: 0 }, landed: { total: 0 } }), "fresh");
+  assert.equal(ctx.freshness({ tidiedAt: 1, behind: { sessions: 0, artifacts: 0, commits: 7, cards: 0 }, landed: { total: 7 } }), "stale");
   assert.equal(ctx.freshness({}), null);
   assert.equal(ctx.freshness(null), null);
 });
@@ -768,18 +834,18 @@ test("place rows cover every role, with defaults and other writers", () => {
   assert.equal(ctx.placeRows(KEPT)[0].resolved, null);
 });
 
-test("the header shows the stage, the freshness line, Open current and Tidy", async () => {
+test("the header shows the stage, the freshness line, Open note and Tidy", async () => {
   const H = kept();
   const m = await mount("hws-panel", {});
   const text = m.text();
   assert.match(text, /checkout demo \| deciding/);
-  assert.match(text, new RegExp(`${LINE}.*Open current.*Tidy`));
+  assert.match(text, new RegExp(`${LINE}.*Open note.*Tidy`));
   assert.deepEqual(args(H).filter((a) => a[0] === "tidy" || a[0] === "place"), [["tidy", "status", "--workspace", "spc1", "--json"]]);
   await m.click("open-current");
   assert.deepEqual(args(H).find((a) => a[0] === "surface"), ["surface", "open", "--type", "note", "--file", NOTE_PATH, "--terminal", "t13", "--json"]);
   await m.click("tidy");
   assert.deepEqual(args(H).find((a) => a[1] === "start"), ["tidy", "start", "--workspace", "spc1", "--json"]);
-  assert.match(m.text(), /Tidy started in t20\./);
+  assert.match(m.text(), /Tidy started in a terminal\. Answer any questions there\./);
 });
 
 test("the header reads unknown with no line, and Tidy again pokes a live pass", async () => {
@@ -787,22 +853,29 @@ test("the header reads unknown with no line, and Tidy again pokes a live pass", 
   const m = await mount("hws-panel", {});
   assert.match(m.text(), /Freshness unknown/);
   assert.match(m.text(), /Tidy again/);
-  assert.match(m.text(), /A tidy pass is running in t12/);
+  assert.match(m.text(), /A tidy pass is running\. Click to go to it\./);
   await m.click("tidy-live");
   assert.deepEqual(globalThis.__herdr.runs.at(-1), { name: "agent.focus", args: { terminal: "t12" } });
   await m.click("tidy");
-  assert.match(m.text(), /Asked the tidy pass in t12 to read the packet again/);
+  assert.match(m.text(), /Asked the tidy pass to read the packet again/);
 });
 
-test("Open current waits for an agent and a path", async () => {
-  kept({ agents: [{ ...AGENT, focused: false }], focused: { space: "spc1", tab: "tb1", pane: "p2", terminal: null } });
+test("with no agent Open note reads in the panel, and it needs a note or a path", async () => {
+  const noAgent = { agents: [{ ...AGENT, focused: false }], focused: { space: "spc1", tab: "tb1", pane: "p2", terminal: null } };
+  const H = kept(noAgent);
   const m = await mount("hws-panel", {});
-  assert.equal(m.clickable("open-current"), false);
   assert.equal(m.clickable("tidy"), true);
+  await m.click("open-current");
+  await m.settle();
+  assert.equal(args(H).some((a) => a[0] === "surface"), false);
+  assert.match(m.text(), /Back \| Current note/);
+  kept({ ...noAgent, files: {} });
+  const unwritten = await mount("hws-panel", {});
+  assert.equal(unwritten.clickable("open-current"), false);
   kept({}, { "tidy status": { ...STATUS, places: { ...STATUS.places, current: null } } });
   const none = await mount("hws-panel", {});
   assert.equal(none.clickable("open-current"), false);
-  assert.match(none.text(), /No current note yet\./);
+  assert.match(none.text(), /A short summary of where this work stands\. Tidy writes it\./);
 });
 
 test("Current renders the note with a chip per cite", async () => {
@@ -813,10 +886,10 @@ test("Current renders the note with a chip per cite", async () => {
   assert.equal(text.includes("[commit:"), false);
 });
 
-test("a missing note says so and names where Tidy writes it", async () => {
+test("a missing note explains itself and names where Tidy writes it", async () => {
   kept({ files: {} });
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /No current note yet\. Tidy writes one at ~\/Projects\/checkout\/docs\/NEXT-STEPS\.md/);
+  assert.match(m.text(), /A short summary of where this work stands\. Tidy writes it to ~\/Projects\/checkout\/docs\/NEXT-STEPS\.md/);
 });
 
 test("a card cite opens the card dialog over the Board", async () => {
@@ -850,23 +923,95 @@ test("a commit cite copies the sha", async () => {
   assert.match(m.text(), /Copied ba7d965\./);
 });
 
-test("file and artifact cites open pages beside the agent and other files in macOS", async () => {
-  const H = kept();
+test("a markdown cite reads in the panel and other files open in macOS", async () => {
+  const H = kept({ files: { [NOTE_PATH]: NOTE, "/Users/me/Projects/checkout/docs/panel-options.md": "# Options\n\nBody" } });
   const m = await mount("hws-panel", {});
   await m.click("cite-6-0");
-  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), ["surface", "open", "--type", "page", "--file", "/Users/me/Projects/checkout/docs/panel-options.md", "--terminal", "t13", "--json"]);
+  await m.settle();
+  assert.equal(args(H).some((a) => a[0] === "surface"), false);
+  assert.match(m.text(), /Back \| panel-options\.md \| Show in Finder.*# Options/s);
+  assert.equal(m.has("hws-panel-body"), false);
+  await m.click("reader-back");
+  assert.equal(m.has("hws-panel-body"), true);
   await m.click("cite-8-0");
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/Users/me/Projects/checkout/notes/raw.txt"] });
-  await m.click("cite-7-0");
-  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/art/new"] });
+});
+
+test("an HTML cite opens as a page beside the agent", async () => {
+  const H = kept({ files: { [NOTE_PATH]: "- mock [file:docs/page.html]" } });
+  const m = await mount("hws-panel", {});
+  await m.click("cite-0-0");
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), ["surface", "open", "--type", "page", "--file", "/Users/me/Projects/checkout/docs/page.html", "--terminal", "t13", "--json"]);
 });
 
 test("a flipped agent's page opens beside its chat pane", async () => {
-  const H = kept({ terminals: [{ address: "t13", state: "live", labels: { "herdr.chat": "p7" } }] });
+  const H = kept({ files: { [NOTE_PATH]: "- mock [file:docs/page.html]" }, terminals: [{ address: "t13", state: "live", labels: { "herdr.chat": "p7" } }] });
   H.panes.push({ pane: "p7", terminal: null, tab: "tb1", mod: "hws-chat" });
   const m = await mount("hws-panel", {});
-  await m.click("cite-6-0");
+  await m.click("cite-0-0");
   assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1).slice(-5), ["--beside-pane", "p7", "--space", "spc1", "--json"]);
+});
+
+test("an artifact's title reads it in the panel and Show in Finder reveals the file", async () => {
+  const H = kept({ files: { [NOTE_PATH]: NOTE, "/Users/me/Projects/checkout/docs/spec.md": "# Spec" } });
+  const m = await mount("hws-panel", {});
+  await m.click("artifact-open-doc");
+  await m.settle();
+  assert.match(m.text(), /spec.*# Spec/s);
+  await m.click("reader-reveal");
+  await m.settle();
+  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["-R", "/Users/me/Projects/checkout/docs/spec.md"] });
+});
+
+test("a board artifact reads its comments, then its prompt, and a missing file says so", async () => {
+  kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
+  const withComments = await mount("hws-panel", {});
+  await withComments.click("artifact-open-new");
+  await withComments.settle();
+  assert.match(withComments.text(), /# Comments/);
+  kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "the prompt" } });
+  const withPrompt = await mount("hws-panel", {});
+  await withPrompt.click("artifact-open-new");
+  await withPrompt.settle();
+  assert.match(withPrompt.text(), /the prompt/);
+  kept();
+  const missing = await mount("hws-panel", {});
+  await missing.click("artifact-open-new");
+  await missing.settle();
+  assert.match(missing.text(), /This file is missing or can't be read\./);
+});
+
+test("Tidy passes the panel's pane so the terminal opens below it", async () => {
+  const H = kept({}, {});
+  H.panes.push({ pane: "p7", terminal: null, tab: "tb1", mod: "hws-panel" });
+  const m = await mount("hws-panel", {});
+  await m.click("tidy");
+  assert.deepEqual(args(H).find((a) => a[1] === "start"), ["tidy", "start", "--workspace", "spc1", "--pane", "p7", "--json"]);
+});
+
+test("History opens the decision log and updates in the reader", async () => {
+  kept({ files: { [NOTE_PATH]: NOTE, "/w/decisions.md": "# Decisions log" } }, { "tidy status": { ...STATUS, record: { decisions: { path: "/w/decisions.md", inForce: 2, replaced: 1 }, updates: "/w/updates.md" } } });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /History.*Decision log.*2 in force · 1 replaced.*Updates/);
+  await m.click("history-decisions");
+  await m.settle();
+  assert.match(m.text(), /Back \| Decision log.*# Decisions log/s);
+});
+
+test("a long note folds after 24 lines and shows the rest in place", async () => {
+  const long = Array.from({ length: 30 }, (_, i) => `- line ${i}`).join("\n");
+  kept({ files: { [NOTE_PATH]: long } });
+  const m = await mount("hws-panel", {});
+  assert.doesNotMatch(m.text(), /line 29/);
+  assert.match(m.text(), /6 more lines/);
+  await m.click("note-more");
+  assert.match(m.text(), /line 29/);
+});
+
+test("the note's own title does not repeat under the section title", async () => {
+  kept();
+  const m = await mount("hws-panel", {});
+  assert.doesNotMatch(m.text(), /Current note \| Current \|/);
 });
 
 test("an unknown artifact cite shows the problem", async () => {
@@ -876,12 +1021,19 @@ test("an unknown artifact cite shows the problem", async () => {
   assert.match(m.text(), /No artifact zzz in this workspace/);
 });
 
-test("Since last tidy shows the counts and rows, and a row opens its cite", async () => {
+test("Not in the note yet shows the counts and rows, and a row opens its cite", async () => {
   const H = kept();
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /Since last tidy.*3 sessions · 2 artifacts · 0 commits · 0 cards.*session \| Fix login \| 2m ago.*artifact \| newer \| 1h ago.*card \| Remove Studio/);
+  assert.match(m.text(), /Not in the note yet.*3 sessions · 2 artifacts · 0 commits · 0 cards.*session \| Fix login \| 2m ago.*artifact \| newer \| 1h ago.*card \| Remove Studio/);
   await m.click("since-2");
   assert.equal(H.overlays.at(-1).props.id, "17");
+});
+
+test("a multi-line title stays on one backlog row", async () => {
+  const items = [{ kind: "session", id: "s1", title: "first line\n\n1. second\n2. third", at: NOW, path: null }];
+  kept({}, { "tidy status": { ...STATUS, items } });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /session \| first line 1\. second 2\. third \| just now/);
 });
 
 test("a long backlog folds after eight rows", async () => {
@@ -903,11 +1055,11 @@ test("a failed tidy status leaves the rest of the panel working", async () => {
   assert.match(m.text(), /Boards open in their own window/);
 });
 
-test("artifact rows carry a status chip and fold superseded ones", async () => {
+test("artifact rows chip only a status worth noticing and fold superseded ones", async () => {
   kept();
   const m = await mount("hws-panel", {});
   const text = m.text();
-  assert.match(text, /newer \| draft.*spec \| current.*Show 1 superseded/);
+  assert.match(text, /newer \| draft.*spec \| file.*Show 1 superseded/);
   assert.equal(m.has("terminal-old"), false);
   await m.click("superseded-toggle");
   assert.equal(m.has("terminal-old"), true);
@@ -917,7 +1069,8 @@ test("artifact rows carry a status chip and fold superseded ones", async () => {
 test("Places shows a row per role and records an edit with hws set --place", async () => {
   const H = kept();
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /Places.*current.*artifacts.*scratch.*decisions \| decisions \| written by pmos.*history.*meetings/);
+  await m.click("places-toggle");
+  assert.match(m.text(), /Where files go.*current.*artifacts.*scratch.*decisions \| decisions \| written by pmos.*history.*meetings/);
   const current = m.view.inputs["place-current"];
   assert.equal(current.value(), "docs/NEXT-STEPS.md");
   assert.equal(m.view.inputs["place-scratch"].placeholder, ctx.ROLE_DEFAULTS.scratch);
@@ -939,6 +1092,7 @@ test("Places shows a row per role and records an edit with hws set --place", asy
 test("a place another tool writes is read only, with its resolved path when the manifest has none", async () => {
   kept({}, { list: [{ ...KEPT, places: { current: "docs/NEXT-STEPS.md" } }] });
   const m = await mount("hws-panel", {});
+  await m.click("places-toggle");
   assert.match(m.text(), /decisions \| ~\/Projects\/checkout\/decisions \| written by pmos/);
   assert.equal(m.has("place-save-decisions"), false);
 });
@@ -946,6 +1100,7 @@ test("a place another tool writes is read only, with its resolved path when the 
 test("an emptied place field clears the role", async () => {
   const H = kept();
   const m = await mount("hws-panel", {});
+  await m.click("places-toggle");
   m.view.inputs["place-current"].type("", m.cx);
   assert.match(m.text(), /Clear/);
   await m.click("place-save-current");
@@ -979,16 +1134,18 @@ test("a place saved elsewhere replaces an untouched field and keeps an edit", as
 test("Suggest from folder pastes the prompt into the agent", async () => {
   const H = kept();
   const m = await mount("hws-panel", {});
+  await m.click("places-toggle");
   await m.click("suggest-places");
   assert.equal(H.hcCalls.length, 1);
   const [verb, terminal, text] = H.hcCalls[0];
   assert.deepEqual([verb, terminal], ["send", "t13"]);
   assert.match(text, /propose a place map/);
   assert.match(text, /hws set --place ROLE=PATH/);
-  assert.match(m.text(), /Asked t13 to propose places/);
+  assert.match(m.text(), /Asked Claude Code to propose places/);
 
   kept({ agents: [{ ...AGENT, focused: false }], focused: { space: "spc1", tab: "tb1", pane: "p2", terminal: null } });
   const none = await mount("hws-panel", {});
+  await none.click("places-toggle");
   assert.equal(none.clickable("suggest-places"), false);
 });
 
@@ -997,10 +1154,10 @@ test("a throwaway shows its Record and Promote, and reads no freshness", async (
   const H = inWorkspace(record, { hws: { list: [record] } });
   const m = await mount("hws-panel", {});
   const text = m.text();
-  assert.match(text, /Record.*Sessions.*t13 \| aaaabbbb.*Scratch folder.*\/state\/workspaces\/spc1\/scratch.*Artifacts.*ideas \| current.*Promote/);
+  assert.match(text, /Record.*Sessions.*t13 \| aaaabbbb.*Scratch folder.*\/state\/workspaces\/spc1\/scratch.*Artifacts.*ideas.*Promote/);
   assert.equal(text.includes("~/Projects/checkout"), false);
   assert.equal(text.split("/state/workspaces/spc1/scratch").length, 2);
-  assert.equal(/Since last tidy|Places|Open current/.test(text), false);
+  assert.equal(/Not in the note yet|Where files go|Open note/.test(text), false);
   assert.equal(args(H).some((a) => a[0] === "tidy" || a[0] === "place"), false);
   assert.deepEqual(H.calls.find((c) => c.command === "test").args, ["-d", "/state/workspaces/spc1/scratch"]);
   await m.click("open-scratch");
@@ -1127,7 +1284,7 @@ test("right-clicking a sidebar row opens its menu beside the pointer", async () 
   const m = await mount("hws-panel", { view: "sidebar" });
   await m.rightClick("sidebar-workspace-spc1");
   const spec = H.overlays.at(-1);
-  assert.deepEqual([spec.kind, spec.props], ["popup", { workspace: "spc1", name: "checkout demo", kind: "app", archived: false, view: "row-menu" }]);
+  assert.deepEqual([spec.kind, spec.props], ["popup", { workspace: "spc1", name: "checkout demo", kind: "app", archived: false, space: "spc1", view: "row-menu" }]);
 });
 
 test("the sidebar folds archived workspaces under one row and restores on click", async () => {

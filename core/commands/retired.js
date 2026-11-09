@@ -2,13 +2,14 @@ import { mkdirSync } from 'node:fs';
 
 import { resumeArgv } from '../agent-session.js';
 import { HwsError } from '../errors.js';
-import { updateManifest } from '../manifest.js';
+import { listManifests, readManifest, updateManifest } from '../manifest.js';
 import { isStored, listRetired, readRetired, removeRetired } from '../retired.js';
 import { requireFolder } from '../settings.js';
+import { unarchive } from './archive.js';
 import { createWorkspace } from './new.js';
 
 function searchText(record) {
-  const parts = [record.name, ...record.sessions.flatMap((item) => [item.title, item.lastPrompt]), ...record.artifacts.map((item) => item.title)];
+  const parts = [record.name, record.instructions ?? '', ...record.sessions.flatMap((item) => [item.title, item.lastPrompt]), ...record.artifacts.map((item) => item.title)];
   return parts.join('\n').toLowerCase();
 }
 
@@ -22,9 +23,15 @@ function describe(record) {
   return `${record.id}\t${when}\t${record.name}\t${record.sessions[0]?.title ?? ''}`;
 }
 
+// An archived workspace, in the same shape as a retired throwaway.
+function archivedRecord(manifest) {
+  return { id: manifest.id, name: manifest.name, archived: true, instructions: manifest.instructions ?? '', closedAt: manifest.archived.at, folder: manifest.folder, sessions: [], artifacts: manifest.artifacts ?? [] };
+}
+
 export function find(_flags, positionals) {
   const words = positionals.join(' ').toLowerCase().split(/\s+/).filter(Boolean);
-  const records = listRetired().filter((record) => matches(record, words));
+  const archived = listManifests().filter((manifest) => manifest.archived).map(archivedRecord);
+  const records = [...archived, ...listRetired()].filter((record) => matches(record, words)).sort((a, b) => b.closedAt - a.closedAt);
   return { data: records, text: records.map(describe).join('\n') };
 }
 
@@ -44,8 +51,9 @@ function startFolder(record) {
 }
 
 export function reopen(_flags, [id]) {
+  if (readManifest(id)?.archived) return unarchive({ workspace: id });
   const record = readRetired(id);
-  if (!record) throw new HwsError(`no retired throwaway ${id}`);
+  if (!record) throw new HwsError(`no archived workspace or retired throwaway ${id}`);
   const folder = startFolder(record);
   const created = createWorkspace({ name: record.name, kind: 'throwaway', folder, tabs: tabsFor(record) });
   const manifest = updateManifest(created.id, (draft) => {

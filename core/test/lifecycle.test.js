@@ -131,14 +131,14 @@ test('close on a throwaway with no artifacts just closes', (t) => {
   assert.deepEqual(box.actions(), [['herdr-app', 'do', 'space.close', '--id', manifest.id, '--confirmed', 'true']]);
 });
 
-test('close on a kept workspace leaves artifacts in its folder and ignores --trash', (t) => {
+test('close on a kept workspace archives it, keeps artifacts and ignores --trash', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const { artifact } = box.finishGlued(manifest);
   const result = box.json(['close', '--workspace', 'demo', '--trash']);
-  assert.deepEqual(result, { closed: true, workspace: manifest.id, kept: [artifact.path] });
+  assert.deepEqual(result, { closed: true, archived: true, workspace: manifest.id, kept: null });
   assert.ok(existsSync(artifact.path));
-  assert.equal(existsSync(join(box.root, 'workspaces', manifest.id, 'workspace.json')), false);
+  assert.ok(box.manifest(manifest.id).archived);
   assert.equal(box.calls().some((call) => call.bin === 'trash'), false);
 });
 
@@ -150,12 +150,14 @@ test('close finds the workspace from the calling terminal', (t) => {
   assert.equal(box.hws(['close']).code, 2);
 });
 
-test('close moves unfinished surface data to the Trash', (t) => {
+test('removing an archived workspace moves unfinished surface data to the Trash', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
   const draft = join(box.root, 'workspaces', manifest.id, 'surfaces', surface.id, 'board.json');
   writeFileSync(draft, '{}');
+  box.json(['close', '--workspace', manifest.id]);
+  assert.ok(existsSync(draft));
   box.json(['close', '--workspace', manifest.id]);
   assert.ok(existsSync(join(box.trashDir, '0-surfaces', surface.id, 'board.json')));
 });
@@ -177,13 +179,16 @@ test('close refuses the standalone store and unknown workspaces', (t) => {
   assert.equal(box.hws(['close', '--workspace', 'nope']).code, 1);
 });
 
-test('prune removes manifests whose space is gone', (t) => {
+test('prune archives a kept workspace whose space is gone, with its recent sessions', (t) => {
   const box = sandbox(t);
   const gone = box.app('gone');
   const kept = box.app('kept');
+  box.transcript(gone, 'sess-a');
   box.setState({ spaces: box.state().spaces.filter((item) => item.id !== gone.id) });
   assert.deepEqual(box.json(['prune']), { pruned: [gone.id], expired: [], skipped: false });
-  assert.equal(existsSync(join(box.root, 'workspaces', gone.id)), false);
+  const archived = box.manifest(gone.id).archived;
+  assert.deepEqual(archived.spaces[0].tabs.map((tab) => tab.session.id), ['sess-a']);
+  assert.deepEqual(box.manifest(gone.id).spaces, []);
   assert.ok(box.manifest(kept.id));
 });
 
@@ -233,7 +238,7 @@ for (const command of [['list'], ['new', 'terminal'], ['current', '--line'], ['c
     const kept = box.app('kept');
     box.setState({ spaces: box.state().spaces.filter((item) => item.id !== gone.id), selected: kept.id });
     box.hws(command);
-    assert.equal(existsSync(join(box.root, 'workspaces', gone.id, 'workspace.json')), false);
+    assert.ok(box.manifest(gone.id).archived);
   });
 }
 

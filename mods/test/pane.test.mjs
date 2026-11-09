@@ -34,6 +34,13 @@ test("an agent pane shows the switch and a shell pane does not", async () => {
   assert.equal((await mount("hws-pane", { pane: "p1" })).has("ph-mode-p1-chat"), false);
 });
 
+test("the workspace panel's pane is titled Workspace", async () => {
+  world({ panes: [{ pane: "p3", terminal: null, tab: "tb1", focused: true, mod: "hws-panel", title: "hws-panel" }] });
+  const m = await mount("hws-pane", { pane: "p3" });
+  assert.match(m.text(), /^Workspace\b/);
+  assert.doesNotMatch(m.text(), /hws-panel/);
+});
+
 test("a Board pane is titled Board with no folder and keeps its close button", async () => {
   const H = world({ panes: [{ pane: "p3", terminal: null, tab: "tb1", focused: true, mod: "hws-work", title: "Work", cwd: "/w" }] });
   const m = await mount("hws-pane", { pane: "p3" });

@@ -6,11 +6,11 @@ export const ROLES = ["current", "artifacts", "scratch", "decisions", "history",
 // What a role means when the manifest leaves it out. See docs/CONTRACT.md, Places.
 export const ROLE_DEFAULTS = {
   current: "CURRENT.md",
-  artifacts: "Default, under .herdr-workspace/",
-  scratch: "Default, under .herdr-workspace/",
-  decisions: "Unset, decisions stay in current",
-  history: "Unset, demotions go to the Trash",
-  meetings: "Unset",
+  artifacts: "Boards and notes, in .herdr-workspace/",
+  scratch: "Working files, in .herdr-workspace/",
+  decisions: "Decision log, in .herdr-workspace/",
+  history: "Earlier notes and archived docs, in .herdr-workspace/",
+  meetings: "Meeting notes, not set",
 };
 
 // Above this many items behind, the dot reads stale.
@@ -27,6 +27,8 @@ const SOURCES = [
 
 export const NOTE_LINES = 24;
 export const BACKLOG_ROWS = 8;
+
+export const agentName = (agent) => agent?.program?.name ?? agent?.app ?? "Agent";
 
 const CITE = /\[(card|session|commit|artifact|file):([^\]\s]+)\]/g;
 
@@ -45,12 +47,12 @@ export const validStatus = (status) => (status && typeof status === "object" && 
 
 const behindCount = (status) => SOURCES.reduce((sum, s) => sum + (Number(status?.behind?.[s.key]) || 0), 0);
 
-// Fresh at zero, behind up to five, stale above. A workspace never tidied is at least behind.
+// Fresh at zero, behind up to five, stale above. Only what landed counts, so exploring leaves the ring alone.
 export function freshness(status) {
   if (!validStatus(status)) return null;
-  const count = behindCount(status);
+  const count = status.landed ? Number(status.landed.total) || 0 : behindCount(status);
   if (count > STALE_ABOVE) return "stale";
-  return count > 0 || !status.tidiedAt ? "behind" : "fresh";
+  return count > 0 ? "behind" : "fresh";
 }
 
 export const countsLine = (behind) => SOURCES.map((s) => plural(Number(behind?.[s.key]) || 0, s.one)).join(" · ");
@@ -73,7 +75,7 @@ export function noteLines(markdown) {
     else if (bullet) lines.push({ kind: "bullet", ...splitCites(bullet[1]) });
     else lines.push({ kind: "text", ...splitCites(line) });
   }
-  return { lines: lines.slice(0, NOTE_LINES), more: Math.max(0, lines.length - NOTE_LINES) };
+  return { lines: lines.slice(0, NOTE_LINES), all: lines, more: Math.max(0, lines.length - NOTE_LINES) };
 }
 
 export function citeLabel(cite, workspace) {
@@ -88,12 +90,15 @@ export function citeLabel(cite, workspace) {
 const CITE_KINDS = new Set(["card", "session", "commit", "artifact"]);
 
 // One `hws tidy status` item as a row. A session's title is null until it has a first prompt.
+// A row has a fixed height, so a title with line breaks would spill over its neighbours.
+const oneLine = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+
 export function backlogRow(item) {
   const source = String(item?.kind ?? "");
   const id = item?.id ?? null;
-  const title = item?.title || (source === "session" && id ? `Session ${String(id).slice(0, 8)}` : String(id ?? source));
+  const title = oneLine(item?.title) || (source === "session" && id ? `Session ${String(id).slice(0, 8)}` : String(id ?? source));
   const cite = CITE_KINDS.has(source) && id ? { kind: source, value: String(id) } : null;
-  return { source, title, at: item?.at ?? null, cite };
+  return { source, title: item?.edited ? `${title} (edited)` : title, at: item?.at ?? null, cite };
 }
 
 export function backlog(status) {
@@ -121,6 +126,17 @@ export function placeRows(workspace, status = null) {
     const writer = named && named !== "hws" ? named : null;
     return { role, path, writer, resolved: status?.places?.[role] ?? null };
   });
+}
+
+export const readsHere = (path) => /\.(md|markdown)$/i.test(path);
+
+// What the panel's reader shows for an artifact, or null when it opens elsewhere.
+// A Done bundle keeps its words in comments.md or prompt.md.
+export function artifactReading(artifact) {
+  const { title, id, type, path, prompt } = artifact;
+  const name = title || id;
+  if (type === "file") return readsHere(path) ? { title: name, candidates: [path], reveal: path } : null;
+  return { title: name, candidates: [`${path}/comments.md`, prompt], reveal: prompt };
 }
 
 export const opensAsPage = (path) => /\.(html?|md)$/i.test(path);

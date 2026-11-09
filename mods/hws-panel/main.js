@@ -7,12 +7,12 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, panes, spaces, focused, props, exec, hc, theme, run, openOverlay, closeOverlay, readTextFile, shared, watchFolder } from "herdr";
-import { hws, message, submitDialog, openWorkspaceForm, KINDS, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
+import { hws, message, submitDialog, openWorkspaceForm, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 import { startSidebar, drawSidebar } from "./sidebar.js";
 import { initRename, renderConfirm, renderRename, renderRowMenu } from "./rowmenu.js";
-import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, noteLines, placeRows, resolvePath, validStatus } from "./context.js";
-import { copy, openCite, openPath } from "./cites.js";
-import { artifactsSection, currentSection, headerSection, placesSection, recordSection, sectionTitle, sinceSection } from "./sections.js";
+import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, noteLines, placeRows, resolvePath, validStatus } from "./context.js";
+import { citeReading, copy, openCite, openPath, revealPath } from "./cites.js";
+import { artifactsSection, currentSection, headerSection, historySection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
 
 const MOD = "hws-panel";
 const REFRESH_MS = 20000;
@@ -64,6 +64,9 @@ export default class Panel extends View {
       this.context = null;
       this.showSuperseded = false;
       this.showAllBacklog = false;
+      this.showPlaces = false;
+      this.showWholeNote = false;
+      this.reading = null;
 
       // GPUI creates input state only outside render, so each role's input is made once here.
       this.placeSaved = Object.fromEntries(ROLES.map((role) => [role, ""]));
@@ -207,13 +210,50 @@ export default class Panel extends View {
     }, cx);
   }
 
+  // Shows the first candidate file that can be read. A newer open wins over a slow read.
+  openReader({ candidates, ...reading }, cx) {
+    const opened = { ...reading, text: null, isLoading: true };
+    this.reading = opened;
+    this.note = null;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      let text = null;
+      for (const path of candidates) {
+        text = await readTextFile(path).catch(() => null);
+        if (typeof text === "string") break;
+      }
+      opened.text = typeof text === "string" ? text : null;
+      opened.isLoading = false;
+      cx.notify();
+    });
+  }
+
+  closeReader(cx) {
+    this.reading = null;
+    this.note = null;
+    cx.notify();
+  }
+
+  reveal(path, cx) {
+    this.act(`reveal-${path}`, () => revealPath(path), cx);
+  }
+
   citeAction(cite, workspace, cx) {
+    const reading = citeReading(cite, workspace);
+    if (reading) {
+      this.openReader(reading, cx);
+      return;
+    }
     this.act(`cite-${cite.kind}-${cite.value}`, () => openCite(cite, { workspace, target: this.trackAgent(this.spaceId), space: this.spaceId }), cx);
   }
 
   openCurrent(target, cx) {
     const file = this.context?.currentPath;
-    if (!target || !file) return;
+    if (!file) return;
+    if (!target) {
+      this.openReader({ title: "Current note", candidates: [file], reveal: file }, cx);
+      return;
+    }
     this.act("open-current", async (cx) => {
       await hws(["surface", "open", "--type", "note", "--file", file, "--terminal", target.address]);
       this.refresh(cx);
@@ -223,10 +263,10 @@ export default class Panel extends View {
   // With a pass already live, hws asks it to read the packet again.
   startTidy(workspace, cx) {
     this.act("tidy", async (cx) => {
-      const { terminal, started } = (await hws(["tidy", "start", "--workspace", workspace.id])) ?? {};
+      const seat = panes().find((p) => p.mod === MOD && p.tab === focused()?.tab);
+      const { started } = (await hws(["tidy", "start", "--workspace", workspace.id, ...(seat ? ["--pane", seat.pane] : [])])) ?? {};
       this.refresh(cx);
-      const where = terminal ? ` in ${terminal}` : "";
-      return started === false ? `Asked the tidy pass${where} to read the packet again.` : `Tidy started${where}.`;
+      return started === false ? "Asked the tidy pass to read the packet again." : "Tidy started in a terminal. Answer any questions there.";
     }, cx);
   }
 
@@ -265,7 +305,7 @@ export default class Panel extends View {
     this.act("suggest-places", async () => {
       const r = await hc(["send", target.address, SUGGEST_PROMPT]);
       if (r.code !== 0) throw new Error(r.stderr.trim() || `Could not send to ${target.address}.`);
-      return `Asked ${target.address} to propose places.`;
+      return `Asked ${agentName(target)} to propose places.`;
     }, cx);
   }
 
@@ -277,7 +317,7 @@ export default class Panel extends View {
     this.act(`link-${artifact.id}`, async () => {
       const { link } = await hws(["link", artifact.id]);
       await copy(link);
-      return "Link copied.";
+      return "Copied. Paste it into Claude.";
     }, cx);
   }
 
@@ -330,46 +370,6 @@ export default class Panel extends View {
       );
   }
 
-  setKind(workspace, kind, cx) {
-    if (kind === workspace.kind) return;
-    cx.spawn(async (cx) => {
-      try {
-        await hws(["set", "--workspace", workspace.id, "--kind", kind]);
-        this.refresh(cx);
-      } catch (e) {
-        this.note = { text: message(e), isError: true };
-        cx.notify();
-      }
-    });
-  }
-
-  kindSetting(t, workspace) {
-    return h_flex()
-      .pt(6)
-      .gap(4)
-      .items_center()
-      .children(
-        KINDS.map((k) =>
-          h_flex()
-            .id(`kind-${k.id}`)
-            .flex_none()
-            .h(20)
-            .px(6)
-            .items_center()
-            .rounded(5)
-            .border_1()
-            .border_color(k.id === workspace.kind ? t.accent : t.border)
-            .text_size(11)
-            .text_color(k.id === workspace.kind ? t.foreground : t.muted)
-            .cursor_pointer()
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => this.setKind(workspace, k.id, cx))
-            .child(k.name),
-        ),
-      )
-      .child(div().pl(4).truncate().text_size(11).text_color(t.dim).child("Tells agents what kind of work this is."));
-  }
-
   // Runs in the decide dialog.
   decide(flag, cx) {
     submitDialog(this, flag, () => hws(["close", "--workspace", props().workspace, `--${flag}`]), cx);
@@ -397,43 +397,49 @@ export default class Panel extends View {
     }, cx);
   }
 
-  tabsSection(t, workspace, space) {
+  // Tab headings appear only when they tell agents apart.
+  agentsSection(t, workspace, space) {
     const liveAgents = agents().filter((a) => workspace.spaces.includes(a.space));
+    const tabs = (space?.tabs ?? []).filter((tab) => liveAgents.some((a) => a.tab === tab.id));
+    const showTabs = tabs.length > 1;
     return v_flex()
       .flex_none()
       .gap(6)
-      .child(sectionTitle(t, "Tabs and agents"))
+      .child(sectionTitle(t, "Agents"))
+      .when(tabs.length === 0, (el) => el.child(div().px(8).text_size(12).text_color(t.dim).child("None running in this space.")))
       .children(
-        (space?.tabs ?? []).map((tab) =>
+        tabs.map((tab) =>
           v_flex()
             .flex_none()
             .gap(1)
-            .child(
-              h_flex()
-                .id(`tab-${tab.id}`)
-                .h(24)
-                .px(8)
-                .gap(8)
-                .items_center()
-                .rounded(6)
-                .cursor_pointer()
-                .hover((s) => s.bg(t.hover))
-                .on_click(() => run("tab.select", { id: tab.id }))
-                .child(div().flex_1().min_w(0).truncate().font_medium().child(tab.name))
-                .when(Boolean(tab.status), (el) => el.child(div().flex_none().text_size(11).text_color(t[tab.status] ?? t.dim).child(STATUS_WORD[tab.status] ?? tab.status))),
+            .when(showTabs, (el) =>
+              el.child(
+                h_flex()
+                  .id(`tab-${tab.id}`)
+                  .h(24)
+                  .px(8)
+                  .gap(8)
+                  .items_center()
+                  .rounded(6)
+                  .cursor_pointer()
+                  .hover((s) => s.bg(t.hover))
+                  .on_click(() => run("tab.select", { id: tab.id }))
+                  .child(div().flex_1().min_w(0).truncate().font_medium().child(tab.named === false ? `Tab ${tab.name}` : tab.name))
+                  .when(Boolean(tab.status), (inner) => inner.child(div().flex_none().text_size(11).text_color(t[tab.status] ?? t.dim).child(STATUS_WORD[tab.status] ?? tab.status))),
+              ),
             )
-            .children(liveAgents.filter((a) => a.tab === tab.id).map((a) => this.agentRow(t, workspace, a))),
+            .children(liveAgents.filter((a) => a.tab === tab.id).map((a) => this.agentRow(t, workspace, a, showTabs))),
         ),
       );
   }
 
-  agentRow(t, workspace, agent) {
+  agentRow(t, workspace, agent, isIndented) {
     const role = workspace.terminals?.find((x) => x.terminal === agent.address)?.role;
-    const label = [agent.program?.name ?? agent.app ?? "Agent", role, agent.address].filter(Boolean).join(" · ");
+    const label = [agentName(agent), role].filter(Boolean).join(" · ");
     return h_flex()
       .id(`agent-${agent.address}`)
       .h(22)
-      .pl(20)
+      .pl(isIndented ? 20 : 8)
       .pr(8)
       .gap(8)
       .items_center()
@@ -449,11 +455,13 @@ export default class Panel extends View {
     const surfaces = workspace.surfaces ?? [];
     const livePanes = new Set(panes().map((p) => p.pane));
     const drafts = new Set((shared("hws-pane.boards") ?? []).filter((b) => !b.open).map((b) => b.id));
+    const owner = (s) => (s.terminal ? agents().find((a) => a.address === s.terminal) : null);
+    const detail = (s) => [s.type, owner(s) ? agentName(owner(s)) : !s.terminal && "standalone", drafts.has(s.id) && "draft"].filter(Boolean).join(" · ");
     return v_flex()
       .flex_none()
       .gap(1)
-      .child(sectionTitle(t, "Open surfaces"))
-      .when(surfaces.length === 0, (el) => el.child(div().px(8).text_color(t.dim).child("None open.")))
+      .child(sectionTitle(t, "Open now"))
+      .when(surfaces.length === 0, (el) => el.child(div().px(8).text_color(t.dim).child("No boards, notes or pages open.")))
       .children(
         surfaces.map((s) =>
           h_flex()
@@ -466,12 +474,13 @@ export default class Panel extends View {
             .when(livePanes.has(s.pane), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(() => run("pane.focus", { pane: s.pane })))
             .when(Boolean(s.host), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(() => { hws(["surface", "resume", "--id", s.id]).catch(() => {}); }))
             .child(div().flex_1().min_w(0).truncate().child(s.title || s.type))
-            .child(div().flex_none().text_size(11).text_color(t.dim).child(`${s.terminal ? `${s.type} · ${s.terminal}` : `${s.type} · standalone`}${drafts.has(s.id) ? " · draft" : ""}`)),
+            .child(div().flex_none().text_size(11).text_color(t.dim).child(detail(s))),
         ),
       );
   }
 
   footer(t, workspace) {
+    const isThrowaway = workspace.kind === "throwaway";
     if (this.isConfirmingClose) {
       return h_flex()
         .flex_none()
@@ -481,9 +490,9 @@ export default class Panel extends View {
         .items_center()
         .border_t(1)
         .border_color(t.border)
-        .child(div().flex_1().min_w(0).text_size(12).text_color(t.muted).child("Close this workspace and its terminals?"))
+        .child(div().flex_1().min_w(0).text_size(12).text_color(t.muted).child(isThrowaway ? "Close this workspace and its terminals?" : "Archive this and close its terminals? You can restore it later."))
         .child(button(t, "close-cancel", "Cancel", false, (_e, cx) => { this.isConfirmingClose = false; cx.notify(); }))
-        .child(button(t, "close-yes", "Close", true, (_e, cx) => this.closeWorkspace(workspace, cx)));
+        .child(button(t, "close-yes", isThrowaway ? "Close" : "Archive", true, (_e, cx) => this.closeWorkspace(workspace, cx)));
     }
     return h_flex()
       .flex_none()
@@ -494,15 +503,22 @@ export default class Panel extends View {
       .justify_end()
       .border_t(1)
       .border_color(t.border)
-      .child(button(t, "close", this.busy === "close" ? "Closing…" : "Close workspace", false, (_e, cx) => { this.isConfirmingClose = true; cx.notify(); }, this.busy !== "close"));
+      .child(button(t, "close", this.busy === "close" ? (isThrowaway ? "Closing…" : "Archiving…") : isThrowaway ? "Close workspace" : "Archive workspace", false, (_e, cx) => { this.isConfirmingClose = true; cx.notify(); }, this.busy !== "close"));
   }
 
-  // A kept workspace shows Current, Since last tidy, Artifacts and Places.
+  // A kept workspace shows its note, what the note misses, Artifacts and, last, Places.
   // A throwaway shows its Record in their place.
   renderWorkspace(t, workspace) {
     const space = spaces().find((s) => s.id === this.spaceId);
     const view = { t, host: this, workspace, target: this.trackAgent(this.spaceId), now: Date.now() };
+    if (this.reading) return readerView(view);
     const isThrowaway = workspace.kind === "throwaway";
+    const sections = [
+      ...(isThrowaway ? [recordSection(view)] : [currentSection(view), sinceSection(view), historySection(view), artifactsSection(view)]),
+      this.agentsSection(t, workspace, space),
+      this.surfacesSection(t, workspace),
+      ...(isThrowaway ? [] : [placesSection(view)]),
+    ].filter(Boolean);
     return v_flex()
       .id("hws-panel")
       .size_full()
@@ -518,11 +534,7 @@ export default class Panel extends View {
           .min_h(0)
           .overflow_y_scrollbar()
           .p(10)
-          .gap(14)
-          .when(isThrowaway, (el) => el.child(recordSection(view)))
-          .when(!isThrowaway, (el) => el.child(currentSection(view)).child(sinceSection(view)).child(artifactsSection(view)).child(placesSection(view)))
-          .child(this.tabsSection(t, workspace, space))
-          .child(this.surfacesSection(t, workspace)),
+          .children(sections.map((section, i) => v_flex().flex_none().when(i > 0, (el) => el.mt(12).pt(12).border_t(1).border_color(t.border)).child(section))),
       )
       .when(Boolean(this.note), (el) => el.child(div().flex_none().px(14).py(4).text_size(11).text_color(this.note.isError ? t.blocked : t.dim).whitespace_normal().child(this.note.text)))
       .child(this.footer(t, workspace));
@@ -557,6 +569,9 @@ export default class Panel extends View {
       this.note = null;
       this.showSuperseded = false;
       this.showAllBacklog = false;
+      this.showPlaces = false;
+      this.showWholeNote = false;
+      this.reading = null;
       this.refresh(cx);
     }
     if (this.problem) return this.renderMessage(t, this.problem, false);

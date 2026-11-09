@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import { UsageError } from '../errors.js';
 import { act } from '../herdr.js';
-import { createManifest } from '../manifest.js';
+import { createManifest, updateManifest } from '../manifest.js';
 import { expandFolder } from '../paths.js';
 import { ensurePlace } from '../places.js';
 import { requireFlag, splitList } from '../resolve.js';
@@ -67,6 +67,9 @@ export function newTerminal(flags) {
   return { data: opened, text: `opened ${opened.terminal}` };
 }
 
+// New work starts out exploring, so a tidy pass decides nothing the person has not.
+const FIRST_STAGE = 'discovery';
+
 export function newWorkspace(flags) {
   const { name, folder, kind } = keptFields(flags);
   const manifest = createWorkspace({
@@ -76,8 +79,11 @@ export function newWorkspace(flags) {
     instructions: flags.instructions,
     tabs: parseTabs(flags.tabs),
   });
+  const started = updateManifest(manifest.id, (draft) => {
+    draft.stage = FIRST_STAGE;
+  });
   rememberParent(folder);
-  return { data: manifest, text: `created ${kind} workspace ${name} (${manifest.id})` };
+  return { data: started, text: `created ${kind} workspace ${name} (${manifest.id})` };
 }
 
 export function newThrowaway(flags) {

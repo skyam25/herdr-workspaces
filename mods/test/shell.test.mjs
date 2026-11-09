@@ -267,11 +267,11 @@ test("the Tasks badge shows only above zero", async () => {
   }
 });
 
-test("the buttons read Tasks, Outputs, Files, Changes, with Tasks and Outputs even when panels are restricted", async () => {
+test("the buttons read Workspace, Tasks, Outputs, Files, Changes, with Tasks and Outputs even when panels are restricted", async () => {
   tabWorld();
   const view = await mount("hws-tabs");
   const order = nodes(view.render()).map((n) => n.id).filter((id) => /^panel-[a-z]+$/.test(id ?? ""));
-  assert.deepEqual(order, ["panel-tasks", "panel-outputs", "panel-files", "panel-changes"]);
+  assert.deepEqual(order, ["panel-workspace", "panel-tasks", "panel-outputs", "panel-files", "panel-changes"]);
 
   tabWorld({ sharedValues: { "workspace.panels": ["files"] } });
   const limited = await mount("hws-tabs");
@@ -279,6 +279,20 @@ test("the buttons read Tasks, Outputs, Files, Changes, with Tasks and Outputs ev
   assert.equal(limited.has("panel-changes"), false);
   assert.equal(limited.has("panel-tasks"), true);
   assert.equal(limited.has("panel-outputs"), true);
+});
+
+test("the Workspace button toggles the panel and lights when it is open in this tab", async () => {
+  const H = tabWorld();
+  const view = await mount("hws-tabs");
+  await view.click("panel-workspace");
+  assert.deepEqual(H.runs.at(-1), { name: "mod.open", args: { name: "hws-panel" } });
+  const lit = (panes) => {
+    tabWorld({ panes });
+    return mount("hws-tabs").then((v) => byId(v, "panel-workspace").bg);
+  };
+  const open = await lit([{ pane: "p9", terminal: null, mod: "hws-panel", tab: "tb1" }]);
+  const elsewhere = await lit([{ pane: "p9", terminal: null, mod: "hws-panel", tab: "tb2" }]);
+  assert.notEqual(open, elsewhere);
 });
 
 test("a panel button selects its stack child and shows the panel, then hides it", async () => {

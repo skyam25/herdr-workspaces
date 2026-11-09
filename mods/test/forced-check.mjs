@@ -116,6 +116,7 @@ const VARIANTS = [
   { mod: "hws-panel", name: "promote-problem", props: { view: "promote" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "Choose a folder.";') },
   { mod: "hws-panel", name: "panel", props: {}, header: LIVE_HEADER, patch: live },
   { mod: "hws-panel", name: "panel-confirm", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.isConfirmingClose = false;", "this.isConfirmingClose = true;").replace("this.note = null;", 'this.note = { text: "Link copied.", isError: false };') },
+  { mod: "hws-panel", name: "panel-reader", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.reading = null;", 'this.reading = { title: "Spec", text: "# Hello", isLoading: false, reveal: "/a/spec.md" };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-problem", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.problem = null;", 'this.problem = "hws failed";') },
   { mod: "hws-panel", name: "panel-kept", props: {}, header: LIVE_HEADER, patch: keptPanel(CONTEXT) },

@@ -313,12 +313,32 @@ test('a space closed outside hws keeps a record', (t) => {
   assert.equal(box.json(['find'])[0].id, manifest.id);
 });
 
-test('closing a kept workspace leaves no record', (t) => {
+test('a closed kept workspace is found and reopened with its record', (t) => {
   const box = sandbox(t);
-  const manifest = box.app();
+  const manifest = box.app('loyalty');
+  box.json(['set', '--workspace', manifest.id, '--instructions', 'Cafe discovery']);
   box.transcript(manifest, 'sess');
   box.json(['close', '--workspace', manifest.id]);
-  assert.deepEqual(box.json(['find']), []);
+
+  const [found] = box.json(['find', 'cafe']);
+  assert.deepEqual([found.id, found.name, found.archived], [manifest.id, 'loyalty', true]);
+  assert.deepEqual(box.json(['find', 'nothing-like-it']), []);
+
+  const reopened = box.json(['reopen', manifest.id]);
+  assert.equal(reopened.id, manifest.id);
+  assert.equal(reopened.archived, undefined);
+  assert.equal(box.manifest(manifest.id).spaces.length, 1);
+});
+
+test('find lists archived workspaces and retired throwaways newest first', (t) => {
+  const box = sandbox(t);
+  const scrap = box.throwaway();
+  box.transcript(scrap, 'sess', { title: 'Scrap' });
+  box.json(['close', '--workspace', scrap.id]);
+  const manifest = box.app('newer');
+  box.json(['close', '--workspace', manifest.id]);
+
+  assert.deepEqual(box.json(['find']).map((item) => item.id), [manifest.id, scrap.id]);
 });
 
 test('artifact list and link still reach a retired throwaway', (t) => {

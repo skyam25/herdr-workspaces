@@ -134,11 +134,14 @@ export default class Tabs extends View {
       });
     };
     const onBoard = Boolean(board?.active);
+    const shownTab = space?.tabs.find((c) => c.active);
+    const panelOpen = paneList.some((p) => p.mod === "hws-panel" && p.tab === shownTab?.id);
     return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
       .on_mouse_up("left", () => { this.pressed = null; })
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
+      .child(barButton("workspace", "Workspace", "mods/workspace-chrome/panel-right.svg", panelOpen, () => run("mod.open", { name: "hws-panel" })))
       .child(barButton("tasks", "Tasks", "mods/hws-tabs/tasks.svg", onBoard, (_e, cx) => (onBoard ? this.leaveBoard(space, board) : this.toBoard(space, cx)), waiting))
       .when(enabled.includes("outputs"), el => el.child(panelButton("outputs", "Outputs", "mods/hws-tabs/outputs.svg")))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))

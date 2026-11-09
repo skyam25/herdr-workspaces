@@ -44,7 +44,7 @@ function builtInDefaults(manifest) {
     return { artifacts: join(workspaceDir(manifest.id), 'artifacts'), scratch: join(workspaceDir(manifest.id), 'scratch') };
   }
   const own = keptWorkspaceDir(manifest.folder, manifest);
-  return { current: 'CURRENT.md', artifacts: join(own, 'artifacts'), scratch: join(own, 'scratch') };
+  return { current: 'CURRENT.md', artifacts: join(own, 'artifacts'), scratch: join(own, 'scratch'), decisions: join(own, 'decisions'), history: join(own, 'history') };
 }
 
 // The manifest decides first, then settings.json for a kept workspace, then the built-in default.

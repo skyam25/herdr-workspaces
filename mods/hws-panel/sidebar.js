@@ -336,12 +336,12 @@ function addRowSpecs(state, workspace, members) {
   return [addSpace, { id: `sidebar-add-board-${workspace.id}`, label: "Add board", onClick: (cx) => addBoard(state, workspace, cx) }];
 }
 
-const menuTarget = (workspace, archived) => ({ workspace: workspace.id, name: workspace.name, kind: workspace.kind, archived });
+const menuTarget = (workspace, archived, space = null) => ({ workspace: workspace.id, name: workspace.name, kind: workspace.kind, archived, space });
 
-function rightClick(workspace, archived) {
+function rightClick(workspace, archived, space) {
   return (_e, cx) => {
     cx.stop_propagation();
-    openRowMenu(menuTarget(workspace, archived));
+    openRowMenu(menuTarget(workspace, archived, space));
   };
 }
 
@@ -363,7 +363,7 @@ function workspaceRow(t, state, workspace, members) {
     .when(isActive, (el) => el.bg(t.raised))
     .when(!isActive, (el) => el.hover((s) => s.bg(t.hover)))
     .on_click(() => target && run("space.select", { id: target.id }))
-    .on_mouse_down("right", rightClick(workspace, false))
+    .on_mouse_down("right", rightClick(workspace, false, target?.id ?? null))
     .when(members.length > 1, (el) => el.child(foldButton(t, state, workspace.id)))
     .child(svg(icon("layers")).size(14).flex_none().text_color(isActive ? t.foreground : t.dim))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(workspace.name))
@@ -371,7 +371,7 @@ function workspaceRow(t, state, workspace, members) {
     .when(workspace.kind === "throwaway", (el) => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child("Throwaway")))
     .when(Boolean(status), (el) => el.child(statusDot(t, status)))
     .when(ahead > 0, (el) => el.child(div().flex_none().text_size(11.5).text_color(t.ansi2).child(`\u2191${ahead}`)))
-    .when(isActive, (el) => el.child(iconButton(t, "sidebar-panel", "panel-right", 22, () => run("mod.open", { name: "hws-panel" }))));
+    .when(isActive, (el) => el.child(iconButton(t, "sidebar-panel", "panel-right", 22, () => run("mod.open", { name: "hws-panel" })).tooltip("Show or hide the workspace panel")));
 }
 
 function archivedRowCount(state) {

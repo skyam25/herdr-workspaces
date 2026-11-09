@@ -20,8 +20,9 @@ test('a kept workspace takes the default places', (t) => {
   assert.equal(placeText(box, manifest, 'current'), join(manifest.folder, 'CURRENT.md'));
   assert.equal(placeText(box, manifest, 'artifacts'), join(ownDir(manifest), 'artifacts'));
   assert.equal(placeText(box, manifest, 'scratch'), join(ownDir(manifest), 'scratch'));
-  for (const role of ['decisions', 'history', 'meetings']) assert.equal(placeText(box, manifest, role), '');
-  assert.deepEqual(box.json(['place', 'history', '--workspace', manifest.id]), { role: 'history', path: null, writer: null });
+  for (const role of ['decisions', 'history']) assert.equal(placeText(box, manifest, role), join(ownDir(manifest), role));
+  assert.equal(placeText(box, manifest, 'meetings'), '');
+  assert.deepEqual(box.json(['place', 'meetings', '--workspace', manifest.id]), { role: 'meetings', path: null, writer: null });
 });
 
 test('place creates only the scratch and artifacts folders', (t) => {

@@ -3,16 +3,17 @@
 // Each takes `{ t, host, workspace, target, now }`. `t` is the theme, `target` the
 // agent new surfaces attach to (or null) and `host` the Panel view that owns the state.
 
-import { div } from "gpui-kit";
-import { v_flex, h_flex, Input } from "gpui-base";
+import { div, svg } from "gpui-kit";
+import { v_flex, h_flex, Input, TextView } from "gpui-base";
 import { run } from "herdr";
 import { tilde } from "./hws.js";
-import { BACKLOG_ROWS, FRESHNESS_COLOR, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, livePass, placeRows, recordedSessions } from "./context.js";
+import { revealLabel } from "./cites.js";
+import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, livePass, placeRows, recordedSessions } from "./context.js";
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
 
 export function sectionTitle(t, title) {
-  return div().px(8).pb(3).text_size(11.5).font_medium().text_color(t.muted).child(title);
+  return div().px(8).pb(6).text_size(13).font_semibold().text_color(t.foreground).child(title);
 }
 
 function smallButton(t, id, text, action, enabled = true) {
@@ -74,7 +75,7 @@ function freshnessRow({ t, host, workspace, target }) {
     .items_center()
     .when(Boolean(level), (el) => el.child(freshnessDot(t, level)))
     .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.muted).child(sentence))
-    .child(smallButton(t, "open-current", "Open current", (_e, cx) => host.openCurrent(target, cx), Boolean(target && context?.currentPath) && !host.busy))
+    .child(smallButton(t, "open-current", "Open note", (_e, cx) => host.openCurrent(target, cx), Boolean(context?.currentPath && (target || context.current)) && !host.busy))
     .child(smallButton(t, "tidy", live ? "Tidy again" : "Tidy", (_e, cx) => host.startTidy(workspace, cx), !host.busy));
 }
 
@@ -99,7 +100,7 @@ export function headerSection(view) {
         .when(isThrowaway, (el) => el.child(pill(t, "Throwaway"))),
     )
     .when(Boolean(workspace.instructions), (el) => el.child(div().truncate().text_size(12).text_color(t.muted).child(workspace.instructions.split("\n")[0])))
-    .when(!isThrowaway, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(tilde(workspace.folder))).child(host.kindSetting(t, workspace)).child(freshnessRow(view)))
+    .when(!isThrowaway, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(tilde(workspace.folder))).child(freshnessRow(view)))
     .child(
       h_flex()
         .pt(6)
@@ -108,7 +109,7 @@ export function headerSection(view) {
         .child(smallButton(t, "new-board", "New board", (_e, cx) => host.openSurface("board", target, cx), canAttach))
         .child(smallButton(t, "new-note", "New note", (_e, cx) => host.openSurface("note", target, cx), canAttach))
         .child(smallButton(t, "edit-instructions", "Instructions…", () => host.openInstructions(workspace)))
-        .child(div().flex_1().min_w(0).truncate().pl(4).text_size(11).text_color(t.dim).child(target ? `opens beside ${target.address}` : "focus an agent to attach one")),
+        .child(div().flex_1().min_w(0).truncate().pl(4).text_size(11).text_color(t.dim).child(target ? `Boards and notes open beside ${agentName(target)}` : "Boards and notes need an agent. Click one first.")),
     );
 }
 
@@ -123,7 +124,7 @@ function noteLine(t, host, workspace, line, i) {
     .flex_1()
     .min_w(0)
     .whitespace_normal()
-    .when(line.kind === "heading", (el) => el.pt(4).text_size(11.5).font_semibold().text_color(t.foreground))
+    .when(line.kind === "heading", (el) => el.pt(6).text_size(11.5).font_semibold().text_color(t.muted))
     .when(line.kind !== "heading", (el) => el.text_size(12).text_color(t.foreground))
     .child(line.text || " ");
   return h_flex()
@@ -136,19 +137,28 @@ function noteLine(t, host, workspace, line, i) {
     .children(citeChips(t, host, workspace, i, line.cites));
 }
 
+// The note's own "# Current" title would repeat the section title.
+const isNoteTitle = (line, i) => i === 0 && line.kind === "heading" && /^current$/i.test(line.text);
+
 export function currentSection({ t, host, workspace }) {
   const context = isCurrentFor(host, workspace);
   const note = context?.current;
+  const lines = host.showWholeNote ? note?.all : note?.lines;
   return v_flex()
     .flex_none()
     .gap(3)
-    .child(sectionTitle(t, "Current"))
+    .child(sectionTitle(t, "Current note"))
     .when(!context, (el) => el.child(dimLine(t, "Loading…")))
-    .when(Boolean(context) && !note, (el) => el.child(dimLine(t, context.currentPath ? `No current note yet. Tidy writes one at ${tilde(context.currentPath)}.` : "No current note yet.")))
+    .when(Boolean(context) && !note, (el) => el.child(dimLine(t, context.currentPath ? `A short summary of where this work stands. Tidy writes it to ${tilde(context.currentPath)}.` : "A short summary of where this work stands. Tidy writes it.")))
     .when(Boolean(note), (el) =>
       el
-        .children(note.lines.map((line, i) => noteLine(t, host, workspace, line, i)))
-        .when(note.more > 0, (inner) => inner.child(dimLine(t, `${note.more} more ${note.more === 1 ? "line" : "lines"}. Open current shows the whole note.`))),
+        .children(lines.map((line, i) => (isNoteTitle(line, i) ? null : noteLine(t, host, workspace, line, i))).filter(Boolean))
+        .when(note.more > 0, (inner) =>
+          inner.child(smallButtonRow(t, "note-more", host.showWholeNote ? "Show fewer" : `${note.more} more ${note.more === 1 ? "line" : "lines"}`, (_e, cx) => {
+            host.showWholeNote = !host.showWholeNote;
+            cx.notify();
+          })),
+        ),
     );
 }
 
@@ -177,7 +187,7 @@ export function sinceSection({ t, host, workspace, now }) {
   return v_flex()
     .flex_none()
     .gap(1)
-    .child(sectionTitle(t, "Since last tidy"))
+    .child(sectionTitle(t, "Not in the note yet"))
     .when(!context, (el) => el.child(dimLine(t, "Loading…")))
     .when(Boolean(context) && !status, (el) => el.child(dimLine(t, context.statusProblem ? `Freshness unavailable. ${context.statusProblem}` : "Freshness unavailable.")))
     .when(Boolean(status), (el) =>
@@ -196,7 +206,7 @@ export function sinceSection({ t, host, workspace, now }) {
               .cursor_pointer()
               .hover((s) => s.bg(t.hover))
               .on_click(() => run("agent.focus", { terminal: live.terminal }))
-              .child(`A tidy pass is running in ${live.terminal}.`),
+              .child("A tidy pass is running. Click to go to it."),
           ),
         )
         .children(shown.map((row, i) => backlogRowView(t, host, workspace, row, i, now)))
@@ -211,9 +221,37 @@ export function sinceSection({ t, host, workspace, now }) {
 
 const smallButtonRow = (t, id, text, action) => h_flex().px(8).pt(2).child(smallButton(t, id, text, action));
 
+// History
+
+// The decision log and update log a past pass left behind.
+export function historySection({ t, host, workspace }) {
+  const record = isCurrentFor(host, workspace)?.status?.record;
+  if (!record?.decisions && !record?.updates) return null;
+  const row = (id, title, detail, path) =>
+    h_flex()
+      .id(id)
+      .h(22)
+      .px(8)
+      .gap(8)
+      .items_center()
+      .rounded(6)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => host.openReader({ title, candidates: [path], reveal: path }, cx))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).child(title))
+      .when(Boolean(detail), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(detail)));
+  const { decisions, updates } = record;
+  return v_flex()
+    .flex_none()
+    .gap(1)
+    .child(sectionTitle(t, "History"))
+    .when(Boolean(decisions), (el) => el.child(row("history-decisions", "Decision log", decisions ? `${decisions.inForce} in force · ${decisions.replaced} replaced` : "", decisions?.path)))
+    .when(Boolean(updates), (el) => el.child(row("history-updates", "Updates", "", updates)));
+}
+
 // Artifacts
 
-function artifactRow(t, host, artifact, now) {
+function artifactRow(t, host, workspace, artifact, now) {
   const { status } = artifact;
   return v_flex()
     .flex_none()
@@ -223,23 +261,34 @@ function artifactRow(t, host, artifact, now) {
       h_flex()
         .gap(8)
         .items_center()
-        .child(div().flex_1().min_w(0).truncate().text_color(status === "superseded" ? t.muted : t.foreground).child(artifact.title || artifact.id))
-        .child(pill(t, status, t[STATUS_COLOR[status]]))
+        .child(
+          div()
+            .id(`artifact-open-${artifact.id}`)
+            .flex_1()
+            .min_w(0)
+            .truncate()
+            .cursor_pointer()
+            .text_color(status === "superseded" ? t.muted : t.foreground)
+            .hover((s) => s.text_color(t.accent))
+            .on_click((_e, cx) => host.citeAction({ kind: "artifact", value: artifact.id }, workspace, cx))
+            .child(artifact.title || artifact.id),
+        )
+        .when(Boolean(status) && status !== "current", (el) => el.child(pill(t, status, t[STATUS_COLOR[status]])))
         .child(div().flex_none().text_size(11).text_color(t.dim).child(`${artifact.type} · ${ago(now - (artifact.createdAt ?? now))}`)),
     )
     .child(
       h_flex()
         .gap(4)
-        .child(smallButton(t, `terminal-${artifact.id}`, "Open terminal", (_e, cx) => host.act(`terminal-${artifact.id}`, () => host.artifactTerminal(artifact), cx)))
-        .child(smallButton(t, `link-${artifact.id}`, "Copy link", (_e, cx) => host.copyLink(artifact, cx)))
-        .child(smallButton(t, `folder-${artifact.id}`, "Open folder", (_e, cx) => host.openFolder(artifact, cx))),
+        .child(smallButton(t, `terminal-${artifact.id}`, "New Claude tab", (_e, cx) => host.act(`terminal-${artifact.id}`, () => host.artifactTerminal(artifact), cx)))
+        .child(smallButton(t, `link-${artifact.id}`, "Copy for Claude", (_e, cx) => host.copyLink(artifact, cx)))
+        .child(smallButton(t, `folder-${artifact.id}`, revealLabel(), (_e, cx) => host.reveal(artifact.prompt ?? artifact.path, cx))),
     );
 }
 
 // Current and draft artifacts, then one row that folds the superseded ones.
 function artifactRows(t, host, workspace, now) {
   const { shown, superseded } = artifactGroups(workspace.artifacts);
-  const rows = shown.map((a) => artifactRow(t, host, a, now));
+  const rows = shown.map((a) => artifactRow(t, host, workspace, a, now));
   if (superseded.length === 0) return rows;
   const fold = h_flex()
     .id("superseded-toggle")
@@ -257,7 +306,7 @@ function artifactRows(t, host, workspace, now) {
       cx.notify();
     })
     .child(`${host.showSuperseded ? "Hide" : "Show"} ${superseded.length} superseded`);
-  return [...rows, fold, ...(host.showSuperseded ? superseded.map((a) => artifactRow(t, host, a, now)) : [])];
+  return [...rows, fold, ...(host.showSuperseded ? superseded.map((a) => artifactRow(t, host, workspace, a, now)) : [])];
 }
 
 export function artifactsSection({ t, host, workspace, now }) {
@@ -268,6 +317,45 @@ export function artifactsSection({ t, host, workspace, now }) {
     .child(sectionTitle(t, "Artifacts"))
     .when(rows.length === 0, (el) => el.child(dimLine(t, "None yet.")))
     .children(rows);
+}
+
+// Reader
+
+// A document opened from the panel, rendered in place of the panel's sections.
+export function readerView({ t, host }) {
+  const { title, text, reveal, isLoading } = host.reading;
+  return v_flex()
+    .id("hws-reader")
+    .size_full()
+    .min_h(0)
+    .bg(t.background)
+    .text_color(t.foreground)
+    .text_size(13)
+    .child(
+      h_flex()
+        .flex_none()
+        .px(14)
+        .py(8)
+        .gap(8)
+        .items_center()
+        .border_b(1)
+        .border_color(t.border)
+        .child(smallButton(t, "reader-back", "Back", (_e, cx) => host.closeReader(cx)))
+        .child(div().flex_1().min_w(0).truncate().font_semibold().child(title))
+        .child(smallButton(t, "reader-reveal", revealLabel(), (_e, cx) => host.reveal(reveal, cx))),
+    )
+    .child(
+      v_flex()
+        .id("hws-reader-body")
+        .flex_1()
+        .min_h(0)
+        .overflow_y_scrollbar()
+        .p(18)
+        .when(isLoading, (el) => el.child(div().text_color(t.dim).child("Loading…")))
+        .when(!isLoading && text === null, (el) => el.child(div().text_color(t.dim).child("This file is missing or can't be read.")))
+        .when(typeof text === "string", (el) => el.child(TextView.markdown("reader-text", text || " ").selectable(true))),
+    )
+    .when(Boolean(host.note), (el) => el.child(div().flex_none().px(14).py(4).text_size(11).text_color(host.note.isError ? t.blocked : t.dim).whitespace_normal().child(host.note.text)));
 }
 
 // Places
@@ -320,20 +408,45 @@ function placeRow(t, host, workspace, row) {
     .when(isDirty, (el) => el.child(smallButton(t, `place-save-${row.role}`, host.busy === key ? "Saving…" : typed ? "Save" : "Clear", (_e, cx) => host.savePlace(workspace.id, row.role, cx), !host.busy)));
 }
 
+// Setup that rarely changes, so it starts folded.
+function placesToggle(t, host) {
+  return h_flex()
+    .id("places-toggle")
+    .h(22)
+    .px(8)
+    .gap(6)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .text_size(13)
+    .font_semibold()
+    .text_color(t.foreground)
+    .hover((s) => s.bg(t.hover))
+    .on_click((_e, cx) => {
+      host.showPlaces = !host.showPlaces;
+      cx.notify();
+    })
+    .child(svg(`mods/workspace-chrome/chevron-${host.showPlaces ? "down" : "right"}.svg`).size(12).flex_none())
+    .child("Where files go");
+}
+
 export function placesSection({ t, host, workspace, target }) {
   return v_flex()
     .flex_none()
     .gap(1)
-    .child(sectionTitle(t, "Places"))
-    .children(placeRows(workspace, isCurrentFor(host, workspace)?.status).map((row) => placeRow(t, host, workspace, row)))
-    .child(
-      h_flex()
-        .px(8)
-        .pt(4)
-        .gap(6)
-        .items_center()
-        .child(smallButton(t, "suggest-places", "Suggest from folder", (_e, cx) => host.suggestPlaces(target, cx), Boolean(target) && !host.busy))
-        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(target ? `asks ${target.address} to propose a map` : "focus an agent to ask")),
+    .child(placesToggle(t, host))
+    .when(host.showPlaces, (el) =>
+      el
+        .children(placeRows(workspace, isCurrentFor(host, workspace)?.status).map((row) => placeRow(t, host, workspace, row)))
+        .child(
+          h_flex()
+            .px(8)
+            .pt(4)
+            .gap(6)
+            .items_center()
+            .child(smallButton(t, "suggest-places", "Suggest from folder", (_e, cx) => host.suggestPlaces(target, cx), Boolean(target) && !host.busy))
+            .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(target ? `Asks ${agentName(target)} to propose where files go` : "Needs an agent. Click one first.")),
+        ),
     );
 }
 

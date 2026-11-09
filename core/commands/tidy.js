@@ -1,11 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
 import { freeName, moveDir } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, isTerminalAlive, keepingSelection, killTerminal, sendText } from '../herdr.js';
+import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, listLive, sendText } from '../herdr.js';
 import { withLock } from '../lock.js';
 import { TIDY_ROLE, updateManifest, writeJsonAtomic, writeTextAtomic } from '../manifest.js';
 import { STANDALONE, transcriptPath, workspaceDir } from '../paths.js';
@@ -16,13 +16,16 @@ import { agentModels } from '../settings.js';
 import { modifiedAt, typedPrompt } from '../retired.js';
 import { moveToTrash } from '../trash.js';
 import { assertStatus, assertSupersedes, isInside, realOf } from './artifact.js';
+import { checkDecisionShape, planDecisions, readDecisions, recordDecisions } from './decision.js';
 import { readTodos, spaceOfTerminal, updateTodos } from './todo.js';
 
 const TITLE_CHARS = 200;
 const HEAD_BYTES = 256 * 1024;
 const GIT_BUFFER = 32 * 1024 * 1024;
 const PACKET_CHANGED = 'The workspace changed. Read the tidy packet again at';
-const PARTS = ['current', 'demote', 'artifacts', 'cards'];
+const PARTS = ['current', 'decisions', 'demote', 'artifacts', 'cards'];
+const UPDATES_FILE = 'updates.md';
+const UPDATES_TITLE = '# Updates\n\n';
 const DESTINATIONS = ['history', 'trash'];
 
 const SOURCES = [
@@ -78,10 +81,25 @@ function sessionsSince(manifest, through) {
     .map((item) => ({ ...item, title: firstPrompt(item.transcript) }));
 }
 
+// An artifact counts once when it is created and again each time its file changes.
 function artifactsSince(manifest, through) {
+  const found = [];
+  for (const { id, title, path, status, createdAt, role } of manifest.artifacts) {
+    if (role === TIDY_ROLE) continue;
+    const isNew = through == null || (createdAt ?? 0) > through;
+    const changed = isNew ? null : modifiedAt(path);
+    const isEdited = changed !== null && changed > through;
+    if (!isNew && !isEdited) continue;
+    found.push({ id, title: title ?? null, path, status, createdAt: createdAt ?? null, ...(isEdited ? { editedAt: changed } : {}) });
+  }
+  return found;
+}
+
+// Every artifact still in play, so a pass can catch one a newer fact contradicts.
+function liveArtifacts(manifest) {
   return manifest.artifacts
-    .filter((item) => item.role !== TIDY_ROLE && (through == null || (item.createdAt ?? 0) > through))
-    .map(({ id, title, path, status, createdAt }) => ({ id, title: title ?? null, path, status, createdAt: createdAt ?? null }));
+    .filter((item) => item.role !== TIDY_ROLE && item.status !== 'superseded')
+    .map(({ id, title, path, status, createdAt }) => ({ id, title: title ?? null, path, status: status ?? 'current', createdAt: createdAt ?? null, modifiedAt: modifiedAt(path) }));
 }
 
 function git(folder, args) {
@@ -129,6 +147,15 @@ function doneCards(manifest) {
     .map(({ id, title, notes, note, report, replies, updatedAt }) => ({ id, title, notes: notes ?? '', note, report, replies, updatedAt: updatedAt ?? null }));
 }
 
+// The work still ahead, which feeds Next.
+function openCards(manifest) {
+  try {
+    return readTodos(manifest.id).items.filter((item) => item.column !== 'done' && !item.archived).map(({ id, title, column }) => ({ id, title, column }));
+  } catch {
+    return [];
+  }
+}
+
 function collect(manifest) {
   const covers = manifest.current?.covers ?? null;
   const { commits, git: gitInfo } = commitsSince(manifest, covers?.commit);
@@ -146,7 +173,7 @@ const newestFirst = (a, b) => (b.at ?? 0) - (a.at ?? 0);
 function itemsOf(since) {
   return [
     since.sessions.map((item) => ({ kind: 'session', id: item.id, title: item.title, at: item.modifiedAt, path: item.transcript })).sort(newestFirst),
-    since.artifacts.map((item) => ({ kind: 'artifact', id: item.id, title: item.title, at: item.createdAt, path: item.path })).sort(newestFirst),
+    since.artifacts.map((item) => ({ kind: 'artifact', id: item.id, title: item.title, at: item.editedAt ?? item.createdAt, path: item.path, ...(item.editedAt ? { edited: true } : {}) })).sort(newestFirst),
     since.commits.map((item) => ({ kind: 'commit', id: item.sha, title: item.subject, at: item.at, path: null })),
     since.cards.map((item) => ({ kind: 'card', id: item.id, title: item.title, at: item.updatedAt, path: null })).sort(newestFirst),
   ].flat();
@@ -167,12 +194,35 @@ function placesOf(manifest) {
   };
 }
 
+// Sessions and drafts are exploring, so only these count as having landed.
+function landedOf(since) {
+  const landed = { artifacts: since.artifacts.filter((item) => item.status !== 'draft').length, commits: since.commits.length, cards: since.cards.length };
+  return { ...landed, total: landed.artifacts + landed.commits + landed.cards };
+}
+
+function updatesPath(manifest) {
+  const { path, writer } = placeOf(manifest, 'history');
+  return path && !isForeign(writer) ? join(path, UPDATES_FILE) : null;
+}
+
+// The logs a past pass left behind, for the panel to open.
+function recordOf(manifest) {
+  const { path, decisions } = readDecisions(manifest);
+  const updates = updatesPath(manifest);
+  return {
+    decisions: path && decisions.length > 0 ? { path, inForce: decisions.filter((item) => !item.replacedBy).length, replaced: decisions.filter((item) => item.replacedBy).length } : null,
+    updates: updates && existsSync(updates) ? updates : null,
+  };
+}
+
 function statusOf(manifest) {
   const since = collect(manifest);
   return {
     tidiedAt: manifest.current?.tidiedAt ?? null,
     stage: manifest.stage ?? null,
     behind: Object.fromEntries(SOURCES.map(({ key }) => [key, since[key].length])),
+    landed: landedOf(since),
+    record: isKept(manifest) ? recordOf(manifest) : null,
     items: itemsOf(since),
     git: since.git,
     live: livePass(manifest),
@@ -195,8 +245,11 @@ function joinWords(parts) {
 function freshnessSentence(status) {
   if (!status.tidiedAt) return 'No current note yet';
   const when = shortDate(status.tidiedAt);
-  const parts = SOURCES.filter(({ key }) => status.behind[key] > 0).map(({ key, one }) => plural(status.behind[key], one));
-  if (parts.length === 0) return `Current is up to date, last tidied ${when}`;
+  const parts = SOURCES.filter(({ key }) => status.landed[key] > 0).map(({ key, one }) => plural(status.landed[key], one));
+  if (parts.length === 0) {
+    const isExploring = SOURCES.some(({ key }) => status.behind[key] > 0);
+    return isExploring ? `Nothing has landed since ${when}` : `Current is up to date, last tidied ${when}`;
+  }
   return `Current is ${joinWords(parts)} behind, last tidied ${when}`;
 }
 
@@ -226,6 +279,11 @@ function noteHash(path) {
   return path && existsSync(path) ? createHash('sha256').update(readFileSync(path)).digest('hex') : null;
 }
 
+function inForceDecisions(manifest) {
+  const { path, writer, decisions } = readDecisions(manifest);
+  return { path, writer, inForce: decisions.filter((item) => !item.replacedBy).map(({ id, decidedAt, title }) => ({ id, decidedAt, title })) };
+}
+
 // The cutoff is taken before the stream is read, so work that lands while
 // the packet is written stays in the next backlog.
 function writePacket(manifest) {
@@ -239,6 +297,7 @@ function writePacket(manifest) {
     folder: manifest.folder,
     stage: manifest.stage ?? null,
     places,
+    writers: placesOf(manifest).writers,
     instructions: manifest.instructions ?? '',
     current: {
       path: places.current,
@@ -247,6 +306,7 @@ function writePacket(manifest) {
       tidiedAt: manifest.current?.tidiedAt ?? null,
       covers: manifest.current?.covers ?? null,
     },
+    live: { artifacts: liveArtifacts(manifest), decisions: inForceDecisions(manifest), cards: openCards(manifest) },
     since,
     cutoff: { sessionsThrough: now, artifactsThrough: now, commit: gitInfo.head },
   });
@@ -263,16 +323,33 @@ function tabSpace(manifest) {
   return space;
 }
 
-function openTidy(manifest, packet) {
-  const opened = keepingSelection(() => act('tab.new', {
-    name: 'Tidy',
-    space: tabSpace(manifest),
-    folder: manifest.folder,
-    argv: agentArgv(agentModels().orchestrator),
-    task: `Use the herdr-workspaces:tidy skill. The packet is at ${packet}.`,
-  }));
+// The pane the pass opens beside. The panel names its own pane. A terminal in
+// the workspace uses its own. Anything else has nothing to sit beside.
+function anchorPane(manifest, pane) {
+  if (pane) return { pane, direction: 'down' };
+  const terminal = process.env.HC_TERMINAL_ID;
+  if (!terminal || !manifest.spaces.includes(spaceOfTerminal(terminal))) return null;
+  const own = findTerminal(listLive() ?? { spaces: [] }, terminal)?.pane;
+  return own ? { pane: own, direction: 'right' } : null;
+}
+
+// A pane opens where its anchor does, so the shell moves to the workspace folder first.
+function inFolder(folder, argv) {
+  return ['sh', '-c', 'cd "$0" && exec "$@"', folder, ...argv];
+}
+
+function openPass(manifest, packet, pane) {
+  const argv = agentArgv(agentModels().orchestrator);
+  const task = `Use the herdr-workspaces:tidy skill. The packet is at ${packet}.`;
+  const anchor = anchorPane(manifest, pane);
+  if (anchor) return act('pane.split', { ...anchor, argv: inFolder(manifest.folder, [...argv, task]) });
+  return keepingSelection(() => act('tab.new', { name: 'Tidy', space: tabSpace(manifest), folder: manifest.folder, argv, task }));
+}
+
+function openTidy(manifest, packet, pane) {
+  const opened = openPass(manifest, packet, pane);
   updateManifest(manifest.id, (draft) => {
-    draft.terminals.push({ terminal: opened.terminal, tabId: opened.tab ?? null, sessionId: null, role: TIDY_ROLE });
+    draft.terminals.push({ terminal: opened.terminal, tabId: opened.tab ?? findTerminal(listLive() ?? { spaces: [] }, opened.terminal)?.tab?.id ?? null, sessionId: null, role: TIDY_ROLE });
     draft.tidy = { terminal: opened.terminal, startedAt: Date.now(), packet };
   });
   return opened.terminal;
@@ -287,7 +364,7 @@ export function tidyStart(flags) {
     const live = livePass(manifest);
     const packet = writePacket(manifest);
     if (live) return { terminal: live.terminal, started: false, packet };
-    return { terminal: openTidy(manifest, packet), started: true, packet };
+    return { terminal: openTidy(manifest, packet, flags.pane), started: true, packet };
   });
   if (!result.started) sendText(result.terminal, `${PACKET_CHANGED} ${result.packet}`);
   const text = result.started ? `started a tidy pass in ${result.terminal}` : `asked ${result.terminal} to read the packet again`;
@@ -339,6 +416,7 @@ function checkProposal(proposal) {
   requireArray(proposal, 'cards').forEach((id, index) => {
     if (!isText(id) || !id) throw bad(`cards[${index}]`, 'must be a card id');
   });
+  if (proposal.decisions !== undefined) requireArray(proposal, 'decisions').forEach(checkDecisionShape);
   return proposal;
 }
 
@@ -462,9 +540,49 @@ function archiveCards(manifest, ids) {
   });
 }
 
-function applyText({ wrote, demoted, artifacts, archived }) {
+function stamp(ms = Date.now()) {
+  const date = new Date(ms);
+  const pad = (value) => String(value).padStart(2, '0');
+  return { day: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, time: `${pad(date.getHours())}:${pad(date.getMinutes())}` };
+}
+
+// Keeps the note this pass replaces. Returns its path, or null with nothing to keep or nowhere to put it.
+function snapshotNote(manifest, notePath) {
+  const { path: history, writer } = placeOf(manifest, 'history');
+  if (!history || isForeign(writer) || !existsSync(notePath)) return null;
+  mkdirSync(history, { recursive: true });
+  const target = freeName(history, `current-${stamp().day}.md`);
+  writeTextAtomic(target, readFileSync(notePath, 'utf8'));
+  return target;
+}
+
+function updateEntry({ summary, snapshot, decisions, demoted, artifacts, archived }) {
+  const { day, time } = stamp();
+  const lines = [`## ${day} ${time}`, '', summary.trim() || 'No summary.', ''];
+  const details = [
+    ...decisions.map(({ id, title, replaces }) => `Decided ${id}, ${title}${replaces.length ? `, replacing ${replaces.join(', ')}` : ''}`),
+    ...artifacts.map(({ id, status }) => `Marked artifact ${id} ${status}`),
+    ...demoted.map(({ path, to }) => `Moved ${basename(path)} to ${to === 'trash' ? 'the Trash' : 'history'}`),
+    ...(archived.length ? [`Archived ${plural(archived.length, 'card')}`] : []),
+    ...(snapshot ? [`Previous note saved as ${basename(snapshot)}`] : []),
+  ];
+  if (details.length) lines.push(...details.map((line) => `- ${line}`), '');
+  return lines.join('\n');
+}
+
+// Newest first, so the log opens on what just happened.
+function appendUpdate(manifest, entry) {
+  const path = updatesPath(manifest);
+  if (!path) return null;
+  const old = existsSync(path) ? readFileSync(path, 'utf8') : UPDATES_TITLE;
+  writeTextAtomic(path, `${UPDATES_TITLE}${entry}\n${old.startsWith(UPDATES_TITLE) ? old.slice(UPDATES_TITLE.length) : old}`.replace(/\n+$/, '\n'));
+  return path;
+}
+
+function applyText({ wrote, decisions, demoted, artifacts, archived }) {
   const parts = [];
   if (wrote) parts.push(`wrote ${wrote}`);
+  if (decisions.length) parts.push(`logged ${plural(decisions.length, 'decision')}`);
   if (demoted.length) parts.push(`demoted ${plural(demoted.length, 'file')}`);
   if (artifacts.length) parts.push(`changed ${plural(artifacts.length, 'artifact')}`);
   if (archived.length) parts.push(`archived ${plural(archived.length, 'card')}`);
@@ -487,16 +605,20 @@ export function tidyApply(flags) {
     const demotions = skipped.has('demote') ? { planned: [] } : planDemotions(manifest, proposal.demote, notePath);
     const statuses = skipped.has('artifacts') ? [] : planStatuses(manifest, proposal.artifacts);
     const cards = skipped.has('cards') ? [] : planCards(manifest, proposal.cards);
+    const newDecisions = skipped.has('decisions') ? [] : planDecisions(manifest, proposal.decisions ?? []);
 
+    const snapshot = writeCurrent ? snapshotNote(manifest, notePath) : null;
     if (writeCurrent) writeTextAtomic(notePath, proposal.current.endsWith('\n') ? proposal.current : `${proposal.current}\n`);
+    const decisions = recordDecisions(manifest, newDecisions);
     const demoted = demote(demotions.planned, demotions.history);
     const archived = archiveCards(manifest, cards);
+    const updates = appendUpdate(manifest, updateEntry({ summary: proposal.summary, snapshot, decisions, demoted, artifacts: statuses, archived }));
     updateManifest(id, (draft) => {
       for (const change of statuses) Object.assign(draft.artifacts.find((item) => item.id === change.id), change);
       draft.current = { tidiedAt: Date.now(), covers: packet.cutoff };
       delete draft.tidy;
     });
-    return { wrote: writeCurrent ? notePath : null, demoted, artifacts: statuses, archived, skipped: PARTS.filter((part) => skipped.has(part)) };
+    return { wrote: writeCurrent ? notePath : null, snapshot, updates, decisions, demoted, artifacts: statuses, archived, skipped: PARTS.filter((part) => skipped.has(part)) };
   });
   return { data: result, text: applyText(result) };
 }

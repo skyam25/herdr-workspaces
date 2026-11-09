@@ -3,7 +3,7 @@
 
 import { agents, exec, openOverlay, panes, run, terminals, window } from "herdr";
 import { hws } from "./hws.js";
-import { opensAsPage, resolvePath } from "./context.js";
+import { artifactReading, opensAsPage, readsHere, resolvePath } from "./context.js";
 
 // The Board's card dialog, at the size the Board itself prefers.
 const CARD_DIALOG = { width: 920, height: 760 };
@@ -23,7 +23,7 @@ function pageArgs(file, target) {
   return chat && panes().some((p) => p.pane === chat) ? [...args, "--beside-pane", chat, "--space", target.space] : args;
 }
 
-// Markdown and HTML open as a page beside the agent. Anything else, or no agent, opens in the desktop's default app.
+// HTML opens as a page beside the agent. Anything else, or no agent, opens in the desktop's default app.
 export async function openPath(path, target) {
   if (opensAsPage(path) && target) {
     await hws(pageArgs(path, target));
@@ -32,6 +32,25 @@ export async function openPath(path, target) {
   const r = await exec(onLinux() ? "xdg-open" : "open", [path]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `Could not open ${path}`);
   return null;
+}
+
+export const revealLabel = () => (onLinux() ? "Show in folder" : "Show in Finder");
+
+export async function revealPath(path) {
+  const r = onLinux() ? await exec("xdg-open", [path.replace(/\/[^/]*$/, "") || "/"]) : await exec("open", ["-R", path]);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `Could not show ${path}`);
+  return null;
+}
+
+// What the panel's reader shows for a cite, or null when the cite acts elsewhere.
+export function citeReading(cite, workspace) {
+  if (cite.kind === "artifact") {
+    const artifact = (workspace.artifacts ?? []).find((a) => a.id === cite.value);
+    return artifact?.path ? artifactReading(artifact) : null;
+  }
+  if (cite.kind !== "file") return null;
+  const path = resolvePath(cite.value, workspace.folder);
+  return readsHere(path) ? { title: cite.value.split("/").filter(Boolean).pop() ?? cite.value, candidates: [path], reveal: path } : null;
 }
 
 function openCard(id, workspace, space) {

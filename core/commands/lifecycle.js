@@ -12,6 +12,7 @@ import { resolveWorkspace } from '../resolve.js';
 import { containsFile, isStored, lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
+import { archive, archiveClosed } from './archive.js';
 import { KEPT_KINDS, keptFields, keptKind } from './new.js';
 import { spaceOfTerminal } from './todo.js';
 
@@ -174,7 +175,8 @@ export function prune() {
 
         // An archive that landed after the read above owns these closed spaces.
         if (readManifest(manifest.id)?.archived) continue;
-        retireWorkspace(manifest.id);
+        if (isKept(manifest)) archiveClosed(manifest);
+        else retireWorkspace(manifest.id);
         pruned.push(manifest.id);
         continue;
       }
@@ -324,6 +326,12 @@ export function close(flags) {
   if (flags.keep && flags.trash) throw new UsageError('use --keep or --trash, not both');
   const manifest = resolveWorkspace(flags);
   if (manifest.id === STANDALONE) throw new HwsError('the standalone store is not a space');
+
+  // Closing a kept workspace archives it, so it can always come back. Remove is the only way out.
+  if (isKept(manifest) && !manifest.archived) {
+    archive({ workspace: manifest.id });
+    return { data: { closed: true, archived: true, workspace: manifest.id, kept: null }, text: `archived ${manifest.name}` };
+  }
   const live = requireLive();
 
   const fate = chooseWorkFate(manifest, flags);

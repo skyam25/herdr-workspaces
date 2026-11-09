@@ -10,6 +10,7 @@ import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
 import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
 import { phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop } from './commands/phone.js';
 import { find, reopen } from './commands/retired.js';
+import { decisionAdd, decisionList } from './commands/decision.js';
 import { tidyApply, tidyStart, tidyStatus, tidyStop } from './commands/tidy.js';
 import { boardAdd, boardOpen, spaceAdd, spaceMove, spaceRemove } from './commands/spaces.js';
 import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceOpen, surfaceResume, surfaceSocket } from './commands/surface.js';
@@ -123,9 +124,11 @@ const ROUTES = [
   },
   { path: ['place'], run: place, options: { workspace: text }, positionals: 1 },
   { path: ['tidy', 'status'], run: tidyStatus, options: { workspace: text, line: flag } },
-  { path: ['tidy', 'start'], run: tidyStart, options: { workspace: text } },
+  { path: ['tidy', 'start'], run: tidyStart, options: { workspace: text, pane: text } },
   { path: ['tidy', 'apply'], run: tidyApply, options: { file: text, skip: text, workspace: text } },
   { path: ['tidy', 'stop'], run: tidyStop, options: { workspace: text } },
+  { path: ['decision', 'add'], run: decisionAdd, options: { title: text, why: text, 'decided-at': text, cites: text, replaces: text, workspace: text } },
+  { path: ['decision', 'list'], run: decisionList, options: { workspace: text } },
   { path: ['parent'], run: parent, options: {} },
   { path: ['close'], run: close, prunes: true, options: { workspace: text, keep: flag, trash: flag } },
   { path: ['archive'], run: archive, options: { workspace: text } },
