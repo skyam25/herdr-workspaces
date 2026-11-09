@@ -81,6 +81,7 @@ const fromDraft = (draft: Draft) => {
   return {
     ...(images.length ? { images } : {}),
     ...(draft.source ? { sourcePath: draft.source.path } : {}),
+    ...(draft.source?.text === draft.body ? { sourceUnchanged: true } : {}),
     ...((draft.source || draft.review) && (draft.source?.sessionId ?? draft.sessionId) ? { fileSessionId: draft.source?.sessionId ?? draft.sessionId } : {}),
     ...(annotations ? { annotations } : {}),
   };

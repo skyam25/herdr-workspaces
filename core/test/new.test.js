@@ -82,15 +82,20 @@ test('the agent line carries the workspace instructions', (t) => {
   assert.match(line, /Workspace instructions:\nKeep notes in context\//);
 });
 
-test('new throwaway starts one claude tab', (t) => {
+test('new throwaway starts one claude tab in its scratch folder', (t) => {
   const box = sandbox(t);
   const manifest = box.json(['new', 'throwaway', '--name', 'quick']);
+  const scratch = join(box.root, 'workspaces', 'sp102', 'scratch');
   assert.deepEqual(box.actions(), [
-    ['herdr-app', 'do', 'space.new', '--name', 'quick', '--folder', box.homeDir, '--argv', '["claude"]'],
-    ['herdr-app', 'do', 'tab.rename', '--id', 'tb101', '--name', 'Claude'],
+    ['herdr-app', 'do', 'space.new', '--name', 'quick', '--folder', box.homeDir],
+    ['herdr-app', 'do', 'tab.new', '--name', 'Claude', '--space', 'sp102', '--folder', scratch, '--argv', '["claude"]'],
+    ['herdr-app', 'do', 'tab.close', '--id', 'tb101', '--confirmed', 'true'],
   ]);
   assert.equal(manifest.kind, 'throwaway');
-  assert.equal(manifest.tabs.length, 1);
+  assert.equal(manifest.folder, scratch);
+  assert.ok(existsSync(scratch));
+  assert.deepEqual(manifest.tabs, [{ tabId: 'tb103', name: 'Claude', role: 'claude' }]);
+  assert.deepEqual(box.state().spaces[0].tabs.map((tab) => tab.id), ['tb103']);
 });
 
 test('new throwaway invents a name when none is given', (t) => {

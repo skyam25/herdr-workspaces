@@ -11,11 +11,12 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, wri
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { readStdin } from "./stdin.mjs";
+
 // The timeout in hooks.json sits above this limit.
 const GIVE_UP_MINUTES = 30;
 const WAIT_MS = Number(process.env.HWS_ASK_WAIT_MS) || GIVE_UP_MINUTES * 60 * 1000;
 
-const STDIN_MS = 1000;
 const HC_MS = 2000;
 const POLL_MS = 250;
 const STATUS_EVERY = 4;
@@ -42,19 +43,6 @@ function quiet(action) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function readStdin() {
-  const chunks = [];
-  const finished = (async () => {
-    for await (const chunk of process.stdin) chunks.push(chunk);
-  })();
-
-  let timer;
-  await Promise.race([finished, new Promise((resolve) => (timer = setTimeout(resolve, STDIN_MS)))]);
-  clearTimeout(timer);
-
-  return Buffer.concat(chunks).toString("utf8");
-}
 
 // Returns the terminal's record, or null when hc fails or times out.
 function hcGet() {

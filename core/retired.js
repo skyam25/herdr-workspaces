@@ -1,16 +1,31 @@
 import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 import { writeJsonAtomic } from './manifest.js';
-import { retiredDir, retiredPath, transcriptPath } from './paths.js';
+import { retiredDir, retiredPath, stateRoot, transcriptPath } from './paths.js';
+import { placeOf } from './places.js';
 
 const MAX_PROMPT_CHARS = 2000;
 
-function modifiedAt(path) {
+export function modifiedAt(path) {
   try {
     return statSync(path).mtimeMs;
   } catch {
     return null;
   }
+}
+
+export function containsFile(dir) {
+  if (!dir || !existsSync(dir)) return false;
+  return readdirSync(dir).some((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? containsFile(path) : true;
+  });
+}
+
+// A path under the workspace store belongs to hws. Anything else is the user's.
+export function isStored(path) {
+  return Boolean(path) && path.startsWith(join(stateRoot(), 'workspaces') + sep);
 }
 
 const sessionIds = (manifest) => [...new Set(manifest.terminals.map((item) => item.sessionId).filter(Boolean))];
@@ -22,7 +37,7 @@ export function lastActiveAt(manifest) {
 }
 
 // Returns what the user typed, or nothing for slash commands and injected context.
-function typedPrompt(entry) {
+export function typedPrompt(entry) {
   if (entry.isMeta) return '';
   const content = entry.message?.content;
   const blocks = Array.isArray(content) ? content.filter((block) => block.type === 'text').map((block) => block.text) : [content ?? ''];
@@ -59,13 +74,14 @@ function sessionsOf(manifest) {
     .sort((a, b) => b.activeAt - a.activeAt);
 }
 
-// Writes the record that keeps a closed throwaway findable. A throwaway that
-// never ran a session and made nothing has nothing to find.
+// Writes the record that keeps a closed throwaway findable. A throwaway with
+// no session, no artifact and an empty scratch folder has nothing to find.
 export function recordRetired(manifest) {
   if (manifest.kind !== 'throwaway' || manifest.discarded) return;
   const sessions = sessionsOf(manifest);
   const artifacts = manifest.artifacts.filter((artifact) => existsSync(artifact.path));
-  if (sessions.length === 0 && artifacts.length === 0) return;
+  const scratch = placeOf(manifest, 'scratch').path;
+  if (sessions.length === 0 && artifacts.length === 0 && !containsFile(scratch)) return;
   writeJsonAtomic(retiredPath(manifest.id), {
     version: 1,
     id: manifest.id,
@@ -73,6 +89,7 @@ export function recordRetired(manifest) {
     folder: manifest.folder,
     createdAt: manifest.createdAt,
     closedAt: Date.now(),
+    scratch,
     sessions,
     artifacts,
   });

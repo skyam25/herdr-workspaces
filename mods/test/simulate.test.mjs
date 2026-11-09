@@ -20,11 +20,11 @@ const APP = {
   terminals: [{ terminal: "t13", tabId: "tb1", sessionId: null, role: "planner" }],
   surfaces: [{ id: "s1", type: "board", title: "flow", terminal: "t13", pane: "p9", socket: "/tmp/x", pid: 1 }],
   artifacts: [
-    { id: "old", type: "note", title: "older", path: "/art/old", prompt: "/art/old/prompt.md", fromTerminal: null, createdAt: 1000 },
-    { id: "new", type: "board", title: "newer", path: "/art/new", prompt: "/art/new/prompt.md", fromTerminal: "t13", createdAt: 2000 },
+    { id: "old", type: "note", title: "older", path: "/art/old", prompt: "/art/old/prompt.md", fromTerminal: null, createdAt: 1000, status: "current" },
+    { id: "new", type: "board", title: "newer", path: "/art/new", prompt: "/art/new/prompt.md", fromTerminal: "t13", createdAt: 2000, status: "current" },
   ],
 };
-const THROWAWAY = { ...APP, name: "scratch", kind: "throwaway", instructions: "", surfaces: [], artifacts: [] };
+const THROWAWAY = { ...APP, name: "scratch", kind: "throwaway", folder: "/state/workspaces/spc1/scratch", instructions: "", surfaces: [], artifacts: [] };
 const AGENT = { address: "t13", pane: "p1", space: "spc1", space_name: "x", tab: "tb1", tab_name: "Plan", status: "working", app: "claude-code", program: { key: "claude", name: "Claude Code" }, title: "t", seq: 1, pinned: false, focused: true };
 
 function inWorkspace(manifest = APP, extra = {}) {
@@ -452,12 +452,31 @@ test("a throwaway's close decision opens the dialog and Keep calls --keep", asyn
   assert.equal(spec.kind, "dialog");
   assert.equal(spec.props.view, "decide");
   assert.deepEqual(spec.props.artifacts, made);
+  assert.equal(spec.props.scratch, null);
 
   const d = await mount("hws-panel", { ...spec.props, overlay: "ov7" }, H);
   assert.match(d.text(), /sketch.*ideas/);
   await d.click("keep");
   assert.deepEqual(args(H).filter((a) => a[0] === "close").at(-1), ["close", "--workspace", "spc1", "--keep", "--json"]);
   assert.deepEqual(H.closed, ["ov7"]);
+});
+
+test("the close decision names the scratch folder, even with no artifacts", async () => {
+  const H = inWorkspace(THROWAWAY, { hws: { list: [THROWAWAY], close: { decision: "needed", artifacts: [], scratch: "/Users/me/.local/state/hws/workspaces/spc1/scratch" } } });
+  const m = await mount("hws-panel", {});
+  await m.click("close");
+  await m.click("close-yes");
+  const spec = H.overlays[0];
+  assert.equal(spec.props.scratch, "/Users/me/.local/state/hws/workspaces/spc1/scratch");
+  const d = await mount("hws-panel", { ...spec.props, overlay: "ov7" }, H);
+  assert.match(d.text(), /Scratch folder \| ~\/\.local\/state\/hws\/workspaces\/spc1\/scratch/);
+});
+
+test("the sidebar asks git about kept folders only", async () => {
+  const H = setup({ hws: { list: [APP, { ...THROWAWAY, id: "spc2", spaces: ["spc2"], folder: "/state/workspaces/spc2/scratch" }] }, spaces: [{ id: "spc1", active: true, tabs: [] }] });
+  await mount("hws-panel", { view: "sidebar" });
+  const gits = H.calls.filter((c) => c.command === "git");
+  assert.equal(gits.length, 1);
 });
 
 test("Trash calls --trash, and a failure stays in the dialog", async () => {
@@ -570,6 +589,374 @@ test("a hws failure on list shows the message", async () => {
   assert.match(m.text(), /state folder unreadable/);
 });
 
+// Context sections
+
+const ctx = await import("../hws-panel/context.js");
+
+const NOW = Date.now();
+const NOTE_PATH = "/Users/me/Projects/checkout/docs/NEXT-STEPS.md";
+const NOTE = [
+  "# Current",
+  "",
+  "## Now",
+  "- Boards open in their own window [commit:ba7d965abc]",
+  "",
+  "## Decisions in force",
+  "- 2026-11-04 Studio is removed [card:17] [session:abcdef1234567890]",
+  "",
+  "## Next",
+  "- Pick a panel treatment [file:docs/panel-options.md]",
+  "- See the bundle [artifact:new]",
+  "- Read the raw notes [file:notes/raw.txt]",
+].join("\n");
+const LINE = "Current is 3 sessions and 2 artifacts behind, last tidied Nov 3";
+const STATUS = {
+  tidiedAt: new Date(new Date(NOW).getFullYear(), 10, 3).getTime(),
+  stage: "deciding",
+  behind: { sessions: 3, artifacts: 2, commits: 0, cards: 0 },
+  items: [
+    { kind: "session", id: "abcdef1234567890", title: "Fix login", at: NOW - 120000, path: "/t.jsonl" },
+    { kind: "artifact", id: "new", title: "newer", at: NOW - 3600000, path: "/art/new" },
+    { kind: "card", id: "17", title: "Remove Studio", at: null, path: null },
+  ],
+  git: { repo: true, head: "abc", base: null, baseFound: false },
+  live: null,
+  places: { current: NOTE_PATH, artifacts: "/Users/me/Projects/checkout/.herdr-workspace/checkout-c1/artifacts", scratch: "/Users/me/Projects/checkout/.herdr-workspace/checkout-c1/scratch", decisions: "/Users/me/Projects/checkout/decisions", history: null, meetings: null },
+  writers: { current: null, artifacts: null, scratch: null, decisions: "pmos", history: null, meetings: null },
+  line: LINE,
+};
+const KEPT = {
+  ...APP,
+  stage: "deciding",
+  board: { space: "spb", tab: "tbb" },
+  places: { current: "docs/NEXT-STEPS.md", decisions: { path: "decisions", writer: "pmos" } },
+  terminals: [{ terminal: "t13", tabId: "tb1", sessionId: "live0000aaaa", role: "planner" }],
+  artifacts: [
+    { id: "old", type: "note", title: "older", path: "/art/old", prompt: "/art/old/prompt.md", createdAt: 1000, status: "superseded" },
+    { id: "new", type: "board", title: "newer", path: "/art/new", prompt: "/art/new/prompt.md", createdAt: 2000, status: "draft" },
+    { id: "doc", type: "file", title: "spec", path: "/Users/me/Projects/checkout/docs/spec.md", createdAt: 1500, status: "current" },
+  ],
+};
+
+function kept(extra = {}, answers = {}) {
+  const H = inWorkspace(KEPT, {
+    files: { [NOTE_PATH]: NOTE },
+    hws: {
+      list: [KEPT],
+      "tidy status": STATUS,
+      "tidy start": { terminal: "t20", started: true, packet: "/p.json" },
+      ...answers,
+    },
+    ...extra,
+  });
+  H.hcCalls = [];
+  return H;
+}
+
+test("freshness is fresh at zero, behind up to five and stale above", () => {
+  const at = (n, tidiedAt = 1) => ctx.freshness({ tidiedAt, behind: { sessions: n, artifacts: 0, commits: 0, cards: 0 } });
+  assert.deepEqual([at(0), at(1), at(5), at(6)], ["fresh", "behind", "behind", "stale"]);
+  assert.equal(at(0, null), "behind");
+  assert.equal(ctx.freshness({}), null);
+  assert.equal(ctx.freshness(null), null);
+});
+
+test("the counts line names every source", () => {
+  assert.equal(ctx.countsLine(STATUS.behind), "3 sessions · 2 artifacts · 0 commits · 0 cards");
+});
+
+test("note lines keep headings and bullets, pull out cites and stop at the first screen", () => {
+  const { lines, more } = ctx.noteLines(NOTE);
+  assert.equal(more, 0);
+  assert.deepEqual(lines[4], { kind: "bullet", text: "2026-11-04 Studio is removed", cites: [{ kind: "card", value: "17" }, { kind: "session", value: "abcdef1234567890" }] });
+  assert.equal(lines[1].kind, "heading");
+  const long = ctx.noteLines(Array.from({ length: 30 }, (_, i) => `- line ${i}`).join("\n"));
+  assert.equal(long.lines.length, ctx.NOTE_LINES);
+  assert.equal(long.more, 30 - ctx.NOTE_LINES);
+});
+
+test("backlog rows turn status items into cites", () => {
+  assert.deepEqual(ctx.backlogRow({ kind: "commit", id: "abc1234", title: "Fix it", at: 5, path: null }), { source: "commit", title: "Fix it", at: 5, cite: { kind: "commit", value: "abc1234" } });
+  assert.equal(ctx.backlogRow({ kind: "session", id: "abcdef123456", title: null }).title, "Session abcdef12");
+  assert.equal(ctx.backlogRow({ kind: "card", id: 9, title: "x" }).cite.value, "9");
+  assert.equal(ctx.backlogRow({ kind: "other", id: "x" }).cite, null);
+  assert.deepEqual(ctx.livePass({ live: { terminal: "t12", startedAt: 1 } }), { terminal: "t12", startedAt: 1 });
+  assert.equal(ctx.livePass({ live: null }), null);
+});
+
+test("superseded artifacts are held apart", () => {
+  const groups = ctx.artifactGroups(KEPT.artifacts);
+  assert.deepEqual(groups.shown.map((a) => a.id), ["new", "doc"]);
+  assert.deepEqual(groups.superseded.map((a) => a.id), ["old"]);
+});
+
+test("place rows cover every role, with defaults and other writers", () => {
+  const rows = ctx.placeRows(KEPT, STATUS);
+  assert.deepEqual(rows.map((r) => r.role), ctx.ROLES);
+  assert.deepEqual(rows[0], { role: "current", path: "docs/NEXT-STEPS.md", writer: null, resolved: NOTE_PATH });
+  assert.equal(rows.find((r) => r.role === "decisions").writer, "pmos");
+  assert.equal(rows.find((r) => r.role === "scratch").path, "");
+  assert.match(rows.find((r) => r.role === "scratch").resolved, /scratch$/);
+  assert.equal(ctx.placeRows({ places: {} }, { writers: { history: "pmos" } }).find((r) => r.role === "history").writer, "pmos");
+  assert.equal(ctx.placeRows({ places: { history: { path: "h", writer: "hws" } } }).find((r) => r.role === "history").writer, null);
+  assert.equal(ctx.placeRows(KEPT)[0].resolved, null);
+});
+
+test("the header shows the stage, the freshness line, Open current and Tidy", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  const text = m.text();
+  assert.match(text, /checkout demo \| deciding/);
+  assert.match(text, new RegExp(`${LINE}.*Open current.*Tidy`));
+  assert.deepEqual(args(H).filter((a) => a[0] === "tidy" || a[0] === "place"), [["tidy", "status", "--workspace", "spc1", "--json"]]);
+  await m.click("open-current");
+  assert.deepEqual(args(H).find((a) => a[0] === "surface"), ["surface", "open", "--type", "note", "--file", NOTE_PATH, "--terminal", "t13", "--json"]);
+  await m.click("tidy");
+  assert.deepEqual(args(H).find((a) => a[1] === "start"), ["tidy", "start", "--workspace", "spc1", "--json"]);
+  assert.match(m.text(), /Tidy started in t20\./);
+});
+
+test("the header reads unknown with no line, and Tidy again pokes a live pass", async () => {
+  kept({}, { "tidy status": { ...STATUS, line: null, live: { terminal: "t12", startedAt: 1, packet: "/p.json" } }, "tidy start": { terminal: "t12", started: false, packet: "/p.json" } });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /Freshness unknown/);
+  assert.match(m.text(), /Tidy again/);
+  assert.match(m.text(), /A tidy pass is running in t12/);
+  await m.click("tidy-live");
+  assert.deepEqual(globalThis.__herdr.runs.at(-1), { name: "agent.focus", args: { terminal: "t12" } });
+  await m.click("tidy");
+  assert.match(m.text(), /Asked the tidy pass in t12 to read the packet again/);
+});
+
+test("Open current waits for an agent and a path", async () => {
+  kept({ agents: [{ ...AGENT, focused: false }], focused: { space: "spc1", tab: "tb1", pane: "p2", terminal: null } });
+  const m = await mount("hws-panel", {});
+  assert.equal(m.clickable("open-current"), false);
+  assert.equal(m.clickable("tidy"), true);
+  kept({}, { "tidy status": { ...STATUS, places: { ...STATUS.places, current: null } } });
+  const none = await mount("hws-panel", {});
+  assert.equal(none.clickable("open-current"), false);
+  assert.match(none.text(), /No current note yet\./);
+});
+
+test("Current renders the note with a chip per cite", async () => {
+  kept();
+  const m = await mount("hws-panel", {});
+  const text = m.text();
+  assert.match(text, /Current.*Now.*Boards open in their own window \| ba7d965.*Studio is removed \| card 17 \| session abcdef12.*panel-options\.md.*newer.*raw\.txt/);
+  assert.equal(text.includes("[commit:"), false);
+});
+
+test("a missing note says so and names where Tidy writes it", async () => {
+  kept({ files: {} });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /No current note yet\. Tidy writes one at ~\/Projects\/checkout\/docs\/NEXT-STEPS\.md/);
+});
+
+test("a card cite opens the card dialog over the Board", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  await m.click("cite-4-0");
+  assert.deepEqual(H.runs.slice(-2), [{ name: "space.select", args: { id: "spb" } }, { name: "tab.select", args: { id: "tbb" } }]);
+  const spec = H.overlays.at(-1);
+  assert.equal(spec.mod, "hws-work");
+  assert.equal(spec.kind, "dialog");
+  assert.deepEqual(spec.props, { view: "todo", space: "spb", id: "17", height: spec.height });
+});
+
+test("a session cite resumes in a new tab, or focuses the session when it still runs", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  await m.click("cite-4-1");
+  assert.deepEqual(H.runs.at(-1), { name: "tab.new", args: { name: "Resume abcdef12", space: "spc1", folder: KEPT.folder, argv: ["claude", "--resume", "abcdef1234567890"] } });
+  const cites = await import("../hws-panel/cites.js");
+  cites.resumeSession("live0000aaaa", KEPT, "spc1");
+  assert.deepEqual(H.runs.at(-1), { name: "agent.focus", args: { terminal: "t13" } });
+});
+
+test("a commit cite copies the sha", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  await m.click("cite-2-0");
+  const copy = H.calls.at(-1);
+  assert.equal(copy.command, "sh");
+  assert.deepEqual(copy.args.slice(2), ["sh", "ba7d965abc"]);
+  assert.match(m.text(), /Copied ba7d965\./);
+});
+
+test("file and artifact cites open pages beside the agent and other files in macOS", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  await m.click("cite-6-0");
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), ["surface", "open", "--type", "page", "--file", "/Users/me/Projects/checkout/docs/panel-options.md", "--terminal", "t13", "--json"]);
+  await m.click("cite-8-0");
+  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/Users/me/Projects/checkout/notes/raw.txt"] });
+  await m.click("cite-7-0");
+  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/art/new"] });
+});
+
+test("a flipped agent's page opens beside its chat pane", async () => {
+  const H = kept({ terminals: [{ address: "t13", state: "live", labels: { "herdr.chat": "p7" } }] });
+  H.panes.push({ pane: "p7", terminal: null, tab: "tb1", mod: "hws-chat" });
+  const m = await mount("hws-panel", {});
+  await m.click("cite-6-0");
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1).slice(-5), ["--beside-pane", "p7", "--space", "spc1", "--json"]);
+});
+
+test("an unknown artifact cite shows the problem", async () => {
+  kept({ files: { [NOTE_PATH]: "- gone [artifact:zzz]" } });
+  const m = await mount("hws-panel", {});
+  await m.click("cite-0-0");
+  assert.match(m.text(), /No artifact zzz in this workspace/);
+});
+
+test("Since last tidy shows the counts and rows, and a row opens its cite", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /Since last tidy.*3 sessions · 2 artifacts · 0 commits · 0 cards.*session \| Fix login \| 2m ago.*artifact \| newer \| 1h ago.*card \| Remove Studio/);
+  await m.click("since-2");
+  assert.equal(H.overlays.at(-1).props.id, "17");
+});
+
+test("a long backlog folds after eight rows", async () => {
+  const items = Array.from({ length: 11 }, (_, i) => ({ kind: "commit", id: `sha${i}`, title: `Commit ${i}`, at: NOW, path: null }));
+  kept({}, { "tidy status": { ...STATUS, items } });
+  const m = await mount("hws-panel", {});
+  assert.equal(m.has("since-7"), true);
+  assert.equal(m.has("since-8"), false);
+  await m.click("since-more");
+  assert.equal(m.has("since-10"), true);
+});
+
+test("a failed tidy status leaves the rest of the panel working", async () => {
+  const H = kept({}, { "tidy status": { fail: "unknown command tidy" }, "place current": { role: "current", path: NOTE_PATH, writer: null } });
+  const m = await mount("hws-panel", {});
+  assert.deepEqual(args(H).find((a) => a[0] === "place"), ["place", "current", "--workspace", "spc1", "--json"]);
+  assert.match(m.text(), /Freshness unavailable\. unknown command tidy/);
+  assert.match(m.text(), /Freshness unknown/);
+  assert.match(m.text(), /Boards open in their own window/);
+});
+
+test("artifact rows carry a status chip and fold superseded ones", async () => {
+  kept();
+  const m = await mount("hws-panel", {});
+  const text = m.text();
+  assert.match(text, /newer \| draft.*spec \| current.*Show 1 superseded/);
+  assert.equal(m.has("terminal-old"), false);
+  await m.click("superseded-toggle");
+  assert.equal(m.has("terminal-old"), true);
+  assert.match(m.text(), /older \| superseded/);
+});
+
+test("Places shows a row per role and records an edit with hws set --place", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /Places.*current.*artifacts.*scratch.*decisions \| decisions \| written by pmos.*history.*meetings/);
+  const current = m.view.inputs["place-current"];
+  assert.equal(current.value(), "docs/NEXT-STEPS.md");
+  assert.equal(m.view.inputs["place-scratch"].placeholder, ctx.ROLE_DEFAULTS.scratch);
+  assert.equal(m.has("place-save-decisions"), false);
+
+  current.type("docs/NEXT-STEPS.md ", m.cx);
+  current.submit(m.cx);
+  await settle();
+  assert.equal(args(H).some((a) => a[0] === "set"), false);
+
+  current.type("docs/CURRENT.md", m.cx);
+  assert.equal(m.has("place-save-current"), true);
+  await m.click("place-save-current");
+  assert.deepEqual(args(H).find((a) => a[0] === "set"), ["set", "--workspace", "spc1", "--place", "current=docs/CURRENT.md", "--json"]);
+  assert.match(m.text(), /Saved the current place/);
+  assert.equal(m.has("place-save-current"), false);
+});
+
+test("a place another tool writes is read only, with its resolved path when the manifest has none", async () => {
+  kept({}, { list: [{ ...KEPT, places: { current: "docs/NEXT-STEPS.md" } }] });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /decisions \| ~\/Projects\/checkout\/decisions \| written by pmos/);
+  assert.equal(m.has("place-save-decisions"), false);
+});
+
+test("an emptied place field clears the role", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  m.view.inputs["place-current"].type("", m.cx);
+  assert.match(m.text(), /Clear/);
+  await m.click("place-save-current");
+  assert.deepEqual(args(H).find((a) => a[0] === "set"), ["set", "--workspace", "spc1", "--place", "current=", "--json"]);
+  assert.match(m.text(), /Cleared the current place/);
+});
+
+test("Enter in a place field saves it", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  m.render();
+  m.view.inputs["place-history"].type("docs/history", m.cx);
+  m.view.inputs["place-history"].submit(m.cx);
+  await settle();
+  assert.deepEqual(args(H).find((a) => a[0] === "set"), ["set", "--workspace", "spc1", "--place", "history=docs/history", "--json"]);
+});
+
+test("a place saved elsewhere replaces an untouched field and keeps an edit", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  m.render();
+  m.view.inputs["place-scratch"].type("mine", m.cx);
+  const moved = { ...KEPT, places: { ...KEPT.places, current: "NOW.md", scratch: "theirs" } };
+  H.hws.list = [moved];
+  await m.fireTimer(20000);
+  m.render();
+  assert.equal(m.view.inputs["place-current"].value(), "NOW.md");
+  assert.equal(m.view.inputs["place-scratch"].value(), "mine");
+});
+
+test("Suggest from folder pastes the prompt into the agent", async () => {
+  const H = kept();
+  const m = await mount("hws-panel", {});
+  await m.click("suggest-places");
+  assert.equal(H.hcCalls.length, 1);
+  const [verb, terminal, text] = H.hcCalls[0];
+  assert.deepEqual([verb, terminal], ["send", "t13"]);
+  assert.match(text, /propose a place map/);
+  assert.match(text, /hws set --place ROLE=PATH/);
+  assert.match(m.text(), /Asked t13 to propose places/);
+
+  kept({ agents: [{ ...AGENT, focused: false }], focused: { space: "spc1", tab: "tb1", pane: "p2", terminal: null } });
+  const none = await mount("hws-panel", {});
+  assert.equal(none.clickable("suggest-places"), false);
+});
+
+test("a throwaway shows its Record and Promote, and reads no freshness", async () => {
+  const record = { ...THROWAWAY, terminals: [{ terminal: "t13", tabId: "tb1", sessionId: "aaaabbbbcccc", role: null }], artifacts: [{ id: "a1", type: "note", title: "ideas", path: "/art/a1", createdAt: 1, status: "current" }] };
+  const H = inWorkspace(record, { hws: { list: [record] } });
+  const m = await mount("hws-panel", {});
+  const text = m.text();
+  assert.match(text, /Record.*Sessions.*t13 \| aaaabbbb.*Scratch folder.*\/state\/workspaces\/spc1\/scratch.*Artifacts.*ideas \| current.*Promote/);
+  assert.equal(text.includes("~/Projects/checkout"), false);
+  assert.equal(text.split("/state/workspaces/spc1/scratch").length, 2);
+  assert.equal(/Since last tidy|Places|Open current/.test(text), false);
+  assert.equal(args(H).some((a) => a[0] === "tidy" || a[0] === "place"), false);
+  assert.deepEqual(H.calls.find((c) => c.command === "test").args, ["-d", "/state/workspaces/spc1/scratch"]);
+  await m.click("open-scratch");
+  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/state/workspaces/spc1/scratch"] });
+  await m.click("session-aaaabbbbcccc");
+  assert.deepEqual(H.runs.at(-1), { name: "agent.focus", args: { terminal: "t13" } });
+});
+
+test("a reopened throwaway shows the scratch folder its Keep moved", async () => {
+  const reopened = { ...THROWAWAY, places: { scratch: "/Users/me/Documents/kept/scratch" } };
+  const H = inWorkspace(reopened, { hws: { list: [reopened] } });
+  await mount("hws-panel", {});
+  assert.deepEqual(H.calls.find((c) => c.command === "test").args, ["-d", "/Users/me/Documents/kept/scratch"]);
+});
+
+test("a throwaway with no scratch folder yet offers nothing to open", async () => {
+  inWorkspace(THROWAWAY, { hws: { list: [THROWAWAY] }, missingDirs: new Set(["/state/workspaces/spc1/scratch"]) });
+  const m = await mount("hws-panel", {});
+  assert.equal(m.has("open-scratch"), false);
+  assert.match(m.text(), /None recorded/);
+});
+
 // Brief
 
 const panelLayout = (panel, active) => ({ id: "root", children: [{ id: "panel", hidden: panel === "hidden", children: [{ id: "panel-body", active, children: [{ id: "outputs" }] }] }] });
@@ -618,7 +1005,7 @@ test("every element method used exists in gpui-kit.d.ts", () => {
 
 test("every herdr import exists in herdr.d.ts", () => {
   const types = readFileSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`, "utf8");
-  for (const file of ["../hws-new/main.js", "../hws-new/hws.js", "../hws-panel/main.js", "../hws-brief/main.js"]) {
+  for (const file of ["../hws-new/main.js", "../hws-new/hws.js", "../hws-panel/main.js", "../hws-panel/cites.js", "../hws-panel/sections.js", "../hws-panel/sidebar.js", "../hws-brief/main.js"]) {
     const names = /import \{([^}]*)\} from "herdr"/.exec(read(file))[1].split(",").map((s) => s.trim());
     for (const name of names) assert.match(types, new RegExp(`export function ${name}\\b`), `${file}: ${name}`);
   }
@@ -747,11 +1134,29 @@ test("the sidebar chevron folds spaces, resizes the block and remembers the choi
   assert.equal(again.has("sidebar-space-spc1"), false);
 });
 
+test("a kept workspace row carries a freshness dot and a throwaway's does not", async () => {
+  const other = { ...THROWAWAY, id: "spc2", spaces: ["spc2"] };
+  const fresh = { ...STATUS, behind: { sessions: 9, artifacts: 0, commits: 0, cards: 0 }, line: "Current is 9 sessions behind, last tidied Nov 3" };
+  const H = setup({ hws: { list: [APP, other], "tidy status": fresh }, spaces: [{ id: "spc1", active: true, tabs: [] }, { id: "spc2", active: false, tabs: [] }] });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.deepEqual(args(H).filter((a) => a[0] === "tidy"), [["tidy", "status", "--workspace", "spc1", "--json"]]);
+  assert.equal(m.has("sidebar-fresh-spc1"), true);
+  assert.equal(m.has("sidebar-fresh-spc2"), false);
+  assert.deepEqual(m.view.sidebar.fresh.spc1, { level: "stale", title: "Current is 9 sessions behind, last tidied Nov 3" });
+});
+
+test("the sidebar shows no dot when tidy status fails", async () => {
+  setup({ hws: { list: [APP], "tidy status": { fail: "unknown command" } }, spaces: [{ id: "spc1", active: true, tabs: [] }] });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.equal(m.has("sidebar-fresh-spc1"), false);
+  assert.match(m.text(), /checkout demo/);
+});
+
 test("the minus takes a space out of the workspace", async () => {
   const H = setup({ hws: { list: [GROUP] }, spaces: SPACED });
   const m = await mount("hws-panel", { view: "sidebar" });
   await m.click("sidebar-remove-spc3");
-  assert.deepEqual(args(H).at(-2), ["space", "remove", "--space", "spc3", "--json"]);
+  assert.deepEqual(args(H).find((a) => a[0] === "space"), ["space", "remove", "--space", "spc3", "--json"]);
   assert.equal(H.runs.some((r) => r.name === "space.select"), false);
 });
 

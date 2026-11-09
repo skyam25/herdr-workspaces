@@ -7,7 +7,7 @@ import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, lis
 import { withLock } from '../lock.js';
 import { manifestOfSpace, readManifest, writeJsonAtomic } from '../manifest.js';
 import { todosPath } from '../paths.js';
-import { requireFlag } from '../resolve.js';
+import { requireFlag, splitList } from '../resolve.js';
 import { agentArgv, agentModels } from '../settings.js';
 import { workerPrompt } from '../worker-prompt.js';
 
@@ -34,7 +34,7 @@ export function spaceOfTerminal(terminal) {
 }
 
 // An agent's card must reach its own board, so a set terminal never falls back to the selected space.
-export function resolveSpace(flags) {
+function callerSpace(flags) {
   if (flags.space) return flags.space;
   const terminal = process.env.HC_TERMINAL_ID;
   if (terminal) {
@@ -45,6 +45,17 @@ export function resolveSpace(flags) {
   const selected = windowStatus()?.space;
   if (!selected) throw new UsageError('pass --space, because the window has no selected space');
   return selected;
+}
+
+// The person keeps a list in a plain space, but agents use a Board only inside a workspace.
+export function requireWorkspace(space) {
+  if (!manifestOfSpace(space)) throw new HwsError(`agents can use the Board only inside a workspace, and space ${space} is not in one`);
+}
+
+function resolveSpace(flags) {
+  const space = callerSpace(flags);
+  if (process.env.HC_TERMINAL_ID) requireWorkspace(space);
+  return space;
 }
 
 // Spaces in a workspace share its board. A space that left a workspace it founded
@@ -141,6 +152,13 @@ function findChangeableItem(todos, id) {
   return item;
 }
 
+function findClaimableItem(todos, id) {
+  const item = findOpenItem(todos, id);
+  if (item.owner !== 'agent') throw new HwsError(`to-do ${id} is not assigned to an agent`);
+  if (item.column !== 'todo') throw new HwsError(`to-do ${id} is not in To do`);
+  return item;
+}
+
 // A reporting session becomes the card's link on the Board, and the first one stays.
 // Its session id is kept too, so the Board can resume it after the terminal ends.
 function changeOpenItem(space, id, changes, reported = false) {
@@ -205,8 +223,14 @@ function agentFields(owner) {
   return { addedBy: terminal, owner: owner === 'mine' ? 'mine' : 'unassigned' };
 }
 
-function claim(item, terminal, session) {
-  return Object.assign(item, { column: 'doing', terminal, note: '', updatedAt: Date.now() }, terminal === process.env.HC_TERMINAL_ID && session ? { session } : {});
+function claim(item, terminal, fields) {
+  return Object.assign(item, { column: 'doing', terminal, note: '', updatedAt: Date.now() }, fields);
+}
+
+// A claim made for another terminal says nothing about that terminal's session.
+function ownSession(terminal) {
+  const session = terminal === process.env.HC_TERMINAL_ID ? callerSession() : null;
+  return session ? { session } : {};
 }
 
 // Cards added together can share a createdAt, so the first in the file wins a tie.
@@ -223,11 +247,12 @@ function textToSend(item) {
 export function todoList(flags) {
   const space = resolveSpace(flags);
   const todos = readTodos(boardOf(space));
-  const open = todos.items.filter((item) => !item.archived).sort((a, b) => b.updatedAt - a.updatedAt);
+  const shown = todos.items.filter((item) => flags.archived || !item.archived).sort((a, b) => b.updatedAt - a.updatedAt);
 
   // An agent reading the board skips the reports, which can be long.
-  const items = process.env.HC_TERMINAL_ID && !flags.reports ? open.map(({ report, reportFrom, ...item }) => item) : open;
-  return { data: { items, orchestrator: orchestratorState(todos), spaces: manifestOfSpace(space)?.spaces ?? [space] } };
+  const items = process.env.HC_TERMINAL_ID && !flags.reports ? shown.map(({ report, reportFrom, ...item }) => item) : shown;
+  const manifest = manifestOfSpace(space);
+  return { data: { items, orchestrator: orchestratorState(todos), spaces: manifest?.spaces ?? [space], workspace: manifest?.id ?? null } };
 }
 
 function addTitles(flags) {
@@ -305,37 +330,26 @@ export function todoCapture(flags) {
   return { data: { captured: cards?.length ?? 0, closed } };
 }
 
-function pathsFrom(value) {
-  return (value ?? '').split(',').map((path) => path.trim()).filter(Boolean);
-}
-
 // Starts one worker on one or more ready cards and claims them for it.
 export function todoStart(flags) {
-  const ids = pathsFrom(requireFlag(flags, 'ids'));
+  const ids = splitList(requireFlag(flags, 'ids'));
   const folder = requireFlag(flags, 'folder');
   const orchestrator = process.env.HC_TERMINAL_ID;
   if (!orchestrator) throw new UsageError('run this inside the orchestrator terminal');
   const space = resolveSpace(flags);
   const board = boardOf(space);
   const todos = readTodos(board);
-  const items = ids.map((id) => {
-    const item = findOpenItem(todos, id);
-    if (item.owner !== 'agent') throw new HwsError(`to-do ${id} is not assigned to an agent`);
-    if (item.column !== 'todo') throw new HwsError(`to-do ${id} is not in To do`);
-    return item;
-  });
+  const items = ids.map((id) => findClaimableItem(todos, id));
   const worker = agentModels().worker;
   const packet = flags['packet-file'] ? readFileSync(flags['packet-file'], 'utf8') : '';
-  const hooks = worker.tool === 'claude';
-  const prompt = workerPrompt({ items, space, orchestrator, packet, owns: pathsFrom(flags.owns), avoid: pathsFrom(flags.avoid), hooks });
 
   // Naming Claude's session up front means a worker that dies early can still be resumed.
-  const sessionId = hooks ? randomUUID() : null;
-  const session = sessionId ? { tool: 'claude', id: sessionId, folder, model: worker.model, effort: worker.effort } : null;
+  const session = worker.tool === 'claude' ? { tool: 'claude', id: randomUUID(), folder, model: worker.model, effort: worker.effort } : null;
+  const prompt = workerPrompt({ items, space, orchestrator, packet, owns: splitList(flags.owns), avoid: splitList(flags.avoid), hooks: Boolean(session) });
   const name = `todo-${ids[0]}-${randomBytes(2).toString('hex')}`;
-  const started = startWorker({ name, label: `hws.todo=${ids.join(',')}`, cwd: folder, argv: [...agentArgv(worker), ...(sessionId ? ['--session-id', sessionId] : []), prompt] });
+  const started = startWorker({ name, label: `hws.todo=${ids.join(',')}`, cwd: folder, argv: [...agentArgv(worker), ...(session ? ['--session-id', session.id] : []), prompt] });
   updateTodos(board, (current) => {
-    for (const id of ids) Object.assign(claim(findOpenItem(current, id), started.address, null), { session });
+    for (const id of ids) claim(findOpenItem(current, id), started.address, { session });
   });
   return { data: { ...started, cards: ids, tool: worker.tool, model: worker.model } };
 }
@@ -347,10 +361,10 @@ export function todoNote(flags) {
 
 export function todoNext(flags) {
   const terminal = requireFlag(flags, 'terminal');
-  const session = callerSession();
+  const fields = ownSession(terminal);
   const item = updateTodos(resolveBoard(flags), (todos) => {
     const ready = oldestReady(todos.items);
-    return ready && claim(ready, terminal, session);
+    return ready && claim(ready, terminal, fields);
   });
   return { data: item };
 }
@@ -358,13 +372,8 @@ export function todoNext(flags) {
 export function todoClaim(flags) {
   const id = requireFlag(flags, 'id');
   const terminal = requireFlag(flags, 'terminal');
-  const session = callerSession();
-  const item = updateTodos(resolveBoard(flags), (todos) => {
-    const found = findOpenItem(todos, id);
-    if (found.owner !== 'agent') throw new HwsError(`to-do ${id} is not assigned to an agent`);
-    if (found.column !== 'todo') throw new HwsError(`to-do ${id} is not in To do`);
-    return claim(found, terminal, session);
-  });
+  const fields = ownSession(terminal);
+  const item = updateTodos(resolveBoard(flags), (todos) => claim(findClaimableItem(todos, id), terminal, fields));
   return { data: item };
 }
 
@@ -372,19 +381,18 @@ export function todoClaim(flags) {
 export function todoSend(flags) {
   const id = requireFlag(flags, 'id');
   const terminal = requireFlag(flags, 'terminal');
-  const space = resolveBoard(flags);
-  const item = findChangeableItem(readTodos(space), id);
+  const space = resolveSpace(flags);
+  requireWorkspace(space);
+  const board = boardOf(space);
+  const item = findChangeableItem(readTodos(board), id);
   if (item.owner !== 'agent') refuseAgentAssigning(id);
   if (!isTerminalAlive(terminal)) throw new HwsError(`terminal ${terminal} is not live`);
   sendText(terminal, textToSend(item));
-  return { data: changeOpenItem(space, id, { terminal, column: 'doing', owner: 'agent', session: sessionOfTerminal(terminal) }) };
+  return { data: changeOpenItem(board, id, { terminal, column: 'doing', owner: 'agent', session: sessionOfTerminal(terminal) }) };
 }
 
-// A closed session comes back with the person's words as its next message, so the window stays put.
-function reopenWith(space, terminal, title, session, text) {
-  if (!session) throw new HwsError(`terminal ${terminal} is not live`);
-  const opened = keepingSelection(() => act('tab.new', { name: title.slice(0, 40), space, folder: session.folder, argv: resumeArgv(session, text) }));
-  return opened.terminal;
+function openSessionTab(space, title, session, text) {
+  return act('tab.new', { name: title.slice(0, 40), space, folder: session.folder, argv: resumeArgv(session, text) }).terminal;
 }
 
 // The send outlasts the lock's stale limit, so it runs outside the lock.
@@ -392,12 +400,17 @@ export function todoReply(flags) {
   const id = requireFlag(flags, 'id');
   const text = textFrom(flags);
   const space = resolveSpace(flags);
+  requireWorkspace(space);
   const board = boardOf(space);
   const { title, terminal, note, replies, session } = findChangeableItem(readTodos(board), id);
   if (!terminal && !session) throw new HwsError(`to-do ${id} has no terminal`);
   const reply = { question: note, answer: text, at: Date.now() };
-  const reached = terminal && isTerminalAlive(terminal) ? terminal : reopenWith(space, terminal, title, session, text);
-  if (reached === terminal) sendText(terminal, text);
+  const alive = terminal && isTerminalAlive(terminal);
+  if (!alive && !session) throw new HwsError(`terminal ${terminal} is not live`);
+  if (alive) sendText(terminal, text);
+
+  // A closed session comes back with the person's words as its next message, so the window stays put.
+  const reached = alive ? terminal : keepingSelection(() => openSessionTab(space, title, session, text));
   return { data: changeOpenItem(board, id, { terminal: reached, note: '', column: 'doing', replies: [...replies, reply] }) };
 }
 
@@ -423,11 +436,12 @@ export function todoStatus(flags) {
 export function todoResume(flags) {
   const id = requireFlag(flags, 'id');
   const space = resolveSpace(flags);
+  requireWorkspace(space);
   const board = boardOf(space);
   const item = findChangeableItem(readTodos(board), id);
   if (!item.session) throw new HwsError(`to-do ${id} has no saved session`);
   if (item.terminal && isTerminalAlive(item.terminal)) throw new HwsError(`to-do ${id} still has a live session`);
-  const { terminal } = act('tab.new', { name: item.title.slice(0, 40), space, folder: item.session.folder, argv: resumeArgv(item.session) });
+  const terminal = openSessionTab(space, item.title, item.session);
   return { data: changeOpenItem(board, id, { terminal }) };
 }
 

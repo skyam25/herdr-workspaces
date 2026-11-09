@@ -13,7 +13,29 @@ const SUMMARY = join(ROOT, "scripts", "workspace-summary.sh");
 
 const LINE = "This session is in the app workspace checkout demo at /tmp/checkout.";
 const MANIFEST = '{"version":1,"name":"checkout demo","kind":"app"}';
-const STDIN = JSON.stringify({ session_id: "sess-1", hook_event_name: "SessionStart" });
+const FOLDER = "/tmp/checkout";
+const STDIN = JSON.stringify({ session_id: "sess-1", hook_event_name: "SessionStart", cwd: FOLDER });
+
+const PLACES = {
+  current: `${FOLDER}/docs/NEXT-STEPS.md`,
+  artifacts: `${FOLDER}/docs`,
+  scratch: `${FOLDER}/.herdr-workspace/checkout-1234/scratch`,
+  decisions: null,
+  history: null,
+  meetings: null,
+};
+const PLACES_SENTENCE =
+  "Artifacts land in docs/, drafts in .herdr-workspace/checkout-1234/scratch/, the current note is docs/NEXT-STEPS.md.";
+const FRESHNESS = "Current is 3 sessions and 2 artifacts behind, last tidied Nov 3.";
+
+// A fake `hws tidy status --json` body with the given places and line.
+function status({ places = PLACES, line = FRESHNESS } = {}) {
+  const body = { tidiedAt: null, stage: null, behind: { sessions: 3, artifacts: 2, commits: 0, cards: 0 }, items: [], live: false, places, line };
+  return `echo '${JSON.stringify(body)}'`;
+}
+
+const REGISTER = "bin register --terminal t13 --session sess-1 --json";
+const WORKSPACE_CALLS = [REGISTER, "bin current --line", "bin tidy status --json"].sort();
 
 let dir;
 let home;
@@ -35,7 +57,15 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 // Writes a stub hws that logs its arguments, then runs the case body for its subcommand.
-function stub(folder, { register = "echo '{}'", current = `echo '${LINE}'`, json = `echo '${MANIFEST}'` } = {}) {
+function stub(
+  folder,
+  {
+    register = "echo '{}'",
+    current = `echo '${LINE}'`,
+    json = `echo '${MANIFEST}'`,
+    tidy = ":",
+  } = {},
+) {
   mkdirSync(folder, { recursive: true });
   const path = join(folder, "hws");
 
@@ -46,6 +76,7 @@ echo "$(basename "$(dirname "$0")") $*" >> "${log}"
 case "$1 $2" in
   "current --line") ${current} ;;
   "current --json") ${json} ;;
+  "tidy status") ${tidy} ;;
   register*) ${register} ;;
 esac
 `,
@@ -68,8 +99,9 @@ function run(script, { input = STDIN, terminal = "t13", path = `${nodeBin}:/usr/
   return { ...result, elapsed: Date.now() - started };
 }
 
+// Sorted, because the hook runs its calls in parallel.
 function calls() {
-  return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+  return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").sort() : [];
 }
 
 function assertSilent(result) {
@@ -100,7 +132,70 @@ describe("session-start hook", () => {
     assert.deepEqual(JSON.parse(result.stdout), {
       hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: LINE },
     });
-    assert.deepEqual(calls(), ["bin register --terminal t13 --session sess-1 --json", "bin current --line"]);
+    assert.deepEqual(calls(), WORKSPACE_CALLS);
+  });
+
+  it("adds the places and freshness sentences after the line", () => {
+    homeStub({ tidy: status() });
+
+    assert.equal(contextOf(run(HOOK)), `${LINE} ${PLACES_SENTENCE} ${FRESHNESS}`);
+  });
+
+  it("keeps the task list paragraph after the new sentences", () => {
+    homeStub({ tidy: status() });
+
+    const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
+    assert.ok(context.startsWith(`${LINE} ${PLACES_SENTENCE} ${FRESHNESS}\n\n`));
+    assertTaskList(context);
+  });
+
+  it("names only the places that are set", () => {
+    homeStub({ tidy: status({ places: { ...PLACES, artifacts: null, current: "/elsewhere/CURRENT.md" }, line: "" }) });
+
+    assert.equal(
+      contextOf(run(HOOK)),
+      `${LINE} Drafts land in .herdr-workspace/checkout-1234/scratch/, the current note is /elsewhere/CURRENT.md.`,
+    );
+  });
+
+  it("gives the freshness line alone when no place is set", () => {
+    homeStub({ tidy: status({ places: { current: null, artifacts: null, scratch: null } }) });
+    assert.equal(contextOf(run(HOOK)), `${LINE} ${FRESHNESS}`);
+  });
+
+  for (const [name, tidy] of [
+    ["status prints nothing", ":"],
+    ["places and line are empty", status({ places: {}, line: "" })],
+    ["places is null and line is missing", `echo '{"places":null}'`],
+    ["status fails", "echo oops >&2; exit 1"],
+    ["status prints malformed JSON", "echo '{not json'"],
+  ]) {
+    it(`leaves out the new sentences when ${name}`, () => {
+      homeStub({ tidy });
+      assert.equal(contextOf(run(HOOK)), LINE);
+    });
+  }
+
+  it("skips tidy status outside a workspace", () => {
+    homeStub({ current: ":", tidy: status() });
+
+    assertSilent(run(HOOK));
+    assert.deepEqual(calls(), [REGISTER, "bin current --line"].sort());
+  });
+
+  it("never calls hws place, which creates folders", () => {
+    homeStub({ tidy: status() });
+    run(HOOK);
+
+    assert.ok(!calls().some((call) => call.startsWith("bin place")));
+  });
+
+  it("returns the line when tidy status hangs", () => {
+    homeStub({ tidy: "sleep 8" });
+    const result = run(HOOK);
+
+    assert.equal(contextOf(result), LINE);
+    assert.ok(result.elapsed < 4000, `took ${result.elapsed}ms`);
   });
 
   it("adds the task list paragraph after the line in a Herdr app terminal", () => {
@@ -111,12 +206,9 @@ describe("session-start hook", () => {
     assertTaskList(context);
   });
 
-  it("gives the task list paragraph outside a workspace in a Herdr app terminal", () => {
+  it("stays silent about the task list outside a workspace in a Herdr app terminal", () => {
     homeStub({ current: ":" });
-    const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
-
-    assert.ok(context.startsWith("This Herdr workspace or space"));
-    assertTaskList(context);
+    assertSilent(run(HOOK, { bundle: HERDR_APP }));
   });
 
   it("leaves out the paragraph in another app's terminal", () => {
@@ -156,7 +248,7 @@ describe("session-start hook", () => {
 
     assert.equal(result.status, 0);
     assert.equal(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, LINE);
-    assert.deepEqual(calls(), ["bin register --terminal t13 --session sess-1 --json", "bin current --line"]);
+    assert.deepEqual(calls(), WORKSPACE_CALLS);
   });
 
   it("stays silent when current fails", () => {
@@ -191,7 +283,7 @@ describe("session-start hook", () => {
     stub(join(dir, "elsewhere"));
     run(HOOK, { path: `${join(dir, "elsewhere")}:${nodeBin}:/usr/bin:/bin` });
 
-    assert.deepEqual(calls().map((call) => call.split(" ")[0]), ["bin", "bin"]);
+    assert.deepEqual(new Set(calls().map((call) => call.split(" ")[0])), new Set(["bin"]));
   });
 
   it("falls back to PATH", () => {
@@ -199,7 +291,7 @@ describe("session-start hook", () => {
     const result = run(HOOK, { path: `${join(dir, "elsewhere")}:${nodeBin}:/usr/bin:/bin` });
 
     assert.equal(JSON.parse(result.stdout).hookSpecificOutput.additionalContext, LINE);
-    assert.deepEqual(calls().map((call) => call.split(" ")[0]), ["elsewhere", "elsewhere"]);
+    assert.deepEqual(new Set(calls().map((call) => call.split(" ")[0])), new Set(["elsewhere"]));
   });
 
   it("sets a timeout above the script's own limits", () => {

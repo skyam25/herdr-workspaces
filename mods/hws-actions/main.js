@@ -10,8 +10,8 @@ import { openBoard } from "./board.js";
 
 // One shell runs the chooser and the open, because the popup can close while the chooser has
 // focus and an exec already started keeps running. Error -128 means the person cancelled.
-const REVIEW_PAGE = `
-f=$(osascript -e activate -e 'POSIX path of (choose file of type {"html", "htm", "md"} with prompt "Review a page")' 2>&1)
+const chooseThenRun = (types, prompt, command) => `
+f=$(osascript -e activate -e 'POSIX path of (choose file of type {${types}} with prompt "${prompt}")' 2>&1)
 if [ $? -ne 0 ]; then
   case "$f" in *-128*) exit 0 ;; esac
   echo "Couldn't open the file chooser." >&2
@@ -19,8 +19,11 @@ if [ $? -ne 0 ]; then
 fi
 h="$HOME/.local/bin/hws"
 [ -x "$h" ] || h=hws
-exec "$h" surface open --type page --file "$f" "$@"
+exec "$h" ${command} "$@"
 `;
+
+const REVIEW_PAGE = chooseThenRun('"html", "htm", "md"', "Review a page", 'surface open --type page --file "$f"');
+const SEND_TO_PHONE = chooseThenRun('"html", "htm", "excalidraw"', "Send to phone", 'phone send "$f"');
 
 function showPanel(view) {
   run("layout.select", { stack: "panel-body", child: view });
@@ -59,6 +62,12 @@ export default class Actions extends View {
     if (r.code !== 0) throw new Error(r.stderr.trim() || "Couldn't open that page.");
   }
 
+  async sendToPhone() {
+    const p = props();
+    const r = await exec("sh", ["-c", SEND_TO_PHONE, "hws-actions", "--terminal", p.terminal, ...(p.space ? ["--space", p.space] : [])]);
+    if (r.code !== 0) throw new Error(r.stderr.trim() || "Couldn't send that file.");
+  }
+
   boardRows(boards) {
     return boards.flatMap((b, i) => [
       { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${b.title}`, icon: "sketch", divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
@@ -73,6 +82,8 @@ export default class Actions extends View {
       { id: "write", name: "Write", icon: "write", work: () => this.openSurface("note") },
       ...(p.lastReply ? [{ id: "write-reply", name: "Write from last reply", icon: "reply", work: () => this.writeFromReply(p.lastReply) }] : []),
       { id: "review", name: "Review a page…", icon: "review", work: () => this.reviewPage() },
+      { id: "phone-send", name: "Send to phone…", icon: "phone", work: () => this.sendToPhone() },
+      { id: "phone-pair", name: "Pair phone", icon: "phone", work: () => hws(["phone", "pair"]) },
       ...(p.chat ? [{ id: "attach", name: "Attach file…", icon: "attach", work: () => setShared("hws-chat.attach", { pane: p.pane, at: Date.now() }) }] : []),
       { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: openBoard },
       { id: "outputs", name: "Outputs", icon: "outputs", work: () => showPanel("outputs") },

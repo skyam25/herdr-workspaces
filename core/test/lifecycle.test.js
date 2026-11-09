@@ -59,7 +59,7 @@ test('close on a throwaway with artifacts asks and closes nothing', (t) => {
   const box = sandbox(t);
   const { manifest, artifact } = throwawayWithArtifact(box);
   const result = box.json(['close', '--workspace', manifest.id]);
-  assert.deepEqual(result, { decision: 'needed', artifacts: [artifact] });
+  assert.deepEqual(result, { decision: 'needed', artifacts: [artifact], scratch: null });
   assert.deepEqual(box.actions(), []);
   assert.ok(existsSync(artifact.path));
   assert.ok(box.manifest(manifest.id));

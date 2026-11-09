@@ -1,11 +1,13 @@
 import { parseArgs } from 'node:util';
 
-import { artifactList, artifactTerminal, link } from './commands/artifact.js';
+import { artifactAdd, artifactList, artifactSet, artifactTerminal, link } from './commands/artifact.js';
 import { current, list, parent, register } from './commands/info.js';
-import { close, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
+import { close, place, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
 import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
+import { phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop } from './commands/phone.js';
 import { find, reopen } from './commands/retired.js';
+import { tidyApply, tidyStart, tidyStatus, tidyStop } from './commands/tidy.js';
 import { boardAdd, boardOpen, spaceAdd, spaceMove, spaceRemove } from './commands/spaces.js';
 import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceOpen, surfaceResume, surfaceSocket } from './commands/surface.js';
 import {
@@ -29,6 +31,7 @@ import { UsageError } from './errors.js';
 
 const text = { type: 'string' };
 const flag = { type: 'boolean' };
+const repeated = { type: 'string', multiple: true };
 
 const ROUTES = [
   { path: ['new', 'terminal'], run: newTerminal, prunes: true, options: { folder: text } },
@@ -67,10 +70,18 @@ const ROUTES = [
   { path: ['surface', 'resume'], run: surfaceResume, options: { id: text } },
   { path: ['surface', 'discard'], run: surfaceDiscard, options: { id: text } },
   { path: ['surface', 'socket'], run: surfaceSocket, options: { terminal: text, title: text } },
+  { path: ['phone', 'pair'], run: phonePair, options: { tab: flag } },
+  { path: ['phone', 'send'], run: phoneSend, options: { prompt: text, terminal: text, space: text }, positionals: 1 },
+  { path: ['phone', 'status'], run: phoneStatus, options: {} },
+  { path: ['phone', 'forget'], run: phoneForget, options: {}, positionals: 1 },
+  { path: ['phone', 'stop'], run: phoneStop, options: {} },
+  { path: ['phone', 'deliver'], run: phoneDeliver, options: { send: text, bundle: text } },
   { path: ['artifact', 'list'], run: artifactList, options: { workspace: text } },
   { path: ['artifact', 'terminal'], run: artifactTerminal, options: {}, positionals: 1 },
+  { path: ['artifact', 'set'], run: artifactSet, options: { status: text, supersedes: text }, positionals: 1 },
+  { path: ['artifact', 'add'], run: artifactAdd, options: { file: text, title: text, workspace: text } },
   { path: ['link'], run: link, options: {}, positionals: 1 },
-  { path: ['todo', 'list'], run: todoList, options: { reports: flag, space: text } },
+  { path: ['todo', 'list'], run: todoList, options: { archived: flag, reports: flag, space: text } },
   {
     path: ['todo', 'add'],
     run: todoAdd,
@@ -102,7 +113,16 @@ const ROUTES = [
     run: promote,
     options: { name: text, folder: text, kind: text, workspace: text },
   },
-  { path: ['set'], run: setWorkspace, options: { workspace: text, kind: text, instructions: text } },
+  {
+    path: ['set'],
+    run: setWorkspace,
+    options: { workspace: text, kind: text, instructions: text, stage: text, place: repeated, writer: repeated },
+  },
+  { path: ['place'], run: place, options: { workspace: text }, positionals: 1 },
+  { path: ['tidy', 'status'], run: tidyStatus, options: { workspace: text, line: flag } },
+  { path: ['tidy', 'start'], run: tidyStart, options: { workspace: text } },
+  { path: ['tidy', 'apply'], run: tidyApply, options: { file: text, skip: text, workspace: text } },
+  { path: ['tidy', 'stop'], run: tidyStop, options: { workspace: text } },
   { path: ['parent'], run: parent, options: {} },
   { path: ['close'], run: close, prunes: true, options: { workspace: text, keep: flag, trash: flag } },
   { path: ['resume'], run: resume, options: { workspace: text } },

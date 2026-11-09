@@ -24,7 +24,7 @@ export const MODEL_CATALOG = {
   },
 };
 
-const DEFAULT_MODELS = {
+export const DEFAULT_MODELS = {
   orchestrator: { tool: 'claude', model: 'opus', effort: 'high' },
   worker: { tool: 'claude', model: 'sonnet', effort: 'medium' },
 };
@@ -43,6 +43,12 @@ function writeSettings(changes) {
 }
 
 const remembered = () => readSettings().parent;
+
+// The user's default place map for kept workspaces. Roles the manifest leaves out fall back to it.
+export function defaultPlaces() {
+  const places = readSettings().places;
+  return places && typeof places === 'object' ? places : {};
+}
 
 export function agentModels() {
   const saved = readSettings().models ?? {};

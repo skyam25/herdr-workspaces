@@ -9,7 +9,8 @@ import { imageRefs } from '../shared/drafts';
 import { annotationsAsk, annotationsMarkdown } from '../shared/annotations';
 import { outlinePathFor } from '../shared/outline';
 import { outlineEditsAsk, outlineFeedbackAsk } from '../shared/outline-prompts';
-import { commentCount, editCount, reviewAsk, reviewMarkdown } from '../shared/review';
+import type { Outgoing } from '../shared/ipc';
+import { cleanReview, commentCount, editCount, reviewAsk, reviewMarkdown } from '../shared/review';
 import type { DeliveryInput } from './contract';
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
@@ -84,6 +85,14 @@ export function cleanSourcePath(raw: unknown): string | undefined {
   return path;
 }
 
+/** A Send's review, checked. Its path must be one the prompt may name. */
+export function reviewOf(p: Outgoing): DeliveryInput['review'] {
+  const review = p.review && cleanReview(p.review);
+  if (!review || !cleanSourcePath(review.path)) return undefined;
+  const body = typeof p.review?.body === 'string' ? p.review.body : undefined;
+  return { ...review, ...(body?.trim() ? { body } : {}) };
+}
+
 /**
  * The ask line for comments on `path` when the file has an outline in `cwd`, so Claude revises
  * the outline first. Undefined when there is no outline or no project folder to look in.
@@ -122,6 +131,7 @@ function annotationsWhat(a: NonNullable<DeliveryInput['annotations']>): string {
 /**
  * The prompt Claude Code receives. A written draft goes first, word for word, then the sketch lines.
  * A draft opened from a project file is not repeated. Its lines point at draft.md and ask Claude to apply it to the file.
+ * One sent back unedited says only that, so a review with no changes reads as a review.
  * A review's lines point at review.md instead. A draft with comments on its passages points at draft.md and annotations.md.
  * Comments on a file with an outline in `cwd` ask Claude to revise the outline and propose a direction instead.
  */
@@ -132,6 +142,8 @@ export function buildDraft(id: string, input: DeliveryInput, cwd?: string): stri
     ? [`@${rel}/review.md`, reviewOutlineAsk(cwd, input.review) ?? reviewAsk(input.review)]
     : input.annotations
       ? [`@${rel}/draft.md`, `@${rel}/annotations.md`, outlineAsk(cwd, source, annotationsWhat(input.annotations)) ?? annotationsAsk(input.annotations, source)]
+      : source && input.sourceUnchanged
+      ? [`I reviewed ${source} in Agent Brief and changed nothing.`]
       : source
       ? [`@${rel}/draft.md`, `My edited copy of ${source} from Agent Brief. Apply the changes to ${source}, keep what I did not touch, then say what changed.`]
       : undefined;

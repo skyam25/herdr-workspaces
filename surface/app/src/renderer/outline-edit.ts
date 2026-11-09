@@ -160,10 +160,10 @@ export function leavesRow(dir: -1 | 1, tops: { caret: number; first: number; las
 }
 
 /** A note's line about the file it came from. With an outline, Send revises the outline first. */
-export function sourceLine(path: string, outline?: string): string {
+export function sourceLine(path: string, outline?: string, action = 'Send'): string {
   return outline
-    ? `From ${path}. Send folds your comments into ${outline} first, and Claude proposes a direction there.`
-    : `From ${path}. Send asks Claude to apply your changes to the file.`;
+    ? `From ${path}. ${action} folds your comments into ${outline} first, and Claude proposes a direction there.`
+    : `From ${path}. ${action} asks Claude to apply your changes to the file.`;
 }
 
 /** The direction banner's change lines shown before Show more. */

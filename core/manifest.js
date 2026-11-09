@@ -5,22 +5,31 @@ import { HwsError } from './errors.js';
 import { withLock } from './lock.js';
 import { STANDALONE, home, manifestPath, stateRoot } from './paths.js';
 
+// Marks a tidy pass's terminal and the review it saves. Neither counts as stream work.
+export const TIDY_ROLE = 'tidy';
+
 // A manifest written before workspaces held several spaces has only its own space.
+// An artifact written before statuses existed counts as current.
 export function readManifest(id) {
   try {
     const manifest = JSON.parse(readFileSync(manifestPath(id), 'utf8'));
     manifest.spaces ??= manifest.id === STANDALONE ? [] : [manifest.id];
+    for (const artifact of manifest.artifacts ?? []) artifact.status ??= 'current';
     return manifest;
   } catch {
     return null;
   }
 }
 
-export function writeJsonAtomic(target, value) {
+export function writeTextAtomic(target, text) {
   mkdirSync(dirname(target), { recursive: true });
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`);
+  writeFileSync(temp, text);
   renameSync(temp, target);
+}
+
+export function writeJsonAtomic(target, value) {
+  writeTextAtomic(target, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function writeAtomic(manifest) {

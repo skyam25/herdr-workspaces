@@ -3,7 +3,7 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { buildDraft, cleanSourcePath, freeId, rewriteImages, writeBundle } from '../server/bundle';
+import { buildDraft, cleanSourcePath, freeId, reviewOf, rewriteImages, writeBundle } from '../server/bundle';
 import type { CompanionServer, DeliveryInput } from '../server/contract';
 import { feedbackDir, tidyFeedback } from '../server/feedback-dir';
 import { isTextPayload, type Launcher, type Outgoing, type SendPayload, type SendResult } from '../shared/ipc';
@@ -42,14 +42,6 @@ export function rememberProjects(state: StateFile, cwds: string[]): void {
   if (next.join('\n') !== prev.join('\n')) state.update({ recentProjects: next });
 }
 
-/** A Send's review, checked. Its path must be one the prompt may name. */
-function reviewOf(p: Outgoing): DeliveryInput['review'] {
-  const review = p.review && cleanReview(p.review);
-  if (!review || !cleanSourcePath(review.path)) return undefined;
-  const body = typeof p.review?.body === 'string' ? p.review.body : undefined;
-  return { ...review, ...(body?.trim() ? { body } : {}) };
-}
-
 /** A Send's comments on passages of its draft, checked, with the note's name. */
 function annotationsOf(p: Outgoing): DeliveryInput['annotations'] {
   const annotations = cleanAnnotations(p.annotations);
@@ -60,7 +52,7 @@ function annotationsOf(p: Outgoing): DeliveryInput['annotations'] {
 }
 
 /** The delivery fields a draft adds: its pictures, the file it copies, its review, and its comments. */
-function draftFields(p: Outgoing): Pick<DeliveryInput, 'images' | 'sourcePath' | 'review' | 'annotations'> {
+function draftFields(p: Outgoing): Pick<DeliveryInput, 'images' | 'sourcePath' | 'sourceUnchanged' | 'review' | 'annotations'> {
   const images = deliveryImages(p.images);
   const sourcePath = cleanSourcePath(p.sourcePath);
   const review = reviewOf(p);
@@ -68,6 +60,7 @@ function draftFields(p: Outgoing): Pick<DeliveryInput, 'images' | 'sourcePath' |
   return {
     ...(images.length ? { images } : {}),
     ...(sourcePath ? { sourcePath } : {}),
+    ...(sourcePath && p.sourceUnchanged ? { sourceUnchanged: true } : {}),
     ...(review ? { review } : {}),
     ...(annotations ? { annotations } : {}),
   };

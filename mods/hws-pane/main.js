@@ -29,7 +29,7 @@ let boardsJson = "";
 let resuming = false;
 
 const hws = (args) => exec(`${home()}/.local/bin/hws`, [...args, "--json"]);
-const boardsOf = (terminal) => [shared(BOARDS)].flat().filter((b) => b?.terminal === terminal);
+const boardsOf = (terminal) => (shared(BOARDS) ?? []).filter((b) => b.terminal === terminal);
 
 // One header copy reads the list, and shared state carries it to the others.
 async function refreshBoards() {

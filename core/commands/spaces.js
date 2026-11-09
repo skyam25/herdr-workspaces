@@ -74,22 +74,24 @@ export function spaceRemove(flags) {
   return { data: { workspace: manifest.id, space: space.id }, text: `removed ${space.name} from ${manifest.name}` };
 }
 
-function openBoardSpace(manifest) {
-  const opened = act('space.new', { name: 'Board', folder: manifest.folder });
-  return { space: opened.space, shellTab: opened.tab };
+// Returns the recorded Board's open space, and whether its tab still exists.
+function liveBoard(manifest) {
+  const open = requireLive().spaces.find((item) => item.id === manifest.board?.space);
+  return { open, hasBoard: Boolean(open?.tabs.some((tab) => tab.id === manifest.board.tab)) };
 }
 
 function ensureBoard(id) {
   const manifest = readManifest(id);
-  const open = requireLive().spaces.find((item) => item.id === manifest.board?.space);
-  if (open?.tabs.some((tab) => tab.id === manifest.board.tab)) return manifest.board;
+  const { open, hasBoard } = liveBoard(manifest);
+  if (hasBoard) return manifest.board;
 
-  const { space, shellTab } = open ? { space: open.id } : openBoardSpace(manifest);
+  const fresh = open ? null : act('space.new', { name: 'Board', folder: manifest.folder });
+  const space = open?.id ?? fresh.space;
   const openBoard = () => act('tab.new', { name: BOARD_TAB, space, mod: 'hws-work', props: { view: 'tasks' } });
 
   // An agent adding a Board must not take the window from the person.
   const { tab } = process.env.HC_TERMINAL_ID ? keepingSelection(openBoard) : openBoard();
-  if (shellTab) act('tab.close', { id: shellTab, confirmed: true });
+  if (fresh) act('tab.close', { id: fresh.tab, confirmed: true });
   const board = { space, tab };
   updateManifest(id, (draft) => {
     draft.board = board;
@@ -109,8 +111,7 @@ export function boardAdd(flags) {
 export function boardOpen(flags) {
   const manifest = manifestOfSpace(requireFlag(flags, 'space'));
   if (!manifest) return { data: { workspace: null }, text: 'this space is not in a workspace' };
-  const open = requireLive().spaces.find((item) => item.id === manifest.board?.space);
-  const hasBoard = open?.tabs.some((tab) => tab.id === manifest.board.tab);
+  const { hasBoard } = liveBoard(manifest);
   const board = hasBoard ? manifest.board : { space: null, tab: null };
   return { data: { workspace: manifest.id, ...board }, text: hasBoard ? `Board is space ${board.space}` : `${manifest.name} has no Board` };
 }

@@ -5,9 +5,12 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, panes, spaces, focused, props, exec, theme, run, openOverlay, closeOverlay, shared, setShared, watchFolder } from "herdr";
+import { agents, panes, spaces, focused, props, exec, hc, theme, run, openOverlay, closeOverlay, readTextFile, shared, setShared, watchFolder } from "herdr";
 import { hws, message, submitDialog, openWorkspaceForm, KINDS, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 import { startSidebar, drawSidebar, WORKSPACES_CHANGED } from "./sidebar.js";
+import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, noteLines, placeRows, resolvePath, validStatus } from "./context.js";
+import { copy, openCite, openPath } from "./cites.js";
+import { artifactsSection, currentSection, headerSection, placesSection, recordSection, sectionTitle, sinceSection } from "./sections.js";
 
 const MOD = "hws-panel";
 const REFRESH_MS = 20000;
@@ -16,14 +19,6 @@ const INSTRUCTIONS_HINT = "How agents should work and organize context here.";
 const STATUS_WORD = { working: "Working", blocked: "Needs you", done: "Done", idle: "Idle" };
 
 const openDialog = (width, height, dialogProps) => openOverlay({ mod: MOD, kind: "dialog", modal: true, width, height, props: dialogProps });
-
-function ago(ms) {
-  const minutes = Math.floor(Math.max(0, ms) / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
-}
 
 export default class Panel extends View {
   init(_props, cx) {
@@ -60,6 +55,14 @@ export default class Panel extends View {
       this.lastAgent = new Map(p.terminal && this.spaceId ? [[this.spaceId, p.terminal]] : []);
       this.isConfirmingClose = false;
       this.note = null;
+      this.context = null;
+      this.showSuperseded = false;
+      this.showAllBacklog = false;
+
+      // GPUI creates input state only outside render, so each role's input is made once here.
+      this.placeSaved = Object.fromEntries(ROLES.map((role) => [role, ""]));
+      for (const role of ROLES) makeInput(this, `place-${role}`, { placeholder: ROLE_DEFAULTS[role], submit: (cx) => this.savePlace(this.placesFor, role, cx) });
+      this.placesFor = null;
       this.watching = new Set();
       this.refresh(cx);
       cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
@@ -91,6 +94,12 @@ export default class Panel extends View {
       try {
         this.manifests = await hws(["list"]);
         this.problem = null;
+
+        // The list paints first, so slow context calls cannot hold up the panel.
+        cx.notify();
+        const workspace = this.manifests.find((m) => m.spaces.includes(this.spaceId));
+        this.context = await this.loadContext(workspace);
+        if (workspace && workspace.kind !== "throwaway") this.syncPlaces(workspace);
       } catch (e) {
         this.problem = message(e);
       }
@@ -101,6 +110,40 @@ export default class Panel extends View {
       }
       cx.notify();
     });
+  }
+
+  // What the context sections read. A kept workspace reads `hws tidy status`,
+  // which carries the `--line` sentence and every resolved place, then the
+  // current note. A throwaway reads its scratch folder, which a reopen records
+  // in `places` because `folder` then names the recreated empty folder.
+  async loadContext(workspace) {
+    if (!workspace) return null;
+    if (workspace.kind === "throwaway") {
+      const { path } = placeRows(workspace).find((row) => row.role === "scratch");
+      const scratch = path ? resolvePath(path, workspace.folder) : workspace.folder;
+      const found = await exec("test", ["-d", scratch]).catch(() => null);
+      return { workspaceId: workspace.id, scratch, scratchExists: found?.code === 0 };
+    }
+    let status = null;
+    let statusProblem = null;
+    try {
+      status = validStatus(await hws(["tidy", "status", "--workspace", workspace.id]));
+    } catch (e) {
+      statusProblem = message(e);
+    }
+
+    // `hws place current` creates nothing, so it can stand in when status fails.
+    const fallback = status ? null : await hws(["place", "current", "--workspace", workspace.id]).catch(() => null);
+    const currentPath = status?.places?.current ?? fallback?.path ?? null;
+    const text = currentPath ? await readTextFile(currentPath).catch(() => null) : null;
+    return {
+      workspaceId: workspace.id,
+      status,
+      statusProblem,
+      line: typeof status?.line === "string" ? status.line : "",
+      currentPath,
+      current: typeof text === "string" ? noteLines(text) : null,
+    };
   }
 
   // Reloads when this workspace's manifest changes. Surfaces write constantly
@@ -158,20 +201,82 @@ export default class Panel extends View {
     }, cx);
   }
 
+  citeAction(cite, workspace, cx) {
+    this.act(`cite-${cite.kind}-${cite.value}`, () => openCite(cite, { workspace, target: this.trackAgent(workspace.id), space: this.spaceId }), cx);
+  }
+
+  openCurrent(target, cx) {
+    const file = this.context?.currentPath;
+    if (!target || !file) return;
+    this.act("open-current", async (cx) => {
+      await hws(["surface", "open", "--type", "note", "--file", file, "--terminal", target.address]);
+      this.refresh(cx);
+    }, cx);
+  }
+
+  // With a pass already live, hws asks it to read the packet again.
+  startTidy(workspace, cx) {
+    this.act("tidy", async (cx) => {
+      const { terminal, started } = (await hws(["tidy", "start", "--workspace", workspace.id])) ?? {};
+      this.refresh(cx);
+      const where = terminal ? ` in ${terminal}` : "";
+      return started === false ? `Asked the tidy pass${where} to read the packet again.` : `Tidy started${where}.`;
+    }, cx);
+  }
+
+  // Fills the fields from the manifest. Another workspace replaces every field.
+  // A value saved elsewhere replaces a field unless it holds an unsaved edit.
+  syncPlaces(workspace) {
+    const isNew = this.placesFor !== workspace.id;
+    this.placesFor = workspace.id;
+    for (const row of placeRows(workspace)) {
+      const key = `place-${row.role}`;
+      const saved = this.placeSaved[row.role];
+      if (isNew || (saved !== row.path && this.values[key] === saved)) {
+        this.inputs[key].set_value(row.path);
+        this.values[key] = row.path;
+      }
+      this.placeSaved[row.role] = row.path;
+    }
+  }
+
+  // An empty field drops the role from the manifest, so it falls back to its default.
+  savePlace(workspaceId, role, cx) {
+    const key = `place-${role}`;
+    const path = this.values[key].trim();
+    if (!workspaceId || path === this.placeSaved[role]) return;
+    this.act(key, async (cx) => {
+      await hws(["set", "--workspace", workspaceId, "--place", `${role}=${path}`]);
+      this.placeSaved[role] = path;
+      this.values[key] = path;
+      this.refresh(cx);
+      return path ? `Saved the ${role} place.` : `Cleared the ${role} place.`;
+    }, cx);
+  }
+
+  suggestPlaces(target, cx) {
+    if (!target) return;
+    this.act("suggest-places", async () => {
+      const r = await hc(["send", target.address, SUGGEST_PROMPT]);
+      if (r.code !== 0) throw new Error(r.stderr.trim() || `Could not send to ${target.address}.`);
+      return `Asked ${target.address} to propose places.`;
+    }, cx);
+  }
+
+  artifactTerminal(artifact) {
+    return hws(["artifact", "terminal", artifact.id]).then(() => null);
+  }
+
   copyLink(artifact, cx) {
     this.act(`link-${artifact.id}`, async () => {
       const { link } = await hws(["link", artifact.id]);
-      const r = await exec("sh", ["-c", 'printf %s "$1" | pbcopy', "sh", link]);
-      if (r.code !== 0) throw new Error("Could not copy the link.");
+      await copy(link);
       return "Link copied.";
     }, cx);
   }
 
   openFolder(artifact, cx) {
-    this.act(`folder-${artifact.id}`, async () => {
-      const r = await exec("open", [artifact.path]);
-      if (r.code !== 0) throw new Error(r.stderr.trim() || `Could not open ${artifact.path}`);
-    }, cx);
+    this.act(`folder-${artifact.id}`, () => openPath(artifact.path, null), cx);
   }
 
   closeWorkspace(workspace, cx) {
@@ -179,7 +284,7 @@ export default class Panel extends View {
     this.act("close", async (cx) => {
       const answer = await hws(["close", "--workspace", workspace.id]);
       if (answer?.decision === "needed") {
-        openDialog(460, 400, { view: "decide", workspace: workspace.id, name: workspace.name, artifacts: answer.artifacts ?? [] });
+        openDialog(460, 400, { view: "decide", workspace: workspace.id, name: workspace.name, artifacts: answer.artifacts ?? [], scratch: answer.scratch ?? null });
       } else {
         this.refresh(cx);
       }
@@ -226,7 +331,7 @@ export default class Panel extends View {
         await hws(["set", "--workspace", workspace.id, "--kind", kind]);
         this.refresh(cx);
       } catch (e) {
-        this.note = message(e);
+        this.note = { text: message(e), isError: true };
         cx.notify();
       }
     });
@@ -288,29 +393,12 @@ export default class Panel extends View {
     }, cx);
   }
 
-  smallButton(t, id, text, action, enabled = true) {
-    return div()
-      .id(id)
-      .flex_none()
-      .px(6)
-      .h(20)
-      .flex()
-      .items_center()
-      .rounded(5)
-      .border_1()
-      .border_color(t.border)
-      .text_size(11)
-      .text_color(enabled ? t.muted : t.dim)
-      .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.raised).text_color(t.foreground)).on_click(action))
-      .child(text);
-  }
-
   tabsSection(t, workspace, space) {
     const liveAgents = agents().filter((a) => workspace.spaces.includes(a.space));
     return v_flex()
       .flex_none()
       .gap(6)
-      .child(section(t, "Tabs and agents"))
+      .child(sectionTitle(t, "Tabs and agents"))
       .children(
         (space?.tabs ?? []).map((tab) =>
           v_flex()
@@ -360,7 +448,7 @@ export default class Panel extends View {
     return v_flex()
       .flex_none()
       .gap(1)
-      .child(section(t, "Open surfaces"))
+      .child(sectionTitle(t, "Open surfaces"))
       .when(surfaces.length === 0, (el) => el.child(div().px(8).text_color(t.dim).child("None open.")))
       .children(
         surfaces.map((s) =>
@@ -375,36 +463,6 @@ export default class Panel extends View {
             .when(Boolean(s.host), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(() => { hws(["surface", "resume", "--id", s.id]).catch(() => {}); }))
             .child(div().flex_1().min_w(0).truncate().child(s.title || s.type))
             .child(div().flex_none().text_size(11).text_color(t.dim).child(`${s.terminal ? `${s.type} · ${s.terminal}` : `${s.type} · standalone`}${drafts.has(s.id) ? " · draft" : ""}`)),
-        ),
-      );
-  }
-
-  artifactsSection(t, workspace, now) {
-    const artifacts = [...(workspace.artifacts ?? [])].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-    return v_flex()
-      .flex_none()
-      .gap(8)
-      .child(section(t, "Artifacts"))
-      .when(artifacts.length === 0, (el) => el.child(div().px(8).text_color(t.dim).child("None yet.")))
-      .children(
-        artifacts.map((a) =>
-          v_flex()
-            .flex_none()
-            .px(8)
-            .gap(3)
-            .child(
-              h_flex()
-                .gap(8)
-                .child(div().flex_1().min_w(0).truncate().child(a.title || a.id))
-                .child(div().flex_none().text_size(11).text_color(t.dim).child(`${a.type} · ${ago(now - (a.createdAt ?? now))}`)),
-            )
-            .child(
-              h_flex()
-                .gap(4)
-                .child(this.smallButton(t, `terminal-${a.id}`, "Open terminal", (_e, cx) => this.act(`terminal-${a.id}`, () => hws(["artifact", "terminal", a.id]).then(() => null), cx)))
-                .child(this.smallButton(t, `link-${a.id}`, "Copy link", (_e, cx) => this.copyLink(a, cx)))
-                .child(this.smallButton(t, `folder-${a.id}`, "Open folder", (_e, cx) => this.openFolder(a, cx))),
-            ),
         ),
       );
   }
@@ -432,15 +490,14 @@ export default class Panel extends View {
       .justify_end()
       .border_t(1)
       .border_color(t.border)
-      .when(workspace.kind === "throwaway", (el) => el.child(button(t, "promote", "Promote…", false, () => this.openPromote(workspace))))
       .child(button(t, "close", this.busy === "close" ? "Closing…" : "Close workspace", false, (_e, cx) => { this.isConfirmingClose = true; cx.notify(); }, this.busy !== "close"));
   }
 
+  // A kept workspace shows Current, Since last tidy, Artifacts and Places.
+  // A throwaway shows its Record in their place.
   renderWorkspace(t, workspace) {
-    const now = Date.now();
     const space = spaces().find((s) => s.id === workspace.id);
-    const target = this.trackAgent(workspace.id);
-    const canAttach = Boolean(target) && !this.busy;
+    const view = { t, host: this, workspace, target: this.trackAgent(workspace.id), now: Date.now() };
     const isThrowaway = workspace.kind === "throwaway";
     return v_flex()
       .id("hws-panel")
@@ -449,37 +506,7 @@ export default class Panel extends View {
       .bg(t.background)
       .text_color(t.foreground)
       .text_size(13)
-      .child(
-        v_flex()
-          .flex_none()
-          .px(14)
-          .py(10)
-          .gap(2)
-          .border_b(1)
-          .border_color(t.border)
-          .child(
-            h_flex()
-              .gap(8)
-              .items_center()
-              .child(div().flex_1().min_w(0).truncate().font_semibold().child(workspace.name))
-              .when(isThrowaway, (el) =>
-                el.child(div().flex_none().px(5).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child("Throwaway")),
-              ),
-          )
-          .when(Boolean(workspace.instructions), (el) => el.child(div().truncate().text_size(12).text_color(t.muted).child(workspace.instructions.split("\n")[0])))
-          .child(div().truncate().text_size(11).text_color(t.dim).child(tilde(workspace.folder)))
-          .when(!isThrowaway, (el) => el.child(this.kindSetting(t, workspace)))
-          .child(
-            h_flex()
-              .pt(6)
-              .gap(4)
-              .items_center()
-              .child(this.smallButton(t, "new-board", "New board", (_e, cx) => this.openSurface("board", target, cx), canAttach))
-              .child(this.smallButton(t, "new-note", "New note", (_e, cx) => this.openSurface("note", target, cx), canAttach))
-              .child(this.smallButton(t, "edit-instructions", "Instructions…", () => this.openInstructions(workspace)))
-              .child(div().flex_1().min_w(0).truncate().pl(4).text_size(11).text_color(t.dim).child(target ? `opens beside ${target.address}` : "focus an agent to attach one")),
-          ),
-      )
+      .child(headerSection(view))
       .child(
         v_flex()
           .id("hws-panel-body")
@@ -488,11 +515,12 @@ export default class Panel extends View {
           .overflow_y_scrollbar()
           .p(10)
           .gap(14)
+          .when(isThrowaway, (el) => el.child(recordSection(view)))
+          .when(!isThrowaway, (el) => el.child(currentSection(view)).child(sinceSection(view)).child(artifactsSection(view)).child(placesSection(view)))
           .child(this.tabsSection(t, workspace, space))
-          .child(this.surfacesSection(t, workspace))
-          .child(this.artifactsSection(t, workspace, now)),
+          .child(this.surfacesSection(t, workspace)),
       )
-      .when(Boolean(this.note), (el) => el.child(div().flex_none().px(14).py(4).text_size(11).text_color(this.note.isError ? t.blocked : t.dim).child(this.note.text)))
+      .when(Boolean(this.note), (el) => el.child(div().flex_none().px(14).py(4).text_size(11).text_color(this.note.isError ? t.blocked : t.dim).whitespace_normal().child(this.note.text)))
       .child(this.footer(t, workspace));
   }
 
@@ -523,6 +551,8 @@ export default class Panel extends View {
       this.spaceId = spaceId;
       this.isConfirmingClose = false;
       this.note = null;
+      this.showSuperseded = false;
+      this.showAllBacklog = false;
       this.refresh(cx);
     }
     if (this.problem) return this.renderMessage(t, this.problem, false);
@@ -591,7 +621,7 @@ export default class Panel extends View {
           .pb(10)
           .gap(4)
           .child(div().text_size(15).font_semibold().child(`Close ${p.name ?? "this throwaway"}?`))
-          .child(div().text_color(t.muted).child("This throwaway made these. Keep leaves them on disk. Trash moves them to the macOS Trash.")),
+          .child(div().text_color(t.muted).whitespace_normal().child("This throwaway made these. Keep leaves them on disk. Trash moves them to the macOS Trash.")),
       )
       .child(
         v_flex()
@@ -608,6 +638,15 @@ export default class Panel extends View {
                 .gap(8)
                 .child(div().flex_1().min_w(0).truncate().child(a.title || a.id))
                 .child(div().flex_none().text_size(11).text_color(t.dim).child(a.type ?? "")),
+            ),
+          )
+          .when(Boolean(p.scratch), (el) =>
+            el.child(
+              h_flex()
+                .flex_none()
+                .gap(8)
+                .child(div().flex_none().child("Scratch folder"))
+                .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(tilde(p.scratch))),
             ),
           ),
       )
@@ -654,8 +693,4 @@ export default class Panel extends View {
     if (this.view === "instructions") return this.renderInstructions(t);
     return this.renderPanel(t, cx);
   }
-}
-
-function section(t, title) {
-  return div().px(8).pb(3).text_size(11.5).font_medium().text_color(t.muted).child(title);
 }

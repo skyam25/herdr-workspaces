@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'n
 import { request as httpRequest } from 'node:http';
 import { basename, join, resolve } from 'node:path';
 
-import { artifactStoreDir, linkFor, moveBundle } from '../artifacts.js';
+import { linkFor, moveBundle } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import {
   act,
@@ -19,8 +19,9 @@ import {
   terminalInfo,
   windowStatus,
 } from '../herdr.js';
-import { ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
+import { TIDY_ROLE, ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
 import { HOST_SCRIPT, socketPath, stateRoot, surfaceDataDir } from '../paths.js';
+import { writablePlace } from '../places.js';
 import { callingTerminal, requireCallingTerminal, requireFlag } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
@@ -31,7 +32,7 @@ const SURFACE_TYPES = ['board', 'note', 'page'];
 export const MAX_SEND_BYTES = 128 * 1024;
 const RAISE_MS = 3000;
 
-function newId(prefix) {
+export function newId(prefix) {
   return prefix + randomBytes(3).toString('hex');
 }
 
@@ -84,7 +85,7 @@ function ownerLabel(found, terminal) {
 }
 
 // A flipped agent is missing from the window listing, so its label names the space and address.
-function windowOwnerLabel(live, terminal, placement) {
+export function windowOwnerLabel(live, terminal, placement) {
   const found = findTerminal(live, terminal);
   if (found) return ownerLabel(found, terminal);
   const space = live.spaces.find((item) => item.id === placement.space);
@@ -164,21 +165,23 @@ function findSurface(surfaceId) {
   throw new HwsError(`no surface ${surfaceId}`);
 }
 
-function assertBundle(bundle) {
+export function assertBundle(bundle) {
   if (!existsSync(bundle) || !statSync(bundle).isDirectory()) throw new HwsError(`no bundle folder at ${bundle}`);
   if (!existsSync(join(bundle, 'prompt.md'))) throw new HwsError(`no prompt.md in ${bundle}`);
 }
 
 // Very long text exceeds the argument limit, so the link goes in its place.
-function promptToSend(promptPath) {
+export function promptToSend(promptPath) {
   const text = readFileSync(promptPath, 'utf8');
   return Buffer.byteLength(text) > MAX_SEND_BYTES ? linkFor(promptPath) : text;
 }
 
-function archiveBundle({ manifest, surface }, bundle) {
+// Kept bundles land under the workspace's artifacts place.
+export function archiveBundle({ manifest, surface }, bundle) {
   const artifactId = newId('a');
-  const artifactDir = artifactStoreDir(manifest, artifactId);
+  const artifactDir = join(writablePlace(manifest, 'artifacts'), artifactId);
   const prompt = moveBundle(bundle, artifactDir);
+  const fromTidy = manifest.terminals.some((item) => item.terminal === surface.terminal && item.role === TIDY_ROLE);
   const artifact = {
     id: artifactId,
     type: surface.type,
@@ -187,6 +190,8 @@ function archiveBundle({ manifest, surface }, bundle) {
     prompt,
     fromTerminal: surface.terminal,
     createdAt: Date.now(),
+    status: 'current',
+    ...(fromTidy ? { role: TIDY_ROLE } : {}),
   };
   updateManifest(manifest.id, (draft) => {
     draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);

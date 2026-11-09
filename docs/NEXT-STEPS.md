@@ -1,6 +1,6 @@
 # Next steps
 
-Handoff for the next session. Updated 2026-11-08.
+Handoff for the next session. Updated 2026-11-09.
 
 Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
@@ -8,9 +8,9 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
 | Part | State | Tests |
 |---|---|---|
-| `hws` CLI | Built | 109 pass |
-| Herdr mods | Built and installed | 204 simulated pass |
-| Claude plugin | Built, enabled for every session | 50 pass |
+| `hws` CLI | Built | 317 pass |
+| Herdr mods | Built and installed | 149 simulated pass, 39 forced states |
+| Claude plugin | Built, enabled for every session | 84 pass |
 | Surface | Built | 1,209 unit tests pass, pty checks pass |
 
 ## Proven in the real Herdr window
@@ -27,6 +27,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 |---|---|
 | Starting work | The launcher offers New terminal, New workspace, Throwaway, Find throwaway, New board and New note |
 | Folders | Workspaces start in one parent folder. Nothing creates a folder per workspace |
+| Phone review | One listener per machine runs in a Herdr terminal, on port 47614 beside Agent Brief. The iOS app pairs with it as another host. See `docs/CONTRACT.md` |
 | Context rules | `CLAUDE.md` in the parent folder holds them. Claude Code already reads it |
 | Custom instructions | Each workspace has its own, and agents get them at session start |
 | Manifest | JSON that lives until the workspace closes. Artifacts outlive it |
@@ -35,6 +36,11 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Throwaway | Asks Keep or Trash on close only if something was made. Closes itself after 24 idle hours and stays findable for 30 days |
 | Studio | Removed. New board and New note cover the need |
 | Rendering | Boards open in their own window, which stays as a resumable draft when closed. Notes and pages stay on Pixel in a pane. A native GPUI board was rejected as too costly |
+| Context lifecycle | Working context stays messy in the stream. A tidy pass the person triggers rewrites one current note and demotes the rest. `docs/context-lifecycle.md` holds the design |
+| Places | `hws` speaks in roles (`current`, `artifacts`, `scratch`, `decisions`, `history`, `meetings`). Folder names belong to the user and live in the manifest `places` map |
+| Tidy | `hws tidy start` opens a Claude tab on a packet. The agent writes a proposal and opens it in a page. Done delivers feedback to the agent, which runs `hws tidy apply`. Only `hws` writes the note |
+| Freshness | Counted from the stream against `current.covers`, never from the clock. Sessions, artifacts, commits and Done cards |
+| Throwaway scratch | Shells start in `<state>/workspaces/<id>/scratch`. Keep moves it under `~/Documents/Herdr Workspaces/<name>/`, Trash and purge trash it |
 
 ## Next steps, in order
 
@@ -120,6 +126,7 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 - [ ] Ask on [#218](https://github.com/herdrdev/herdr-app/issues/218) whether the official browser mod can load a local app. This decides the host.
 - [ ] Serve page surfaces, which load from the Electron-only review scheme today.
 - [ ] Test notes, Talk and the microphone in WebKit.
+- [ ] Scan the pairing code with a real iPhone and iPad, then send a page and a board and press Send on the device.
 - [ ] Replace the remaining Electron APIs in `src/main`, so the host is a plain Node process.
 - [ ] Revisit a board inside the pane if Herdr ships a browser mod that can load a local app. Patching Herdr is ruled out.
 - [ ] Add the host address to the manifest through `hws`.
@@ -136,6 +143,20 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 - [ ] Add, edit, send and archive a to-do in the dialog.
 - [ ] Press Done on a surface opened from a flipped agent.
 - [ ] Count flipped agents in the status bar, and make `agent.next` and `agent.prev` reach them.
+
+### 11. Test the context lifecycle by hand
+
+Built 2026-11-09 by six Opus workers against fakes. Nothing has run in the real window.
+
+- [x] Open the workspace panel on this repo and read the header line. It should say "No current note yet" until a pass runs. `hws tidy status --line` said that on 2026-11-09, and the first pass wrote a proposal with a note, 17 cards to archive and one artifact superseded.
+- [ ] Press Open current. The note should open in a pane. The default place is `CURRENT.md`. Decide whether this file should become the current note instead, knowing a tidy pass rewrites the whole note.
+- [ ] Press Tidy. A Tidy tab should open, write a proposal and open it in a page. Press Done and check the note, the Trash and the archived cards.
+- [ ] Read the Since last tidy rows after a commit and after a card moves to Done.
+- [ ] Edit a Places row, clear one, and press Suggest from folder.
+- [ ] Open a throwaway, make a scratch file, close it, and check the Keep or Trash dialog lists the scratch folder.
+- [ ] Start a Claude session in a kept workspace and read the three session-start sentences.
+- [ ] Judge how Current lines wrap and where the cite chips sit in a narrow pane.
+- [ ] Decide whether the stage pill should change the stage.
 
 ## State outside this repo
 

@@ -160,6 +160,7 @@ describe('wrapped fields', () => {
 describe('source line', () => {
   it('names the outline when the file has one', () => {
     expect(sourceLine('docs/memo.md')).toBe('From docs/memo.md. Send asks Claude to apply your changes to the file.');
+    expect(sourceLine('docs/memo.md', undefined, 'Done')).toBe('From docs/memo.md. Done asks Claude to apply your changes to the file.');
     expect(sourceLine('docs/memo.md', 'docs/memo.outline.md')).toBe(
       'From docs/memo.md. Send folds your comments into docs/memo.outline.md first, and Claude proposes a direction there.',
     );

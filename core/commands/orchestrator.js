@@ -4,7 +4,7 @@ import { withLock } from '../lock.js';
 import { expandFolder } from '../paths.js';
 import { requireFlag } from '../resolve.js';
 import { agentArgv, agentModels, requireFolder } from '../settings.js';
-import { boardOf, orchestratorState, readTodos, resolveBoard, updateTodos } from './todo.js';
+import { boardOf, orchestratorState, readTodos, requireWorkspace, resolveBoard, updateTodos } from './todo.js';
 
 const BOARD_CHANGED = 'The board changed. Run hws todo status and start whatever is ready.';
 const STOPPED_NOTE = 'Stopped before finishing';
@@ -31,6 +31,7 @@ function openOrchestrator(space, board, folder) {
 // and to-do commands keep running while the tab opens.
 export function orchestratorStart(flags) {
   const space = requireFlag(flags, 'space');
+  requireWorkspace(space);
   const folder = requireFolder(expandFolder(requireFlag(flags, 'folder')));
   const board = boardOf(space);
   const result = withLock(`orchestrator-${encodeURIComponent(board)}`, () => {

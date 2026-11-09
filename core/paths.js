@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const STANDALONE = 'standalone';
 export const HOST_SCRIPT = fileURLToPath(new URL('../surface/run.sh', import.meta.url));
+export const PHONE_HOST = fileURLToPath(new URL('../surface/app/out/phone/host.cjs', import.meta.url));
+export const HWS_BIN = fileURLToPath(new URL('../bin/hws', import.meta.url));
 
 export function home() {
   return homedir();
@@ -34,19 +37,20 @@ export function socketPath(surfaceId) {
   return `/tmp/hws-${surfaceId}.sock`;
 }
 
+export function phoneDir() {
+  return join(stateRoot(), 'phone');
+}
+
+// Kept short for the Unix limit. The hash gives each state root its own listener.
+export function phoneSocket(root = stateRoot()) {
+  return `/tmp/hws-phone-${createHash('sha256').update(root).digest('hex').slice(0, 8)}.sock`;
+}
+
 const slug = (name) => name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
 
 // One folder per workspace, because workspaces can share a parent folder.
-export function keptArtifactDir(folder, workspace, artifactId) {
-  return join(folder, '.herdr-workspace', `${slug(workspace.name)}-${workspace.id.slice(-6)}`, 'artifacts', artifactId);
-}
-
-export function throwawayArtifactDir(spaceId, artifactId) {
-  return join(workspaceDir(spaceId), 'artifacts', artifactId);
-}
-
-export function standaloneArtifactDir(artifactId) {
-  return join(stateRoot(), STANDALONE, 'artifacts', artifactId);
+export function keptWorkspaceDir(folder, workspace) {
+  return join(folder, '.herdr-workspace', `${slug(workspace.name)}-${workspace.id.slice(-6)}`);
 }
 
 export function keptThrowawayDir(name, artifactId) {
@@ -63,10 +67,13 @@ export function retiredPath(id) {
   return join(retiredDir(), `${encodeURIComponent(id)}.json`);
 }
 
+export function claudeHome() {
+  return process.env.CLAUDE_CONFIG_DIR || join(home(), '.claude');
+}
+
 // Claude Code stores a session under its start folder with each symbol turned into a dash.
 export function transcriptPath(folder, sessionId) {
-  const claudeHome = process.env.CLAUDE_CONFIG_DIR || join(home(), '.claude');
-  return join(claudeHome, 'projects', folder.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
+  return join(claudeHome(), 'projects', folder.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
 }
 
 export function lockDir(name) {

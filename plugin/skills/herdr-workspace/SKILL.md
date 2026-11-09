@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos or the Board, asks what is in the workspace or what artifacts it has, or asks to sketch, draw, write or review something in a pane. Explains how to read the workspace, use the space's task list and ask the user for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos or the Board, asks what is in the workspace, what artifacts it has or where files should land, or asks to sketch, draw, write or review something in a pane. Explains how to read the workspace, use the space's task list and ask the user for input through a surface.
 ---
 
 # Herdr workspace
@@ -20,6 +20,23 @@ Run `~/.local/bin/hws` if `hws` is not on PATH.
 
 Read the manifest before inferring anything from the folder or git state. If `$HC_TERMINAL_ID` is empty or `hws current --line` prints nothing, this session is in a normal terminal with no workspace.
 
+## Places
+
+`hws` names where things land by role. The folders belong to the person, so never guess them from a folder convention.
+
+| Role | Holds |
+|---|---|
+| `current` | The current note, with Now, Decisions in force and Next |
+| `artifacts` | Done bundles and registered files |
+| `scratch` | Drafts and working files |
+| `decisions` | An append-only decision log, when set |
+| `history` | Demoted docs, when set |
+| `meetings` | Transcribed meeting notes, when set |
+
+Session start names the current, artifacts and scratch paths. Run `hws place ROLE` before you write into a place. It prints the absolute path, creates the `artifacts` or `scratch` folder on first use, and prints nothing when the role is unset.
+
+When you land a decision mid-session, you may add one dated line with a cite under Decisions in force in the current note, such as `- 2026-11-08 Notes stay in a pane [commit:ba7d965]`. A cite is `[card:ID]`, `[session:ID]`, `[commit:SHA]`, `[artifact:ID]` or `[file:PATH]`. Change nothing else in the note, because the tidy pass rewrites the whole note when the person runs it. A throwaway has no current note, so `hws place current` prints nothing there.
+
 ## Kinds
 
 | Kind | Meaning |
@@ -31,7 +48,7 @@ Read the manifest before inferring anything from the folder or git state. If `$H
 
 ## Task list
 
-All the spaces in a workspace share one task list, and a space outside a workspace has its own. The person sees it on the Board. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
+All the spaces in a workspace share one task list. The person sees it on the Board. Agents can use the task list and the Board only inside a workspace, so when `hws current --line` prints nothing, tell the person the Board needs a workspace and run none of these commands. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
 
 | Command | Does |
 |---|---|
@@ -100,6 +117,16 @@ hws surface open --type board|note|page --title X --terminal $HC_TERMINAL_ID
 Pass `--file F` to open an existing file in a note or page.
 
 After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it. A user who closes a board early keeps it as a draft and resumes it from the pane header.
+
+## Send to the phone
+
+Use this only when the user asks to review something on their phone or iPad.
+
+```sh
+hws phone send FILE_OR_ARTIFACT_ID --prompt "What to look at"
+```
+
+The phone opens `.html` and `.excalidraw` files. Render a Markdown note to HTML first. End the turn after sending, because the user's markup arrives as the next prompt. If no phone is paired, run `hws phone pair`, which opens a tab with a QR code for the user to scan.
 
 ## Draw on a surface
 

@@ -3,9 +3,17 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { liveFixtures, sandbox } from './helpers.js';
+import { liveFixtures, sandbox as plainSandbox } from './helpers.js';
 
 const { space, tab, terminal } = liveFixtures;
+
+// Agents use a Board only inside a workspace.
+
+function sandbox(t) {
+  const box = plainSandbox(t);
+  box.inWorkspace('sp1');
+  return box;
+}
 
 function todoFile(box, id = 'sp1') {
   return join(box.root, 'todos', `${id}.json`);
@@ -59,7 +67,7 @@ test('todo add needs a title that is not blank', (t) => {
 
 test('todo list prints unarchived items, newest updatedAt first', (t) => {
   const box = sandbox(t);
-  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'] });
+  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'], workspace: 'sp1' });
 
   const first = add(box, 'first');
   const second = add(box, 'second');
@@ -168,6 +176,15 @@ test('a failed send leaves the item unchanged', (t) => {
   assert.equal(result.code, 1);
   assert.match(result.stderr, /terminal is blocked/);
   assert.equal(readFileSync(todoFile(box), 'utf8'), before);
+});
+
+test('todo list --archived includes archived items', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'old');
+  const other = add(box, 'other');
+  box.json(['todo', 'archive', '--id', item.id, '--space', 'sp1']);
+  const { items } = box.json(['todo', 'list', '--archived', '--space', 'sp1']);
+  assert.deepEqual(items.map((entry) => [entry.id, entry.archived]).sort(), [[item.id, true], [other.id, false]].sort());
 });
 
 test('archived items are hidden, kept and frozen', (t) => {
@@ -1057,4 +1074,34 @@ test('sending a card to a terminal assigns it to an agent', (t) => {
   const item = add(box, 'task', '--owner', 'mine');
   const sent = box.json(['todo', 'send', '--id', item.id, '--terminal', 't5', '--space', 'sp1']);
   assert.equal(sent.owner, 'agent');
+});
+
+test('an agent in a plain space cannot use the Board', (t) => {
+  const box = plainSandbox(t);
+  box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t7', 'p7')])])], selected: 'sp1' });
+
+  for (const args of [['list'], ['status'], ['add', '--title', 'x'], ['add', '--title', 'x', '--space', 'sp1'], ['next', '--terminal', 't7']]) {
+    const result = box.hws(['todo', ...args], { HC_TERMINAL_ID: 't7' });
+    assert.notEqual(result.code, 0, args.join(' '));
+    assert.match(result.stderr, /only inside a workspace/);
+  }
+  assert.equal(existsSync(todoFile(box)), false);
+});
+
+test('an agent can reach a workspace board from any terminal', (t) => {
+  const box = sandbox(t);
+  box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t7', 'p7')])])], selected: 'sp1' });
+  assert.equal(box.hws(['todo', 'add', '--title', 'x', '--json'], { HC_TERMINAL_ID: 't7' }).code, 0);
+});
+
+test('the person keeps a list in a plain space, with no agent reaching it', (t) => {
+  const box = plainSandbox(t);
+  const item = add(box, 'mine');
+
+  assert.equal(box.json(['todo', 'list', '--space', 'sp1']).workspace, null);
+  for (const args of [['send', '--terminal', 't7'], ['reply', '--text', 'go'], ['resume']]) {
+    const result = box.hws(['todo', ...args, '--id', item.id, '--space', 'sp1']);
+    assert.notEqual(result.code, 0, args[0]);
+    assert.match(result.stderr, /only inside a workspace/);
+  }
 });

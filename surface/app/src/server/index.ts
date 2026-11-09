@@ -71,7 +71,7 @@ const STATUS_BY_CODE: Record<ErrorBody['code'], number> = {
 };
 
 /** Answers whether something accepts connections on the socket path. */
-function isLive(socketPath: string): Promise<boolean> {
+export function isLive(socketPath: string): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = net.connect(socketPath);
     probe.once('connect', () => {

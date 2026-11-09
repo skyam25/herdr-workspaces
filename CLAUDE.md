@@ -9,7 +9,7 @@ Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.m
 | Path | Holds |
 |---|---|
 | `bin/hws`, `core/` | CLI that creates, tracks and closes workspaces. Node, ESM, no runtime dependencies |
-| `surface/` | Pixel host. `surface/app/` is an owned copy of Agent Brief's Electron app |
+| `surface/` | Pixel host. `surface/app/` is an owned copy of Agent Brief's Electron app, and `surface/app/src/phone/` is the phone listener |
 | `mods/` | Herdr mods `hws-new`, `hws-panel`, `hws-brief`, `hws-pane` and `hws-chat*`, written in GPUI JavaScript. `mods/NOTICE.md` records the Shepherdr import |
 | `plugin/` | Claude Code plugin with the session hook, skill and `/workspace` command |
 
@@ -33,7 +33,7 @@ Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.m
 - Never create a folder per workspace. Workspaces start in the existing parent folder.
 - Never guess a terminal. A surface with no live owner offers Open terminal and Copy link.
 - User work goes to the macOS Trash and is never deleted outright.
-- No background jobs or notifications. Pruning runs inside `hws` commands.
+- No background jobs or notifications. Pruning runs inside `hws` commands. The one exception is the phone listener, which runs in a Herdr terminal, starts on `hws phone` and ends with Herdr.
 - Keep `hws.js` identical in `mods/hws-new` and `mods/hws-panel`. A test compares them.
 - Every mod change must pass `herdr-app check <mod folder>`.
 - The Herdr mod reference is `~/.config/herdr-app/AGENTS.md`, with types in `herdr.d.ts` and `gpui-kit.d.ts` beside it.

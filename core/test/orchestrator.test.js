@@ -3,9 +3,17 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { liveFixtures, sandbox } from './helpers.js';
+import { liveFixtures, sandbox as plainSandbox } from './helpers.js';
 
 const { space, tab, terminal } = liveFixtures;
+
+// Agents use a Board only inside a workspace.
+
+function sandbox(t) {
+  const box = plainSandbox(t);
+  box.inWorkspace('sp1');
+  return box;
+}
 
 const PROMPT = 'Use the herdr-workspaces:orchestrate skill. Your board is space sp1.';
 const NOTE = 'The board changed. Run hws todo status and start whatever is ready.';
@@ -302,4 +310,15 @@ test('stop run from an agent uses the space of its terminal', (t) => {
 
   assert.equal(JSON.parse(result.stdout).stopped, true);
   assert.deepEqual(kills(box), ['t9']);
+});
+
+test('start refuses a plain space and opens nothing', (t) => {
+  const box = plainSandbox(t);
+  box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
+
+  const result = box.hws(['orchestrator', 'start', '--space', 'sp1', '--folder', box.folder('project')]);
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /only inside a workspace/);
+  assert.deepEqual(tabsOpened(box), []);
 });

@@ -91,6 +91,12 @@ export function sandbox(t) {
     manifest: (id) => JSON.parse(readFileSync(join(root, 'workspaces', id, 'workspace.json'), 'utf8')),
     rewriteManifest: (id, change) => writeFileSync(join(root, 'workspaces', id, 'workspace.json'), JSON.stringify(change(box.manifest(id)))),
 
+    // Puts a space in a workspace of the same id.
+    inWorkspace(id) {
+      mkdirSync(join(root, 'workspaces', id), { recursive: true });
+      writeFileSync(join(root, 'workspaces', id, 'workspace.json'), JSON.stringify({ version: 1, id, name: id, kind: 'general', createdAt: 1, spaces: [id], tabs: [], terminals: [], surfaces: [], artifacts: [] }));
+    },
+
     folder(name) {
       const path = join(dir, name);
       mkdirSync(path, { recursive: true });

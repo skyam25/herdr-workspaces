@@ -14,8 +14,39 @@ const MANIFEST = {
   tabs: [{ tabId: "tb1", name: "Plan", role: "plan" }],
   terminals: [{ terminal: "t13", tabId: "tb1", sessionId: null, role: "planner" }],
   surfaces: [{ id: "s1", type: "board", title: "flow", terminal: "t13", pane: "p9" }, { id: "s2", type: "note", title: "", terminal: null, pane: "gone" }],
-  artifacts: [{ id: "a1", type: "board", title: "newer", path: "/a", prompt: "/a/prompt.md", fromTerminal: "t13", createdAt: 2000 }, { id: "a2", type: "note", title: "", path: "/b", prompt: "/b/prompt.md", fromTerminal: null }],
+  artifacts: [{ id: "a1", type: "board", title: "newer", path: "/a", prompt: "/a/prompt.md", fromTerminal: "t13", createdAt: 2000, status: "current" }, { id: "a2", type: "note", title: "", path: "/b", prompt: "/b/prompt.md", fromTerminal: null, status: "current" }],
 };
+const KEPT = {
+  ...MANIFEST, name: "checkout", kind: "app", stage: "deciding", board: { space: "spb", tab: "tbb" },
+  places: { current: "docs/NEXT-STEPS.md", decisions: { path: "decisions", writer: "pmos" } },
+  artifacts: [{ ...MANIFEST.artifacts[0], status: "draft" }, { ...MANIFEST.artifacts[1], status: "superseded" }, { id: "a3", type: "file", title: "spec", path: "/w/spec.md", createdAt: 1500, status: "current" }],
+};
+const STATUS = {
+  tidiedAt: 1794000000000, stage: "deciding", behind: { sessions: 3, artifacts: 2, commits: 4, cards: 1 },
+  items: Array.from({ length: 10 }, (_, i) => ({ kind: ["session", "artifact", "commit", "card"][i % 4], id: `x${i}`, title: i === 0 ? null : `Item ${i} with a title long enough to truncate in a narrow pane`, at: 1794000000000 + i, path: null })),
+  live: { terminal: "t12", startedAt: 1794000000000, packet: "/p.json" },
+  places: { current: "/w/docs/NEXT-STEPS.md", artifacts: "/w/.herdr-workspace/c/artifacts", scratch: "/w/.herdr-workspace/c/scratch", decisions: "/w/decisions", history: null, meetings: null },
+  writers: { current: null, artifacts: null, scratch: null, decisions: "pmos", history: null, meetings: null },
+  line: "Current is 3 sessions, 2 artifacts, 4 commits and 1 card behind, last tidied Nov 3",
+};
+const CONTEXT = {
+  workspaceId: "spc1", status: STATUS, statusProblem: null, line: "Current is 3 sessions, 2 artifacts, 4 commits and 1 card behind, last tidied Nov 3", currentPath: "/w/docs/NEXT-STEPS.md",
+  current: {
+    more: 3,
+    lines: [
+      { kind: "heading", level: 1, text: "Current", cites: [] },
+      { kind: "heading", level: 2, text: "Now", cites: [] },
+      { kind: "bullet", text: "Boards open in their own window and notes stay in a pane beside the agent that opened them", cites: [{ kind: "commit", value: "ba7d965" }] },
+      { kind: "bullet", text: "Studio is removed", cites: [{ kind: "card", value: "17" }, { kind: "session", value: "abcdef1234" }] },
+      { kind: "text", text: "A plain line", cites: [] },
+      { kind: "bullet", text: "", cites: [{ kind: "file", value: "docs/panel-options.md" }, { kind: "artifact", value: "a1" }] },
+    ],
+  },
+};
+const UNAVAILABLE = { workspaceId: "spc1", status: null, statusProblem: "unknown command tidy", line: "", currentPath: "/w/CURRENT.md", current: null };
+const RECORD = { workspaceId: "spc1", scratch: "/state/workspaces/spc1/scratch", scratchExists: true };
+const withSession = { ...MANIFEST, terminals: [{ terminal: "t13", tabId: "tb1", sessionId: "aaaabbbbcccc", role: "planner" }], artifacts: [{ ...MANIFEST.artifacts[0], status: "superseded" }, MANIFEST.artifacts[1]] };
+
 const AGENT = { address: "t13", space: "spc1", tab: "tb1", status: "blocked", app: "claude-code", program: { name: "Claude Code" }, focused: true };
 
 function live(source) {
@@ -33,6 +64,9 @@ const __agents = () => [${JSON.stringify(AGENT)}];
 const __panes = () => [{ pane: "p1", terminal: "t13", tab: "tb1" }, { pane: "p9", terminal: null, tab: "tb1", mod: "x" }];
 const __spaces = () => [{ id: "spc1", machine: null, tabs: [{ id: "tb1", name: "Plan", status: "blocked" }, { id: "tb2", name: "Build", status: null }] }];
 `;
+
+// A kept workspace with its context loaded, as `loadContext` leaves it.
+const keptPanel = (context, extra = "") => (s) => live(s).replace("this.manifests = [__MANIFEST];", `this.manifests = [${JSON.stringify(KEPT)}];`).replace("this.context = null;", `this.context = ${JSON.stringify(context)}; ${extra}`);
 
 function flipWorld(source) {
   return source
@@ -76,6 +110,7 @@ const VARIANTS = [
   { mod: "hws-new", name: "menu-problem", props: { overlay: "o" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "hws failed";') },
   { mod: "hws-panel", name: "toggle", props: { overlay: "o" }, patch: (s) => s.replace("cx.spawn(async () => this.toggle());", "") },
   { mod: "hws-panel", name: "decide", props: { view: "decide", name: "scratch", artifacts: MANIFEST.artifacts } },
+  { mod: "hws-panel", name: "decide-scratch", props: { view: "decide", name: "scratch", artifacts: [], scratch: "/Users/me/.local/state/hws/workspaces/spc1/scratch" } },
   { mod: "hws-panel", name: "decide-problem", props: { view: "decide", artifacts: [] }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "Trash failed";') },
   { mod: "hws-panel", name: "promote", props: { view: "promote", workspace: "spc1", name: "scratch" } },
   { mod: "hws-panel", name: "promote-problem", props: { view: "promote" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "Choose a folder.";') },
@@ -83,6 +118,13 @@ const VARIANTS = [
   { mod: "hws-panel", name: "panel-confirm", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.isConfirmingClose = false;", "this.isConfirmingClose = true;").replace("this.note = null;", 'this.note = { text: "Link copied.", isError: false };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-problem", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.problem = null;", 'this.problem = "hws failed";') },
+  { mod: "hws-panel", name: "panel-kept", props: {}, header: LIVE_HEADER, patch: keptPanel(CONTEXT) },
+  { mod: "hws-panel", name: "panel-kept-open", props: {}, header: LIVE_HEADER, patch: keptPanel(CONTEXT, "this.showSuperseded = true; this.showAllBacklog = true;"), files: { "sections.js": { header: "", patch: (s) => s.replace("const isDirty = typed !== entry.saved;", "const isDirty = true;") } } },
+  { mod: "hws-panel", name: "panel-kept-clear", props: {}, header: LIVE_HEADER, patch: keptPanel(CONTEXT), files: { "sections.js": { header: "", patch: (s) => s.replace("const typed = entry.value.trim();", 'const typed = "";').replace("const isDirty = typed !== entry.saved;", "const isDirty = true;") } } },
+  { mod: "hws-panel", name: "panel-kept-unavailable", props: {}, header: LIVE_HEADER, patch: keptPanel(UNAVAILABLE) },
+  { mod: "hws-panel", name: "panel-kept-loading", props: {}, header: LIVE_HEADER, patch: keptPanel(null) },
+  { mod: "hws-panel", name: "panel-record", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", `this.manifests = [${JSON.stringify(withSession)}];`).replace("this.context = null;", `this.context = ${JSON.stringify(RECORD)}; this.showSuperseded = true;`) },
+  { mod: "hws-panel", name: "sidebar-fresh", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify(KEPT)}, __MANIFEST], problem: null, folded: new Set(), ahead: {}, fresh: { spc1: { level: "stale", title: "Current is 9 sessions behind" } } };`) },
   { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null, folded: new Set(), ahead: {} };") },
   { mod: "hws-panel", name: "add-space", props: { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1"] }, header: LIVE_HEADER },
   { mod: "hws-panel", name: "sidebar-empty", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [], problem: null };") },
@@ -90,7 +132,7 @@ const VARIANTS = [
   { mod: "hws-tabs", name: "tabs-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace('shared("hws.tasks.waiting")', "3") },
   { mod: "hws-agents", name: "agents-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("this.folded = new Set();", 'this.folded = new Set(); this.hovered = "t22";') },
   { mod: "hws-agents", name: "agents-rail", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("const narrow = () =>", "const narrow = () => true || ") },
-  { mod: "hws-work", name: "CONTROL-board-typo", props: { view: "tasks" }, expectFailure: true, patch: (s) => boardState("")(s).replace("allowButton(t, id) {\n    return div()", "allowButton(t, id) {\n    return div().no_such_builder()") },
+  { mod: "hws-work", name: "CONTROL-board-typo", props: { view: "tasks" }, expectFailure: true, patch: (s) => boardState("")(s).replace("rowAction(t, id, text, action, color = null) {\n    return div()", "rowAction(t, id, text, action, color = null) {\n    return div().no_such_builder()") },
   { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('dialogRoot(t, "hws-new-form")', 'dialogRoot(t, "hws-new-form").no_such_builder()') },
 ];
 
@@ -100,7 +142,7 @@ for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  for (const file of ["hws.js", "sidebar.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
+  for (const file of ["hws.js", "sidebar.js", "context.js", "sections.js", "cites.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
     if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
   }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");

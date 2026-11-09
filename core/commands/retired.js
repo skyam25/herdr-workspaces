@@ -1,6 +1,9 @@
+import { mkdirSync } from 'node:fs';
+
+import { resumeArgv } from '../agent-session.js';
 import { HwsError } from '../errors.js';
 import { updateManifest } from '../manifest.js';
-import { listRetired, readRetired, removeRetired } from '../retired.js';
+import { isStored, listRetired, readRetired, removeRetired } from '../retired.js';
 import { requireFolder } from '../settings.js';
 import { createWorkspace } from './new.js';
 
@@ -29,17 +32,25 @@ function tabsFor(record) {
   if (record.sessions.length === 0) return [{ name: 'Claude', argv: ['claude'] }];
   return record.sessions.map((item, index) => ({
     name: index === 0 ? 'Claude' : `Claude ${index + 1}`,
-    argv: ['claude', '--resume', item.sessionId],
+    argv: resumeArgv({ tool: 'claude', id: item.sessionId }),
   }));
+}
+
+// Sessions resume only from the folder they started in. That is the old
+// scratch folder, which hws makes again if Keep moved it away.
+function startFolder(record) {
+  if (isStored(record.folder)) mkdirSync(record.folder, { recursive: true });
+  return requireFolder(record.folder);
 }
 
 export function reopen(_flags, [id]) {
   const record = readRetired(id);
   if (!record) throw new HwsError(`no retired throwaway ${id}`);
-  requireFolder(record.folder);
-  const created = createWorkspace({ name: record.name, kind: 'throwaway', folder: record.folder, tabs: tabsFor(record) });
+  const folder = startFolder(record);
+  const created = createWorkspace({ name: record.name, kind: 'throwaway', folder, tabs: tabsFor(record) });
   const manifest = updateManifest(created.id, (draft) => {
     draft.artifacts = record.artifacts;
+    if (record.scratch) draft.places = { scratch: record.scratch };
     record.sessions.forEach((item, index) => {
       draft.terminals[index].sessionId = item.sessionId;
     });

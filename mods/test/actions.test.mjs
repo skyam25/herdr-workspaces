@@ -31,19 +31,19 @@ const osascriptCalls = (H) => H.calls.filter((c) => c.command === "osascript");
 test("a terminal agent's menu has the rows every agent gets", async () => {
   world();
   const m = await mount("hws-actions", TERMINAL);
-  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Tasks", "Outputs"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Send to phone…", "Pair phone", "Tasks", "Outputs"]);
 });
 
 test("a flipped agent with a reply gets every row in table order", async () => {
   world();
   const m = await mount("hws-actions", { ...FLIPPED, lastReply: "Done." });
-  assert.deepEqual(rows(m), ["Sketch", "Write", "Write from last reply", "Review a page…", "Attach file…", "Tasks", "Outputs"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write", "Write from last reply", "Review a page…", "Send to phone…", "Pair phone", "Attach file…", "Tasks", "Outputs"]);
 });
 
 test("Orchestrate this space comes last, after its own divider", async () => {
   world();
   const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
-  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Tasks", "Outputs", "Orchestrate this space"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Send to phone…", "Pair phone", "Tasks", "Outputs", "Orchestrate this space"]);
   const last = m.render().node.children.at(-1).node;
   assert.equal(last.children.length, 2);
   assert.equal(last.children[1].node.id, "orchestrate");

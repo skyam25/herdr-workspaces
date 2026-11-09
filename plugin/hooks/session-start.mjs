@@ -1,26 +1,31 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { relative } from "node:path";
 
 import { readStdin } from "./stdin.mjs";
 
-// With the 1s stdin limit, two calls stay under the 6s timeout in hooks.json.
+// Stdin (1s) and two rounds of hws calls stay under the 6s timeout in hooks.json.
 const HWS_MS = 2000;
 
 const TASK_LIST = [
-  "This Herdr workspace or space has a shared task list that the person sees on the Board.",
+  "This Herdr workspace has a shared task list that the person sees on the Board.",
   'Read it with `hws todo list --json`, and add follow-up work the person should see with `hws todo add --title="..."`.',
   "A card you add lands unassigned until the person presses Allow. A card marked mine is the person's, so you only read it. You do not take or move cards unless asked.",
   "Run `~/.local/bin/hws` if `hws` is not on PATH.",
 ].join(" ");
 
-// Returns stdout, or null when hws fails or times out.
+// Resolves to trimmed stdout, or null when hws fails or outlives HWS_MS.
 function hws(args) {
-  const run = spawnSync("hws", args, {
-    encoding: "utf8",
-    timeout: HWS_MS,
-    stdio: ["ignore", "pipe", "ignore"],
+  return new Promise((resolve) => {
+    execFile("hws", args, { timeout: HWS_MS, killSignal: "SIGKILL" }, (error, stdout) => resolve(error ? null : stdout.trim()));
   });
+}
 
-  return run.error || run.status !== 0 ? null : run.stdout;
+function parse(text) {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
 }
 
 function print(text) {
@@ -31,17 +36,49 @@ function inHerdrApp() {
   return process.env.__CFBundleIdentifier === "dev.herdr.app" && Boolean(process.env.HC_TERMINAL_ID);
 }
 
+// Shows a path relative to the session folder when it sits inside it.
+function show(path, folder, trailing = "") {
+  const rel = relative(folder, path);
+  const inside = rel !== "" && !rel.startsWith("..");
+  return (inside ? rel : path) + trailing;
+}
+
+// Builds "Artifacts land in X, drafts in Y, the current note is Z." from the roles that are set.
+function placesSentence(places, folder) {
+  const [current, artifacts, scratch] = ["current", "artifacts", "scratch"].map((role) =>
+    typeof places[role] === "string" && places[role] ? places[role] : null,
+  );
+
+  const clauses = [];
+  if (artifacts) clauses.push(`artifacts land in ${show(artifacts, folder, "/")}`);
+  if (scratch) clauses.push(`${artifacts ? "drafts" : "drafts land"} in ${show(scratch, folder, "/")}`);
+  if (current) clauses.push(`the current note is ${show(current, folder)}`);
+  if (clauses.length === 0) return "";
+
+  const text = clauses.join(", ");
+  return `${text[0].toUpperCase()}${text.slice(1)}.`;
+}
+
 async function main() {
-  const sessionId = JSON.parse(await readStdin()).session_id;
+  const input = JSON.parse(await readStdin());
+  const sessionId = input.session_id;
   if (typeof sessionId !== "string" || sessionId === "") return;
 
   const terminal = process.env.HC_TERMINAL_ID;
+  const folder = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
 
   // A failed register only loses resume, so the session still learns its workspace.
-  hws(["register", "--terminal", terminal, "--session", sessionId, "--json"]);
+  const [, line] = await Promise.all([
+    hws(["register", "--terminal", terminal, "--session", sessionId, "--json"]),
+    hws(["current", "--line"]),
+  ]);
 
-  const line = hws(["current", "--line"])?.trim();
-  const context = [line, inHerdrApp() && TASK_LIST].filter(Boolean).join("\n\n");
+  // Places and freshness only exist inside a workspace. Reading them never creates a folder.
+  const status = line ? parse(await hws(["tidy", "status", "--json"])) : null;
+  const freshness = typeof status?.line === "string" ? status.line.trim() : "";
+  const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
+
+  const context = [workspace.filter(Boolean).join(" "), line && inHerdrApp() && TASK_LIST].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

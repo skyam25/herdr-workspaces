@@ -97,6 +97,8 @@ export interface DeliveryInput {
   mode?: 'fill' | 'submit';
   /** The project-relative file `text` was opened from. The prompt asks Claude to apply the draft to it. */
   sourcePath?: string;
+  /** `text` still matches the file at `sourcePath`, so the prompt reports a review with no changes. */
+  sourceUnchanged?: boolean;
   /** Comments pinned to an HTML file, written as review.md. Their pictures are among `images`. */
   review?: ReviewPayload;
   /** Comments pinned to the board, written as comments.md. Present with `png`. */

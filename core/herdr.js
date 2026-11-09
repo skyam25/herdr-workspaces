@@ -101,20 +101,22 @@ export async function closePaneThenFocus(pane, target, kind = 'terminal') {
   await once(child, 'exit');
 }
 
-// Starts a program in a terminal with no pane, tied to nothing that can end it early.
-export function runDetached(argv, cwd) {
-  const result = run(hcBin(), ['run', '--bg', '--json', '--no-parent', '--no-notify', '--rm', '--cwd', cwd, '--', ...argv], ACT_MS);
+function runInBackground(flags, cwd, argv) {
+  const result = run(hcBin(), ['run', '--bg', '--json', ...flags, '--cwd', cwd, '--', ...argv], ACT_MS);
   const reply = parseJson(result.stdout);
   if (!result.ok || !reply?.address) {
     throw new HwsError(result.stderr.trim() || result.stdout.trim() || result.failure || 'hc run failed');
   }
-  return reply.address;
+  return reply;
+}
+
+// Starts a program in a terminal with no pane, tied to nothing that can end it early.
+export function runDetached(argv, cwd) {
+  return runInBackground(['--no-parent', '--no-notify', '--rm'], cwd, argv).address;
 }
 
 export function startWorker({ name, label, cwd, argv }) {
-  const result = run(hcBin(), ['run', '--bg', '--json', '--name', name, '--label', label, '--cwd', cwd, '--', ...argv], ACT_MS);
-  if (!result.ok) throw new HwsError(result.stderr.trim() || result.stdout.trim() || result.failure || 'hc run failed');
-  return parseJson(result.stdout);
+  return runInBackground(['--name', name, '--label', label], cwd, argv);
 }
 
 export function killTerminal(terminal) {

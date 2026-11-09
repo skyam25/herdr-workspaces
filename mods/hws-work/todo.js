@@ -47,6 +47,12 @@ class DialogForm {
     return !this.busy;
   }
 
+  keys(e, cx) {
+    if (e.key !== "escape") return;
+    this.close();
+    cx.stop_propagation();
+  }
+
   close() {
     closeOverlay(props().overlay);
   }
@@ -217,6 +223,7 @@ export class TodoForm extends DialogForm {
 
   // A finished card takes feedback too, which reopens its session when that has closed.
   canReply() {
+    if (props().plainSpace || this.item?.archived) return false;
     if (this.waiting()) return true;
     return this.item?.column === "done" && Boolean(this.item.session || this.item.terminal);
   }
@@ -234,7 +241,7 @@ export class TodoForm extends DialogForm {
   load(cx) {
     cx.spawn(async (cx) => {
       try {
-        const listed = await hws(["todo", "list", "--space", this.space]);
+        const listed = await hws(["todo", "list", "--archived", "--space", this.space]);
         const item = todoItems(listed).find((x) => x.id === this.id);
         if (!item) throw new Error("This to-do no longer exists.");
         this.item = item;
@@ -252,8 +259,9 @@ export class TodoForm extends DialogForm {
     });
   }
 
+  // An archived card is frozen, so the dialog only shows it.
   ready() {
-    return super.ready() && (!this.id || Boolean(this.item));
+    return super.ready() && (!this.id || Boolean(this.item)) && !this.item?.archived;
   }
 
   // Writes only what differs from the stored card.
@@ -299,45 +307,35 @@ export class TodoForm extends DialogForm {
     }, cx);
   }
 
-  // Saves edits first, because `hws todo send` pastes the stored text.
-  send(address, cx) {
+  // Saves edits first, because `hws todo send` pastes the stored text and the other actions close the dialog.
+  saveThen(key, work, cx, afterClose) {
     const title = this.titleText(cx);
     if (title === null) return;
-    this.submit("send", async () => {
+    this.submit(key, async () => {
       await this.saveFields(title, this.notes.value().trim());
-      await hws(["todo", "send", "--id", this.id, "--terminal", address, ...this.spaceFlag()]);
-    }, cx);
+      await work();
+    }, cx, afterClose);
   }
 
-  // Saves edits first, because the dialog closes so the session can take focus.
+  send(address, cx) {
+    this.saveThen("send", () => hws(["todo", "send", "--id", this.id, "--terminal", address, ...this.spaceFlag()]), cx);
+  }
+
   openLinked(address, cx) {
-    const title = this.titleText(cx);
-    if (title === null) return;
-    this.submit("open", () => this.saveFields(title, this.notes.value().trim()), cx, () => openSession(address));
+    this.saveThen("open", () => {}, cx, () => openSession(address));
   }
 
   resume(cx) {
-    const title = this.titleText(cx);
-    if (title === null) return;
-    this.submit("resume", async () => {
-      await this.saveFields(title, this.notes.value().trim());
-      await hws(["todo", "resume", "--id", this.id, ...this.spaceFlag()]);
-    }, cx);
+    this.saveThen("resume", () => hws(["todo", "resume", "--id", this.id, ...this.spaceFlag()]), cx);
   }
 
-  // Saves edits first, because the dialog closes after the reply goes.
   reply(cx) {
     const text = this.replyBox.value().trim();
     if (!text) {
       this.ask("Write a reply first.", cx);
       return;
     }
-    const title = this.titleText(cx);
-    if (title === null) return;
-    this.submit("reply", async () => {
-      await this.saveFields(title, this.notes.value().trim());
-      await hws(["todo", "reply", "--id", this.id, textFlag("text", text), ...this.spaceFlag()]);
-    }, cx);
+    this.saveThen("reply", () => hws(["todo", "reply", "--id", this.id, textFlag("text", text), ...this.spaceFlag()]), cx);
   }
 
   archive(cx) {
@@ -377,7 +375,8 @@ export class TodoForm extends DialogForm {
       this.owner = key;
       cx.notify();
     };
-    return OWNERS.map(({ key, name }) => this.chip(t, `owner-${key}`, name, key === this.owner, choose(key)));
+    const owners = props().plainSpace ? OWNERS.filter(({ key }) => key !== "agent") : OWNERS;
+    return owners.map(({ key, name }) => this.chip(t, `owner-${key}`, name, key === this.owner, choose(key)));
   }
 
   ownerRow(t) {
@@ -410,13 +409,13 @@ export class TodoForm extends DialogForm {
   }
 
   // The sessions behind this card, each with Open while it is live.
-  linkedSessions(t, enabled) {
+  linkedSessions(t, enabled, targets) {
     const sessions = this.item ? cardSessions(this.item) : [];
     if (sessions.length === 0) return [];
-    const lists = { terminals: terminals(), targets: this.targets(), orchestrator: this.orchestrator };
+    const lists = { terminals: terminals(), targets, orchestrator: this.orchestrator };
     const rows = sessions.map(({ role, address }) => {
       const { name, status, live } = describeSession(lists, address);
-      const canResume = !live && role === "Run by" && Boolean(this.item.session);
+      const canResume = !props().plainSpace && !live && role === "Run by" && Boolean(this.item.session);
       const resume = canResume ? this.rowButton(t, `session-resume-${address}`, "Resume", (_e, cx) => this.resume(cx), enabled) : null;
       const open = live ? this.rowButton(t, `session-open-${address}`, "Open", (_e, cx) => this.openLinked(address, cx), enabled) : resume;
       return this.row(t, `session-row-${address}`, `${role} ${name}`, [status, address].filter(Boolean).join(" · "), open);
@@ -424,8 +423,7 @@ export class TodoForm extends DialogForm {
     return [this.labeled(t, "Session", v_flex().gap(FORM.sendGap).children(rows))];
   }
 
-  sendTo(t, enabled) {
-    const targets = this.targets();
+  sendTo(t, enabled, targets) {
     if (targets.length === 0) return div().text_size(12).text_color(t.dim).child("No agents in this space.");
     return v_flex().gap(FORM.sendGap).children(targets.map((x) => this.sendRow(t, x, enabled)));
   }
@@ -448,16 +446,17 @@ export class TodoForm extends DialogForm {
     const enabled = this.ready();
     const story = this.item ? cardStory(this.item) : null;
     const sizes = todoLayout({ height: props().height, waiting: this.canReply(), story });
+    const targets = this.targets();
     const reading = v_flex().flex_1().min_w(0).gap(FORM.gap).children([
       ...this.updateFields(t, enabled, story, sizes.story),
       this.labeled(t, "Title", this.fieldStyle(Input.new(this.title).h(FORM.input), t, "title")),
       this.labeled(t, "Notes", this.fieldStyle(Textarea.new(this.notes).h(sizes.notes).py(8), t, "notes")),
     ]);
     const controls = v_flex().flex_none().w(FORM.side).gap(FORM.gap).children([
-      ...this.linkedSessions(t, enabled),
+      ...this.linkedSessions(t, enabled, targets),
       this.labeled(t, "Column", this.columnChoice(t)),
       this.labeled(t, "Owner", this.ownerRow(t)),
-      ...(this.id ? [this.labeled(t, "Send to", this.sendTo(t, enabled))] : []),
+      ...(this.id && !props().plainSpace ? [this.labeled(t, "Send to", this.sendTo(t, enabled, targets))] : []),
     ]);
     const fields = [h_flex().flex_none().items_start().gap(FORM.columnGap).child(reading).child(controls)];
     const footer = this.footer()
@@ -466,7 +465,7 @@ export class TodoForm extends DialogForm {
       .child(this.button(t, "cancel-todo", "Cancel", false, () => this.close(), true))
       .child(this.button(t, "save-todo", this.busy === "save" ? "Saving…" : "Save", true, (_e, cx) => this.save(cx), enabled));
     const details = this.item ? [this.item.id, ...cardTimes(this.item, Date.now())].join(" · ") : null;
-    return this.frame(t, "hws-todo", this.body(t, "todo-body", this.id ? "To-do" : "New to-do", fields, details), footer);
+    return this.frame(t, "hws-todo", this.body(t, "todo-body", this.item?.archived ? "Archived to-do" : this.id ? "To-do" : "New to-do", fields, details), footer);
   }
 }
 
@@ -485,12 +484,6 @@ export class AddSeveralForm extends DialogForm {
       return;
     }
     this.submit("add", () => hws(["todo", "add", textFlag("titles", titles), ...this.spaceFlag()]), cx);
-  }
-
-  keys(e, cx) {
-    if (e.key !== "escape") return;
-    this.close();
-    cx.stop_propagation();
   }
 
   render() {
@@ -534,8 +527,9 @@ export class ModelsForm extends DialogForm {
   }
 
   useRecommended(cx) {
-    Object.assign(this.settings.orchestrator, { tool: "claude", model: "opus", effort: "high" });
-    Object.assign(this.settings.worker, { tool: "claude", model: "sonnet", effort: "medium" });
+    const { orchestrator, worker } = this.settings.recommended;
+    Object.assign(this.settings.orchestrator, orchestrator);
+    Object.assign(this.settings.worker, worker);
     cx.notify();
   }
 
@@ -546,7 +540,7 @@ export class ModelsForm extends DialogForm {
     return models.some((x) => x.id === model) ? models : [...models, { id: model, name: model }];
   }
 
-  chips(t, ids) {
+  chips(ids) {
     return h_flex().flex_wrap().gap(4).children(ids);
   }
 
@@ -560,9 +554,9 @@ export class ModelsForm extends DialogForm {
       .gap(6)
       .child(div().text_size(13).font_semibold().child(name))
       .child(div().text_size(11.5).text_color(t.dim).child(line))
-      .when(key === "worker", (el) => el.child(this.chips(t, tools)))
-      .child(this.chips(t, models))
-      .child(this.chips(t, efforts));
+      .when(key === "worker", (el) => el.child(this.chips(tools)))
+      .child(this.chips(models))
+      .child(this.chips(efforts));
   }
 
   save(cx) {
@@ -572,12 +566,6 @@ export class ModelsForm extends DialogForm {
         await hws(["models", "set", "--role", key, "--tool", tool, textFlag("model", model), "--effort", effort]);
       }
     }, cx);
-  }
-
-  keys(e, cx) {
-    if (e.key !== "escape") return;
-    this.close();
-    cx.stop_propagation();
   }
 
   render() {

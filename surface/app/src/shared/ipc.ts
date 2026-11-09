@@ -92,6 +92,8 @@ export interface SendPayload {
   images?: DraftImage[];
   /** The project-relative file the draft was opened from. The prompt asks Claude to apply the draft to it. */
   sourcePath?: string;
+  /** The text still matches the file it was opened from. */
+  sourceUnchanged?: boolean;
   /** The session owning the reviewed file, independent of where the note is filed. */
   fileSessionId?: string;
   /** Comments pinned to an HTML file. The prompt points Claude at review.md. */
@@ -119,6 +121,8 @@ export interface TextPayload {
   images?: DraftImage[];
   /** The project-relative file the draft was opened from. The prompt asks Claude to apply the draft to it. */
   sourcePath?: string;
+  /** The text still matches the file it was opened from. */
+  sourceUnchanged?: boolean;
   /** The session owning the reviewed file, independent of where the note is filed. */
   fileSessionId?: string;
   /** Comments pinned to an HTML file. The prompt points Claude at review.md. */

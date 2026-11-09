@@ -1,11 +1,11 @@
 import { UsageError } from '../errors.js';
-import { MODEL_CATALOG, agentModels, setAgentModel } from '../settings.js';
+import { DEFAULT_MODELS, MODEL_CATALOG, agentModels, setAgentModel } from '../settings.js';
 import { requireFlag } from '../resolve.js';
 
 const ROLES = ['orchestrator', 'worker'];
 
 export function modelsShow() {
-  return { data: { ...agentModels(), catalog: MODEL_CATALOG } };
+  return { data: { ...agentModels(), catalog: MODEL_CATALOG, recommended: DEFAULT_MODELS } };
 }
 
 export function modelsSet(flags) {
@@ -18,5 +18,5 @@ export function modelsSet(flags) {
   if (role === 'orchestrator' && tool !== 'claude') throw new UsageError('the orchestrator runs on Claude Code');
   const value = { tool, model: requireFlag(flags, 'model'), effort: requireFlag(flags, 'effort') };
   setAgentModel(role, value);
-  return { data: { ...agentModels(), catalog: MODEL_CATALOG } };
+  return modelsShow();
 }

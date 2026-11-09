@@ -60,7 +60,7 @@ const STATUS: Record<ErrorBody['code'], number> = { not_found: 404, bad_request:
 
 const bad = (message: string) => new LanError(400, 'bad_request', message);
 
-async function readJson(req: IncomingMessage, limit: number): Promise<unknown> {
+export async function readJson(req: IncomingMessage, limit: number): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {

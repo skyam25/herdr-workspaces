@@ -122,7 +122,7 @@ export interface SurfaceDeps {
   close?: () => void;
 }
 
-type HwsResult = { standalone?: boolean; artifact?: string; link?: string; text?: string; deliveryError?: string };
+type HwsResult = { standalone?: boolean; artifact?: string; link?: string; text?: string; deliveryError?: string; message?: string };
 
 const POLL_WAIT_S = 25;
 const RETRY_MS = 1000;
@@ -275,23 +275,10 @@ export class SurfaceHost {
 
   /** Runs `hws` in its own process group, because closing this pane hangs up everything else in it. */
   private hws(args: string[]): Promise<HwsResult> {
-    return new Promise((done, fail) => {
-      const env = { ...process.env };
-      if (env.HWS_OUTER_XDG_STATE_HOME) env.XDG_STATE_HOME = env.HWS_OUTER_XDG_STATE_HOME;
-      else delete env.XDG_STATE_HOME;
-
-      const child = spawn(this.cfg.hws, args, { detached: true, env, stdio: ['ignore', 'pipe', 'pipe'] });
-      let out = '';
-      let err = '';
-      child.stdout.on('data', (chunk) => (out += chunk));
-      child.stderr.on('data', (chunk) => (err += chunk));
-      child.on('error', (e) => fail(new Error(`could not run hws: ${e.message}`)));
-      child.on('close', (code) => {
-        const parsed = parseJson(out);
-        if (code === 0) done(parsed ?? { text: out.trim() });
-        else fail(new Error((parsed as { error?: string } | undefined)?.error ?? (err.trim() || `hws exited ${code}`)));
-      });
-    });
+    const env = { ...process.env };
+    if (env.HWS_OUTER_XDG_STATE_HOME) env.XDG_STATE_HOME = env.HWS_OUTER_XDG_STATE_HOME;
+    else delete env.XDG_STATE_HOME;
+    return runHws(this.cfg.hws, args, { detached: true, env });
   }
 
   private request(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -314,6 +301,23 @@ export class SurfaceHost {
       req.end(payload);
     });
   }
+}
+
+/** Runs `hws` and resolves its JSON, or its plain text under `text`. */
+export function runHws(bin: string, args: string[], options: { detached?: boolean; env?: NodeJS.ProcessEnv } = {}): Promise<HwsResult> {
+  return new Promise((done, fail) => {
+    const child = spawn(bin, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk) => (out += chunk));
+    child.stderr.on('data', (chunk) => (err += chunk));
+    child.on('error', (e) => fail(new Error(`could not run hws: ${e.message}`)));
+    child.on('close', (code) => {
+      const parsed = parseJson(out);
+      if (code === 0) done(parsed ?? { text: out.trim() });
+      else fail(new Error((parsed as { error?: string } | undefined)?.error ?? (err.trim() || `hws exited ${code}`)));
+    });
+  });
 }
 
 function parseJson(text: string): HwsResult | undefined {

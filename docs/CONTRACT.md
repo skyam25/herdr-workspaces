@@ -23,7 +23,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 - The manifest lives until its workspace closes. Artifacts outlive the manifest.
 - A closed throwaway leaves a retired record, unless the user chose Trash.
 - Only `hws` writes the manifest. Every other part calls `hws`.
-- No background jobs and no notifications. Pruning runs inside `hws` commands.
+- No background jobs and no notifications. Pruning runs inside `hws` commands. The one exception is the [phone listener](#phone), which runs in a Herdr terminal, starts on `hws phone` and ends with Herdr.
 - User work moves to the macOS Trash. It is never deleted outright.
 
 ## Paths
@@ -34,10 +34,17 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Manifest | `<root>/workspaces/<spaceId>/workspace.json` |
 | Surface data | `<root>/workspaces/<spaceId>/surfaces/<surfaceId>/` |
 | Surface socket | `/tmp/hws-<surfaceId>.sock`, kept short for the Unix limit |
-| Kept artifacts | `<folder>/.herdr-workspace/<name>-<id tail>/artifacts/<artifactId>/` |
+| Kept artifacts | `<artifacts place>/<artifactId>/` for Done bundles and `<artifacts place>/<file name>` for `hws artifact add`, default place `<folder>/.herdr-workspace/<name>-<id tail>/artifacts/` |
+| Kept scratch | `<scratch place>`, default `<folder>/.herdr-workspace/<name>-<id tail>/scratch/` |
+| Throwaway scratch | `<root>/workspaces/<spaceId>/scratch/`, which is also the throwaway's `folder` |
 | Throwaway artifacts | `<root>/workspaces/<spaceId>/artifacts/<artifactId>/` |
+| Kept throwaway work | `~/Documents/Herdr Workspaces/<name>/<artifactId>/` and `.../<name>/scratch-<id tail>/`, written by `hws close --keep` |
 | Standalone artifacts | `<root>/standalone/artifacts/<artifactId>/` |
 | Retired throwaways | `<root>/retired/<spaceId>.json` |
+| Phone data | `<root>/phone/`, holding `ipad/`, `sends/`, `boards/` and `bundles/` |
+| Phone socket | `/tmp/hws-phone-<hash of the state root>.sock`, mode 600 |
+| Tidy packet | `<root>/workspaces/<spaceId>/tidy/packet.json` |
+| Settings | `<root>/settings.json`, which may hold `places`, the default place map for kept workspaces |
 
 Standalone surfaces with no workspace use the workspace id `standalone`.
 
@@ -52,6 +59,13 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
   "folder": "/Users/me/Projects/checkout",
   "instructions": "Text the user wrote for agents, or empty",
   "createdAt": 1794126748609,
+  "stage": "discovery",
+  "places": { "current": "docs/NEXT-STEPS.md", "artifacts": "docs", "decisions": { "path": "decisions", "writer": "pmos" } },
+  "current": {
+    "tidiedAt": 1794000000000,
+    "covers": { "sessionsThrough": 1794000000000, "artifactsThrough": 1794000000000, "commit": "2a12556" }
+  },
+  "tidy": { "terminal": "t12", "startedAt": 1794000000000, "packet": "<root>/workspaces/<spaceId>/tidy/packet.json" },
   "spaces": ["spc...", "spd..."],
   "board": { "space": "spe...", "tab": "tb..." },
   "tabs": [{ "tabId": "tb...", "name": "Plan or null", "role": "plan or null" }],
@@ -77,13 +91,48 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
       "path": "absolute artifact folder",
       "prompt": "absolute path to prompt.md",
       "fromTerminal": "t13 or null",
-      "createdAt": 1794126748609
+      "createdAt": 1794126748609,
+      "status": "current",
+      "supersedes": null
     }
   ]
 }
 ```
 
 `id` is the first space's id and never changes, even after that space closes or leaves. `spaces` lists every space in the workspace. A manifest without it has only `id`. `board` is the workspace's Board space and its Board tab, absent until someone adds a Board.
+
+| Field | Meaning |
+|---|---|
+| `stage` | `discovery`, `deciding`, `building` or `settled`. Optional. Set with `hws set --stage` |
+| `places` | Role to place map. Optional. Holds only roles set with `hws set --place` |
+| `current.tidiedAt` | When the last tidy pass was applied. Absent until the first |
+| `current.covers` | The newest stream item each source had absorbed at that pass. Any key may be null |
+| `tidy` | The tidy pass `hws tidy start` opened. Absent when none was started |
+| `terminals[].role` | `tidy` on the terminal `hws tidy start` opened. Freshness leaves its session out |
+| `artifacts[].role` | `tidy` on a review saved from the tidy terminal. Freshness leaves it out. Absent on other artifacts |
+| `artifacts[].status` | `draft`, `current` or `superseded`. Done writes `current`. A record without it reads as `current` |
+| `artifacts[].supersedes` | The id of the artifact this one replaces, or null. Absent reads as null |
+| `artifacts[].type` | `board`, `note` or `page` from Done, `file` from `hws artifact add` |
+
+### Places
+
+`hws` speaks in roles. Folder names belong to the user.
+
+| Role | Holds | Default for a kept workspace |
+|---|---|---|
+| `current` | The current note | `CURRENT.md` |
+| `artifacts` | Done bundles | `.herdr-workspace/<name>-<id tail>/artifacts/` |
+| `scratch` | Drafts and working files | `.herdr-workspace/<name>-<id tail>/scratch/` |
+| `decisions` | Append-only decision log | Unset |
+| `history` | Demoted docs | Unset |
+| `meetings` | Transcribed meeting notes | Unset |
+
+- A role resolves from the manifest, then from `settings.json` `places`, then from the default above.
+- The `settings.json` map applies to every kept workspace without its own entry for that role.
+- A throwaway has only `artifacts` and `scratch` under `<root>/workspaces/<spaceId>/`. Standalone has only `artifacts`. Neither reads `settings.json` or accepts `--place`.
+- A place is a path string or `{ "path": "...", "writer": "name" }`. Paths are relative to the workspace folder, absolute, or start with `~/`.
+- A writer other than `hws` makes the place read-only to `hws`. Done refuses to land there and `hws place` creates nothing there.
+- Changing a place moves no files. It changes where new things land.
 
 ## CLI: `hws`
 
@@ -100,9 +149,14 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws space add --workspace W [--name N] [--folder F]` | Opens a new space in W. F defaults to W's folder |
 | `hws space move --space S --workspace W` | Moves an open local space into W. A plain space's cards join W's Board. A space leaving another workspace leaves its cards there. Fails when S is that workspace's last space or its Board space |
 | `hws space remove --space S` | Takes S out of its workspace and leaves it open as a plain space. Its cards stay on the Board. Fails on the workspace's last space or its Board space |
-| `hws set [--workspace W] [--kind K] [--instructions X]` | Changes a workspace's instructions, or a kept workspace's kind |
+| `hws set [--workspace W] [--kind K] [--instructions X] [--stage S] [--place ROLE=PATH ...] [--writer ROLE=NAME ...]` | Changes a workspace's instructions and stage, or a kept workspace's kind and places. An unknown role or stage exits 2. `--place ROLE=` drops the role from the manifest. A new path keeps the role's writer. `--writer` needs the role to have a manifest path, and `--writer ROLE=hws` clears it |
+| `hws tidy status [--workspace W] [--line]` | Prints how far the current note is behind the stream. See [Tidy](#tidy) |
+| `hws tidy start [--workspace W]` | Writes the packet and opens a Tidy tab, or asks the live pass to read the packet again. See [Tidy](#tidy) |
+| `hws tidy apply --file PROPOSAL [--skip current,demote,artifacts,cards] [--workspace W]` | Applies an accepted proposal, stamps `current` and clears `tidy`. See [Tidy](#tidy) |
+| `hws tidy stop [--workspace W]` | Clears `tidy` and ends its terminal. Prints `no tidy pass is running` when none is recorded |
+| `hws place ROLE [--workspace W]` | Prints the absolute path for ROLE, or nothing when unset. `--json` prints `{role,path,writer}`. Creates the `scratch` and `artifacts` folders on first use when `hws` is their writer, never the others |
 | `hws parent` | Prints the folder new work starts in: the last used, else `~/Projects`, else home |
-| `hws new throwaway [--name N]` | Creates a throwaway with one tab running `claude` |
+| `hws new throwaway [--name N]` | Creates a throwaway with one tab running `claude` in its scratch folder. The space opens on a shell in the parent folder, which closes once the tab is open |
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list` | Every manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest |
 | `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal |
@@ -111,24 +165,32 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open}]`. Leaves out closed windows with no work |
 | `hws surface resume --id S` | Brings an open window forward, or starts a closed one again on the same id and data |
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
-| `hws surface done --id S --bundle DIR` | Moves DIR to the artifact store, delivers, closes the pane |
+| `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
+| `hws phone pair` | In a terminal, shows a QR code and waits for a phone. Without a terminal on stdout, opens a Pair phone tab that does this. See [Phone](#phone) |
+| `hws phone send FILE\|ARTIFACT [--prompt X] [--terminal T] [--space S]` | Puts an `.html` or `.excalidraw` file in the phone's inbox, tied to T. Prints the hand-off. Fails when no phone is paired or the file is another type |
+| `hws phone status` | Prints `{running,paired,devices,handoffs}`. Starts the listener when a phone is paired, and never otherwise |
+| `hws phone forget NAME\|ID` | Revokes one paired phone |
+| `hws phone stop` | Quits the listener |
+| `hws phone deliver --send P --bundle DIR` | Called by the listener. Files DIR as an artifact and delivers it. See [Phone](#phone) |
 | `hws artifact list [--workspace W]` | Artifacts, including those of retired throwaways when W is absent |
+| `hws artifact set ID [--status draft\|current\|superseded] [--supersedes ID]` | Changes an artifact in an open workspace and prints its record. Needs one of the two flags. `--supersedes` must name another artifact of the same workspace, and an empty value clears it |
+| `hws artifact add --file F [--title X] [--workspace W]` | Registers F as an artifact with type `file` and status `current`, and prints its record. `path` and `prompt` are the file. A file inside the `artifacts` place stays where it is. Any other file moves to `<artifacts place>/<file name>`, and the command fails when that name is taken or another writer owns the place. The title defaults to the file name |
 | `hws link ARTIFACT` | Prints `@<absolute prompt.md path>`, ready to paste into Claude |
 | `hws todo list\|add\|edit\|move\|send\|archive` | To-dos for a workspace, or for a space outside one. See [To-dos](#to-dos-hws-todo) |
 | `hws artifact terminal ARTIFACT` | Opens a new tab running `claude` with that artifact's prompt |
-| `hws promote [--workspace W] --name N --folder F [--kind K]` | Makes a throwaway a kept workspace and moves its artifacts. W defaults to the current workspace |
-| `hws close [--workspace W] [--keep\|--trash]` | Closes every space in W, the caller's own last. A throwaway with artifacts and no flag returns `{"decision":"needed","artifacts":[...]}` and closes nothing. `--trash` leaves no retired record |
+| `hws promote [--workspace W] --name N --folder F [--kind K]` | Makes a throwaway a kept workspace. Artifacts move into the kept `artifacts` place and scratch contents into the kept `scratch` place, both resolved as for any kept workspace. It refuses before moving anything when a place has another writer or the scratch place already holds a name. The emptied scratch folder stays for live shells. W defaults to the current workspace |
+| `hws close [--workspace W] [--keep\|--trash]` | Closes every space in W, the caller's own last. A throwaway with artifacts or scratch files and no flag returns `{"decision":"needed","artifacts":[...],"scratch":PATH\|null}` and closes nothing. `--keep` moves artifacts and the scratch folder under `~/Documents/Herdr Workspaces/<name>/`. `--trash` sends both to the Trash and leaves no retired record |
 | `hws resume [--workspace W]` | Runs `claude --resume` in shell panes whose recorded session lost its process |
 | `hws prune` | Drops closed spaces from manifests, removes manifests with no open space, expires idle throwaways and purges old retired records. Prints `{pruned,expired,skipped}`. Does nothing when the Herdr window does not answer |
 | `hws find [TEXT...]` | Retired throwaways, newest close first. TEXT must match every word in the name, a session title, a last prompt or an artifact title |
-| `hws reopen ID` | Opens a retired throwaway in a new space, with one tab per session running `claude --resume`, and removes its record |
+| `hws reopen ID` | Opens a retired throwaway in a new space, with one tab per session running `claude --resume`, and removes its record. The tabs start in the record's `folder`, which `hws` makes again when it sits under the state root. The record's `scratch` becomes the manifest's `scratch` place |
 
 ## Delivery on Done
 
 1. The host writes a bundle folder with `prompt.md` and any `images/`.
 2. It calls `hws surface done --id S --bundle DIR`.
-3. `hws` moves the bundle to the artifact store and rewrites paths inside `prompt.md` to the new location.
+3. `hws` moves the bundle under the workspace's `artifacts` place and rewrites paths inside `prompt.md` to the new location.
 4. For a glued surface whose terminal is live, `hws` runs `hc send T "<prompt.md text>"`, then `herdr-app do pane.close --pane P`, then `herdr-app do pane.focus --terminal T`.
 5. For standalone, or a terminal that ended, `hws` records the artifact and prints `{"standalone":true,"artifact":"...","link":"@..."}`. The host then shows Open terminal and Copy link.
 
@@ -139,7 +201,7 @@ Throwaways close themselves when idle and stay findable afterwards. `prune` does
 | Stage | When | Effect |
 |---|---|---|
 | Expire | 24 hours after the last activity | The space closes and a retired record is written |
-| Purge | 30 days after the close | Artifacts under the state root go to the Trash and the record goes. Kept artifacts and transcripts stay |
+| Purge | 30 days after the close | Artifacts and the scratch folder under the state root go to the Trash and the record goes. Kept artifacts, kept scratch and transcripts stay |
 
 Last activity is the newest of `createdAt` and the modified time of each session's transcript, `<claude home>/projects/<folder with symbols as dashes>/<sessionId>.jsonl`. The Claude home is `CLAUDE_CONFIG_DIR` or `~/.claude`.
 
@@ -151,14 +213,15 @@ Expiry skips a throwaway in any of these cases.
 - A flipped agent's status is anything but idle.
 - A surface has its own window open.
 
-Every close of a throwaway writes the record, whether by expiry, `hws close` or Herdr's own UI. A throwaway with no transcript and no artifacts has no record. `hws close --trash` sets `discarded` on the manifest, which suppresses the record even if the closing process ends with the space.
+Every close of a throwaway writes the record, whether by expiry, `hws close` or Herdr's own UI. A throwaway with no transcript, no artifacts and no file in its scratch folder has no record, and its scratch folder goes. The record keeps the scratch path, and the scratch files stay until purge. `hws close --trash` sets `discarded` on the manifest, which suppresses the record even if the closing process ends with the space.
 
 ```json
 {
   "version": 1,
   "id": "spc...",
   "name": "throwaway-1c26",
-  "folder": "/Users/me/Projects",
+  "folder": "/Users/me/.local/state/herdr-workspaces/workspaces/spc.../scratch",
+  "scratch": "/Users/me/.local/state/herdr-workspaces/workspaces/spc.../scratch",
   "createdAt": 1794126748609,
   "closedAt": 1794226748609,
   "sessions": [{ "sessionId": "uuid", "activeAt": 1794200000000, "title": "Fix login", "lastPrompt": "why does login fail" }],
@@ -166,9 +229,162 @@ Every close of a throwaway writes the record, whether by expiry, `hws close` or 
 }
 ```
 
+`folder` is where the sessions started, so `claude --resume` works there. `scratch` is where the scratch files are, which differs from `folder` after `--keep`. Records written before scratch folders have the parent folder and no `scratch`.
+
 `sessions` is newest first. `title` and `lastPrompt` come from undocumented transcript lines, `ai-title` and `last-prompt`. When `last-prompt` has no text, `lastPrompt` is the newest typed user message, up to 2,000 characters.
 
 The launcher's Find throwaway dialog calls `hws find -- TEXT` as you type and `hws reopen ID` on a row.
+
+## Tidy
+
+A tidy pass rewrites a kept workspace's current note from the stream gathered since the last pass. `hws` gathers and applies. A Claude session with the `herdr-workspaces:tidy` skill reads and proposes. `docs/context-lifecycle.md` holds the design.
+
+### Freshness
+
+Counted on read against `current.covers`.
+
+| Source | Behind when |
+|---|---|
+| Sessions | A session recorded in `terminals` has a transcript modified after `sessionsThrough`. The tidy terminal's session and sessions with no transcript are left out |
+| Artifacts | `createdAt` is after `artifactsThrough`. A review saved from the tidy terminal is left out |
+| Commits | In `git log covers.commit..HEAD` in the workspace folder. With no `covers.commit`, every commit since the workspace's `createdAt` |
+| Cards | A Done card on the workspace's task list that is not archived |
+
+- With no `current`, every item is behind and `tidiedAt` is null.
+- A folder outside git, or a `covers.commit` git cannot find, counts zero commits. `git` in the status says which.
+
+### `hws tidy status [--workspace W] [--line]`
+
+```json
+{
+  "tidiedAt": 1794000000000,
+  "stage": "deciding",
+  "behind": { "sessions": 3, "artifacts": 2, "commits": 0, "cards": 1 },
+  "items": [{ "kind": "session", "id": "uuid", "title": "first prompt or null", "at": 1794000000000, "path": "/abs/transcript.jsonl" }],
+  "git": { "repo": true, "head": "sha", "base": "sha or null", "baseFound": true },
+  "live": { "terminal": "t12", "startedAt": 1794000000000, "packet": "/abs/packet.json" },
+  "places": { "current": "/abs/CURRENT.md", "artifacts": "/abs/...", "scratch": "/abs/...", "decisions": "/abs/decisions", "history": null, "meetings": null },
+  "writers": { "current": null, "artifacts": null, "scratch": null, "decisions": "pmos", "history": null, "meetings": null },
+  "line": "Current is 3 sessions, 2 artifacts and 1 card behind, last tidied Nov 3"
+}
+```
+
+- Status changes nothing on disk. It resolves places without creating the folders `hws place` would create.
+
+- `items` lists sessions, artifacts, commits and cards in that order, each newest first. `kind` is `session`, `artifact`, `commit` or `card`. `id` is the session id, artifact id, commit sha or card id. `path` is the transcript or artifact folder, and null for commits and cards.
+- `live` is the manifest's `tidy` while its terminal is live, and null otherwise.
+- `places` maps every role to its absolute path, or null when unset, as in the packet. `writers` maps every role to its writer, or null when `hws` writes it.
+- `line` is the sentence `--line` prints. It is null for a throwaway.
+- Without `--json`, prints the sentence below.
+- `--line` prints one sentence, `{"line":...}` under `--json`. It prints nothing for a terminal outside a workspace, a throwaway or standalone. W defaults to the calling terminal's workspace.
+
+| State | Sentence |
+|---|---|
+| No `current` | `No current note yet` |
+| Something behind | `Current is 3 sessions and 2 artifacts behind, last tidied Nov 3`. Zero sources are left out. The year follows the day when it is not this year |
+| Nothing behind | `Current is up to date, last tidied Nov 3` |
+
+### `hws tidy start [--workspace W]`
+
+1. Fails on a throwaway or standalone, which have no current note.
+2. Writes the packet below.
+3. With no live pass, opens a `Tidy` tab in the caller's space when it belongs to W, else W's first space other than the Board. The tab runs `claude` with the orchestrator's Models setting and the first prompt `Use the herdr-workspaces:tidy skill. The packet is at <packet>.` The window keeps its selection.
+4. Records that terminal in `terminals` with role `tidy`, and sets `tidy`.
+5. With a live pass, opens nothing and runs `hc send <terminal> "The workspace changed. Read the tidy packet again at <packet>"`.
+
+Prints `{ terminal, started, packet }`.
+
+### Packet
+
+```json
+{
+  "version": 1,
+  "workspace": "sp...",
+  "folder": "/abs/folder",
+  "stage": "deciding or null",
+  "places": { "current": "/abs/CURRENT.md", "artifacts": "/abs/...", "scratch": "/abs/...", "decisions": null, "history": null, "meetings": null },
+  "instructions": "workspace instructions",
+  "current": { "path": "/abs/CURRENT.md", "exists": true, "hash": "sha256 hex or null", "tidiedAt": null, "covers": null },
+  "since": {
+    "sessions": [{ "id": "uuid", "transcript": "/abs/path.jsonl", "modifiedAt": 0, "title": "first prompt or null" }],
+    "artifacts": [{ "id": "a1", "title": "...", "path": "/abs", "status": "current", "createdAt": 0 }],
+    "commits": [{ "sha": "...", "subject": "...", "at": 0 }],
+    "cards": [{ "id": "...", "title": "...", "notes": "...", "note": "...", "report": "...", "replies": [], "updatedAt": 0 }]
+  },
+  "cutoff": { "sessionsThrough": 0, "artifactsThrough": 0, "commit": "HEAD sha or null" }
+}
+```
+
+- `since` holds exactly the items `hws tidy status` counts as behind.
+- `cutoff` is taken when the packet is written. The time keys hold that moment, and `commit` holds HEAD. Work that lands during the pass stays in the next backlog.
+- `current.hash` is the sha256 of the note file, or null when the file does not exist.
+
+### Proposal
+
+The tidy agent writes `proposal.json` beside the packet.
+
+```json
+{
+  "version": 1,
+  "workspace": "sp...",
+  "packet": "/abs/packet.json",
+  "summary": "One paragraph for the person",
+  "current": "Full text of the new current note",
+  "demote": [{ "path": "/abs/docs/panel-options.md", "to": "history", "reason": "Decided Nov 8" }],
+  "artifacts": [{ "id": "a1", "status": "superseded", "supersedes": null }],
+  "cards": ["c1"]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `version` | 1 |
+| `workspace`, `packet`, `summary`, `current` | Text. `packet` is not empty |
+| `demote[]` | `path` is absolute or relative to the workspace folder. `to` is `history` or `trash`. `reason` is optional text |
+| `artifacts[]` | `id` and a `status` from the three. `supersedes` is an id, null, or absent to leave it unchanged |
+| `cards[]` | Card ids |
+
+A shape error exits 2 and names the field, such as `proposal demote[0].to must be history or trash`.
+
+### `hws tidy apply --file PROPOSAL [--skip current,demote,artifacts,cards] [--workspace W]`
+
+W defaults to the proposal's `workspace`, and the two must match. The tidy agent runs apply after Done brings the person's verdict. No surface runs it. Done on an unedited page sends `I reviewed proposal.md in Agent Brief and changed nothing.`, which counts as acceptance. Done on an edited page sends the edited copy, and the agent carries the changes into `proposal.md` and `proposal.json` before it opens the page again.
+
+Every check runs before the first write. Apply exits 1 and changes nothing when any of these holds.
+
+- The packet's `workspace` is not W.
+- The `current` place resolves to a path other than the packet's `current.path`.
+- The note's sha256 differs from the packet's `current.hash`. A null hash requires the note to still be missing.
+- `current` is not skipped and another writer owns the `current` place.
+- A demotion is missing, is or holds the current note, is the workspace folder or outside it, sits under a place another writer owns, is or holds any set place, or overlaps another demotion.
+- A `history` demotion is already under the `history` place, or another writer owns that place.
+- An artifact id is not in W, or `supersedes` names itself or an id not in W.
+- A card is not on W's task list, or has left Done.
+
+Then, for each part not skipped:
+
+1. `current` writes the note to the `current` place through a temporary file and a rename, with a final newline.
+2. `demote` sends `trash` demotions to the macOS Trash. A `history` demotion moves to `<history place>/<name>`, or to the Trash when `history` is unset. A taken name gains `-2`, `-3` and so on before the extension. The history folder is created when needed.
+3. `cards` archives each card through the task list's own locked write. The person accepted the proposal, so cards marked as theirs archive too.
+4. `artifacts` sets each `status`, and `supersedes` when the proposal gives it.
+
+Last, apply sets `current.tidiedAt` to now and `current.covers` to the packet's `cutoff`, and clears `tidy`, whatever was skipped.
+
+```json
+{
+  "wrote": "/abs/CURRENT.md or null when skipped",
+  "demoted": [{ "path": "/abs/docs/plan.md", "to": "/abs/docs/history/plan.md" }, { "path": "/abs/docs/scrap.md", "to": "trash" }],
+  "artifacts": [{ "id": "a1", "status": "superseded", "supersedes": null }],
+  "archived": ["c1"],
+  "skipped": ["cards"]
+}
+```
+
+A second apply of the same proposal fails on the hash, because the note has changed.
+
+### `hws tidy stop [--workspace W]`
+
+Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live. The record clears first because the tidy agent may run stop from that terminal. Prints `{ stopped: true, terminal }`, or `{ stopped: false, terminal: null }` and `no tidy pass is running` when none is recorded. Fails when the terminal stays live after the kill.
 
 ## Host environment
 
@@ -222,6 +438,49 @@ Setting `HWS_SURFACE_WEB=1` shows a surface in any web view in place of Pixel. W
 
 Page surfaces do not work in this mode yet, because reviews load from an Electron-only scheme.
 
+## Phone
+
+The Agent Brief app on an iPad or iPhone pairs with Herdr as one more host. `surface/app/src/phone/` wraps the unmodified iPad module in `surface/app/src/ipad/`. Surfaces never listen.
+
+| Item | Behaviour |
+|---|---|
+| Process | One per state root, plain Node, `surface/app/out/phone/host.cjs`, started with `hc run --bg` in a terminal with no pane |
+| Lifetime | Ends with Herdr. `hws phone pair`, `send` and `status` restart it. It exits when no phone is paired and no code is open |
+| Network | HTTPS on port 47614, peers on this Mac's subnets only. Agent Brief keeps 47613 |
+| Pairing | One-use code, 10 minutes. The QR code carries the certificate fingerprint, and the phone pins it |
+| Control | HTTP on the phone socket. `hws` is the only client |
+| Environment | `HWS_PHONE_DATA`, `HWS_PHONE_SOCKET`, `HWS_BIN`, and optional `HWS_PHONE_HOST`, `HWS_PHONE_PORT` |
+
+| Control route | Result |
+|---|---|
+| `GET /status` | `{pid,paired,devices,handoffs,error?}`, with only open hand-offs |
+| `POST /pair` | Opens pairing and returns `{url,qrSvg,qrText,network?,devices,error?}` |
+| `GET /pair` | The same sheet. `url` is gone once a phone has paired |
+| `DELETE /pair` | Cancels the code |
+| `POST /handoffs` | Body `{session,label,prompt?,page?,root?,board?}` |
+| `POST /forget` | Body `{id}` |
+| `POST /stop` | Quits |
+
+A send has an id `p<hex>` and a record at `<root>/phone/sends/<id>.json` with its workspace, terminal, type and file. Records and board copies older than 90 days go when a later send runs.
+
+| Sent | Phone shows | Root |
+|---|---|---|
+| `.html`, `.htm` | The page, to pin comments on | The workspace folder when the file is inside it with no dot segment, and is not home. Otherwise the file's folder |
+| `.excalidraw` | A copy of the drawing, to mark up | Not served as files |
+| Artifact id | The artifact's file, or its `board.excalidraw`, `index.html` or only `.html` | As above |
+
+The listener never serves a path with a segment starting with a dot. The phone cannot open Markdown, so render a note to HTML first.
+
+An answer from the phone follows these steps.
+
+1. The listener writes a bundle, as Done does, and calls `hws phone deliver`.
+2. `hws` adds a first line naming the file, moves the bundle under the workspace's `artifacts` place and records it with `fromTerminal`.
+3. A live terminal running an agent gets the prompt through `hc send`. Focus does not move.
+4. A terminal that ended or sits at a shell gets nothing, because `hc send` to a shell runs the text. The phone reports the artifact id.
+5. When `hws` fails, the phone keeps the work and retries.
+
+The original `.excalidraw` file is never overwritten. The bundle's `board.excalidraw` holds the phone's version.
+
 ## External commands
 
 Binaries resolve from `HWS_HERDR_APP`, default `herdr-app`, and `HWS_HC`, default `hc`. Tests point these at fakes.
@@ -257,7 +516,7 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | Add board, shown under the current workspace when it has no Board | `hws board add`, then shows the Board |
 | Panel button on the current workspace | `mod.open` for `hws-panel` |
 
-The section reloads with `hws list` when the spaces change and every 60 seconds. A workspace row shows its most urgent status and how many commits its folder is ahead of its upstream. Space rows show each space's status. Tabs appear only in the top bar. The section sizes its block with `layout.resize`, up to 300px of rows and then scrolling, and shows only the + when the sidebar is narrower than 160px.
+The section reloads with `hws list` when the spaces change and every 60 seconds. Each reload also runs `hws tidy status --workspace W` for every kept workspace. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A throwaway, or a failed status, shows no ring. Space rows show each space's status. Tabs appear only in the top bar. The section sizes its block with `layout.resize`, up to 300px of rows and then scrolling, and shows only the + when the sidebar is narrower than 160px.
 
 ## Chat and Terminal flip
 
@@ -317,6 +576,45 @@ Each region of the `hws` layout has one job.
 | Own window, or a pane beside the agent | Do the work | Boards in their own window, notes and pages in a pane |
 | Board | Plan and dispatch work | Full-width kanban, `hws-work` with `{"view":"tasks"}`. One Board space per workspace, or a Board tab in a plain space |
 | Right panel | See what the work produced | Files, Changes, Outputs |
+| Workspace panel | Read and keep the workspace's context | `hws-panel`, toggled by `mod.open:hws-panel`. A pane beside the terminal until a treatment is chosen in `docs/panel-options.md` |
+
+### Workspace panel: `hws-panel`
+
+Each section is a function in `mods/hws-panel/sections.js` that takes `{ t, host, workspace, target, now }`, so a pane, popup or window can host it. `target` is the agent last focused in the space, and actions that need one are off without it.
+
+| Workspace | Sections, top to bottom |
+|---|---|
+| Kept | Header, Current, Since last tidy, Artifacts, Places, Tabs and agents, Open surfaces, Close |
+| Throwaway | Header, Record, Tabs and agents, Open surfaces, Close |
+
+Reads, on each `hws list` refresh:
+
+- A kept workspace runs `hws tidy status --workspace W` and reads `line`, `live`, `places` and `writers` from it. It then reads the file at `places.current`.
+- When status fails, `hws place current --workspace W` supplies the note's path, and Since last tidy shows the failure.
+- A throwaway runs no `hws` call for its Record. Its scratch folder is its manifest `folder`, checked with `test -d`.
+- The panel never calls `hws place` per role, because it creates the `scratch` and `artifacts` folders.
+- A throwaway's header leaves out its folder, which is its scratch folder. Record shows that folder instead. The sidebar runs no `git` in a throwaway's folder.
+- The Keep or Trash dialog lists `artifacts` from `hws close`, then a Scratch folder line when `scratch` is set.
+
+| Control | Result |
+|---|---|
+| Stage pill | Shows `stage`. Display only |
+| Freshness ring and sentence | Ring from `behind`: fresh at zero, behind up to five, stale above. A workspace never tidied is at least behind. The sentence is `line`, or the same sentence built locally when `line` is null |
+| Open current | `hws surface open --type note --file <places.current> --terminal T` |
+| Tidy, or Tidy again with a live pass | `hws tidy start --workspace W` |
+| Current | The first 24 non-blank lines of the note. Each cite becomes a chip |
+| `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |
+| `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID` |
+| `[commit:SHA]` chip | Copies the sha with `pbcopy` |
+| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.html` or `.htm` path opens with `hws surface open --type page` beside T. Anything else, or no T, goes to macOS `open`. A file path is relative to the workspace folder |
+| Since last tidy | The four `behind` counts, then `items`, eight at first. A row runs its item's cite. A live pass row focuses its terminal |
+| Artifact status chip | `draft`, `current` or `superseded`. A missing status reads as `current`. Superseded ones fold under one row |
+| Place field | Holds the manifest's path, with the role's default as placeholder. Enter or Save runs `hws set --workspace W --place ROLE=PATH`. An emptied field shows Clear and runs `--place ROLE=`. The label's tooltip is the resolved path from `places` |
+| Place another tool writes | Read only, with its path and `written by NAME`, when `writers` or the stored entry names a writer other than `hws` |
+| Suggest from folder | `hc send T` with a prompt asking the agent to propose a place map and record it with `hws set --place` |
+| Record session row | The `[session:ID]` action |
+| Record scratch folder | macOS `open` on the folder, shown when it exists |
+| Promote… | Opens the Promote dialog |
 
 ### New menu: `hws-actions`
 
@@ -338,6 +636,8 @@ A popup that the pane header and the chat composer open at the pointer.
 | Write | Always | `hws surface open --type note` |
 | Write from last reply | `lastReply` is set | Writes the reply to a file, then opens it with `--type note --file F` |
 | Review a page… | Always | macOS file chooser, then `--type page --file F` |
+| Send to phone… | Always | macOS file chooser, then `hws phone send F --terminal T` |
+| Pair phone | Always | `hws phone pair` |
 | Attach file… | `chat` is true | `setShared("hws-chat.attach", { pane, at })` |
 | Tasks | Always | Opens the Board tab |
 | Outputs | Always | Selects `outputs` in `panel-body` and shows `panel` |
@@ -431,7 +731,7 @@ Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its 
 
 | Command | Does |
 |---|---|
-| `hws todo list [--space S]` | Prints unarchived items, newest `updatedAt` first, and `orchestrator` as `{ terminal, live }` or null |
+| `hws todo list [--archived] [--space S]` | Prints unarchived items, newest `updatedAt` first, `orchestrator` as `{ terminal, live }` or null, and `workspace`, the workspace id or null for a plain space. `--archived` adds archived items, which the card dialog shows read-only |
 | `hws todo add --title X [--notes N] [--owner mine\|unassigned\|agent] [--worktree] [--space S]` | Adds to `todo`. `owner` defaults to unassigned |
 | `hws todo add --titles T [--space S]` | Adds one card for each non-blank line of T, and prints `{ items }` |
 | `hws todo edit --id I [--title X] [--notes N] [--owner mine\|unassigned\|agent] [--worktree true\|false] [--space S]` | Changes the text or flags |
@@ -439,7 +739,7 @@ Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its 
 | `hws todo status [--space S]` | Prints `ready` with each card's `note`, then `inFlight` with `live`, `waiting`, `needsAllow`, `done` and `orchestrator` |
 | `hws todo resume --id I [--space S]` | Opens the card's `session` in a new tab of the space with `claude --resume` or `codex resume`, and sets `terminal` to it. Fails when the card has no session or its terminal is still live |
 | `hws todo start --ids I,J --folder D [--owns A,B] [--avoid C,D] [--packet-file F] [--space S]` | From the orchestrator's terminal, starts one worker on the cards, in order, with the Models setting. Names it `todo-I-<random>` with label `hws.todo=I,J`, claims the cards for it, and saves a Claude worker's session id, model and effort up front |
-| `hws models` | Prints `orchestrator`, `worker`, each `{ tool, model, effort }`, and `catalog` |
+| `hws models` | Prints `orchestrator`, `worker`, each `{ tool, model, effort }`, `catalog`, and `recommended` with the default `orchestrator` and `worker` |
 | `hws models set --role orchestrator\|worker [--tool claude\|codex] --model M --effort E` | Saves a role. The orchestrator must use Claude Code |
 | `hws todo capture --terminal T --text X [--space S]` | Copies X to `report` on the cards whose `reportFrom` is T, then clears it. Only cards T ran take the report. If T is a worker with no card left in progress or waiting, closes T. The plugin's Stop hook runs this with the session's closing message |
 | `hws todo note --id I --text X [--space S]` | Sets `note`, the latest word from the worker. A Herdr terminal on a card outside To do that sets it fills an empty `terminal` |
@@ -448,6 +748,8 @@ Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its 
 | `hws todo send --id I --terminal T [--space S]` | Pastes the title and notes into T with `hc send`, sets `terminal` and `owner` agent, moves to `doing` |
 | `hws todo reply --id I --text X [--space S]` | Pastes X into the card's `terminal`, clears `note`, moves to `doing` |
 | `hws todo archive --id I [--space S]` | Sets `archived`. Nothing is deleted |
+
+Agents can use a Board only inside a workspace. Every `hws todo` and `hws orchestrator` command fails when `$HC_TERMINAL_ID` is set and the space is plain. `hws todo send`, `reply` and `resume` and `hws orchestrator start` reach an agent, so they fail on a plain space for every caller. A Board in a plain space stays the person's own list, with no Allow, Run, Resume, Reply or Send to, and no Agent owner. The session-start hook names the task list only inside a workspace.
 
 `--space` defaults to the calling agent's own space, from `$HC_TERMINAL_ID`. A terminal Herdr cannot place is an error, so a card never lands on another space's board. With no `$HC_TERMINAL_ID`, it defaults to the window's selected space. Mods always pass it.
 
@@ -479,3 +781,29 @@ Orchestration is a way of operating on the list, and is off until you start it. 
 - Only a card owned by agent is taken.
 
 A surface runs on this computer. The `+` menu is hidden for a remote agent, and `hws surface open` refuses a terminal whose address has a machine prefix.
+
+## Claude Code plugin
+
+`plugin/` holds the hooks and skills. Claude Code finds each skill at `plugin/skills/<name>/SKILL.md`, so no manifest lists them. Bump `version` in `plugin/.claude-plugin/plugin.json` when a hook or skill changes, so installs pick it up.
+
+| Skill | Loaded | Does |
+|---|---|---|
+| `herdr-workspace` | When the person mentions a workspace, the task list, where files land or a surface | Explains the manifest, places, the task list and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
+| `orchestrate` | By the first prompt of `hws orchestrator start` | Runs the board |
+| `tidy` | By the first prompt of `hws tidy start` | Reads the packet, writes `proposal.json` and `proposal.md` beside it, opens `proposal.md` with `hws surface open --type page --file F --terminal T` and ends the turn. On Done it runs `hws tidy apply --file proposal.json`, with `--skip` for parts the person turned down |
+
+### Session start
+
+`plugin/hooks/session-start.sh` runs on `SessionStart` when `HC_TERMINAL_ID` is set. It exits 0 on every path and prints nothing when a step fails.
+
+1. Runs `hws register --terminal T --session S --json` and `hws current --line` in parallel.
+2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
+3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line.
+
+| Places sentence | |
+|---|---|
+| Form | `Artifacts land in docs/, drafts in .herdr-workspace/x-1234/scratch/, the current note is docs/NEXT-STEPS.md.` |
+| Paths | Relative to the hook's `cwd` when inside it, absolute otherwise. Folders end in `/` |
+| Unset role | Its clause is left out. No clauses leaves out the sentence |
+
+Each `hws` call gets 2 seconds and stdin gets 1. The two rounds give a worst case of 5 seconds, under the 6 second `timeout` in `hooks.json`.

@@ -4,7 +4,8 @@ import { UsageError } from '../errors.js';
 import { act } from '../herdr.js';
 import { createManifest } from '../manifest.js';
 import { expandFolder } from '../paths.js';
-import { requireFlag } from '../resolve.js';
+import { ensurePlace } from '../places.js';
+import { requireFlag, splitList } from '../resolve.js';
 import { parentFolder, rememberParent, requireFolder } from '../settings.js';
 
 export const KEPT_KINDS = ['general', 'app', 'deliverable'];
@@ -20,16 +21,9 @@ export function keptFields(flags) {
   return { name, folder, kind: keptKind(flags.kind) };
 }
 
-export function createWorkspace({ name, kind, folder, instructions, tabs }) {
-  const [firstTab, ...otherTabs] = tabs;
-  const first = act('space.new', { name, folder, argv: firstTab.argv });
-  if (firstTab.name) act('tab.rename', { id: first.tab, name: firstTab.name });
-  const opened = [{ ...first, name: firstTab.name }];
-  for (const tab of otherTabs) {
-    opened.push({ ...act('tab.new', { name: tab.name, space: first.space, folder, argv: tab.argv }), name: tab.name });
-  }
+function manifestFor({ name, kind, folder, instructions }, space, opened) {
   return createManifest({
-    id: first.space,
+    id: space,
     name,
     kind,
     folder,
@@ -39,9 +33,31 @@ export function createWorkspace({ name, kind, folder, instructions, tabs }) {
   });
 }
 
+export function createWorkspace({ name, kind, folder, instructions, tabs }) {
+  const [firstTab, ...otherTabs] = tabs;
+  const first = act('space.new', { name, folder, argv: firstTab.argv });
+  if (firstTab.name) act('tab.rename', { id: first.tab, name: firstTab.name });
+  const opened = [{ ...first, name: firstTab.name }];
+  for (const tab of otherTabs) {
+    opened.push({ ...act('tab.new', { name: tab.name, space: first.space, folder, argv: tab.argv }), name: tab.name });
+  }
+  return manifestFor({ name, kind, folder, instructions }, first.space, opened);
+}
+
+// A throwaway lives in its scratch folder, whose path holds the space id. So
+// the space opens on a shell in the parent folder, and that shell closes once
+// the throwaway's tabs are open in scratch.
+function createThrowaway({ name, parent, tabs }) {
+  const shell = act('space.new', { name, folder: parent });
+  const scratch = ensurePlace({ id: shell.space, kind: 'throwaway', folder: parent }, 'scratch').path;
+  const opened = tabs.map((tab) => ({ ...act('tab.new', { name: tab.name, space: shell.space, folder: scratch, argv: tab.argv }), name: tab.name }));
+  act('tab.close', { id: shell.tab, confirmed: true });
+  return manifestFor({ name, kind: 'throwaway', folder: scratch }, shell.space, opened);
+}
+
 // With no names, the workspace starts with one tab Herdr numbers.
 function parseTabs(value) {
-  const names = (value ?? '').split(',').map((name) => name.trim()).filter(Boolean);
+  const names = splitList(value);
   return names.length > 0 ? names.map((name) => ({ name })) : [{}];
 }
 
@@ -67,11 +83,6 @@ export function newWorkspace(flags) {
 export function newThrowaway(flags) {
   const name = flags.name ?? `throwaway-${randomBytes(2).toString('hex')}`;
 
-  const manifest = createWorkspace({
-    name,
-    kind: 'throwaway',
-    folder: parentFolder(),
-    tabs: [{ name: 'Claude', argv: ['claude'] }],
-  });
+  const manifest = createThrowaway({ name, parent: parentFolder(), tabs: [{ name: 'Claude', argv: ['claude'] }] });
   return { data: manifest, text: `created throwaway ${name} (${manifest.id})` };
 }

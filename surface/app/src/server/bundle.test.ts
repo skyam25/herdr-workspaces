@@ -62,6 +62,10 @@ describe('a draft opened from a project file', () => {
     expect(buildDraft('id1', edited)).toBe(`@.feedback/sketches/id1/draft.md\n${ask}`);
   });
 
+  it('reports a review with no changes when the draft still matches the file', () => {
+    expect(buildDraft('id1', { ...edited, sourceUnchanged: true })).toBe('I reviewed docs/plan.md in Agent Brief and changed nothing.');
+  });
+
   it('puts the two lines before the sketch lines when a sketch goes too', () => {
     expect(buildDraft('id1', { ...sketch, ...edited, boardName: 'flow' }).split('\n')).toEqual([
       '@.feedback/sketches/id1/draft.md',

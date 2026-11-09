@@ -1,5 +1,5 @@
 {
-  "description": "Register the session with its Herdr workspace, tell Claude which workspace it is in, copy a closing message onto the cards it finished, and show a flipped agent's permission requests in its chat.",
+  "description": "Register the session with its Herdr workspace, tell Claude which workspace it is in, where files land and how fresh the current note is, copy a closing message onto the cards it finished, and show a flipped agent's permission requests in its chat.",
   "hooks": {
     "SessionStart": [
       {

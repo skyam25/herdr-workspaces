@@ -1,23 +1,16 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, extname, join, resolve } from 'node:path';
 
 import { HwsError } from './errors.js';
 import { updateManifest, listManifests } from './manifest.js';
-import { STANDALONE, keptArtifactDir, standaloneArtifactDir, throwawayArtifactDir } from './paths.js';
 import { listRetired } from './retired.js';
-
-export function artifactStoreDir(manifest, artifactId) {
-  if (manifest.id === STANDALONE) return standaloneArtifactDir(artifactId);
-  if (manifest.kind === 'throwaway') return throwawayArtifactDir(manifest.id, artifactId);
-  return keptArtifactDir(manifest.folder, manifest, artifactId);
-}
 
 export function linkFor(promptPath) {
   return /\s/.test(promptPath) ? `@"${promptPath}"` : `@${promptPath}`;
 }
 
 // Across volumes, the source goes only after the copy succeeds.
-function moveDir(source, target) {
+export function moveDir(source, target) {
   mkdirSync(dirname(target), { recursive: true });
   try {
     renameSync(source, target);
@@ -26,6 +19,15 @@ function moveDir(source, target) {
     cpSync(source, target, { recursive: true });
     rmSync(source, { recursive: true });
   }
+}
+
+// Never replaces a file, so a repeated name gains a number.
+export function freeName(folder, name) {
+  const extension = extname(name);
+  const stem = name.slice(0, name.length - extension.length);
+  let candidate = join(folder, name);
+  for (let count = 2; existsSync(candidate); count += 1) candidate = join(folder, `${stem}-${count}${extension}`);
+  return candidate;
 }
 
 // Lists the spellings a prompt may use for a folder.

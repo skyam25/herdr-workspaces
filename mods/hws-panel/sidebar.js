@@ -5,6 +5,8 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, layout, openOverlay, run, shared, spaces, theme } from "herdr";
 import { hws, message, openWorkspaceForm } from "./hws.js";
+import { freshness } from "./context.js";
+import { freshnessDot } from "./sections.js";
 
 const NODE = "workspaces";
 const HEADING_PX = 31;
@@ -57,7 +59,20 @@ async function aheadOf(folder) {
   }
 }
 
-function load(state, cx) {
+// A kept workspace's freshness as `{ level, title }`. A throwaway has no current
+// note, and a failed call shows no dot.
+async function freshnessOf(workspace) {
+  if (workspace.kind === "throwaway") return null;
+  try {
+    const status = await hws(["tidy", "status", "--workspace", workspace.id]);
+    const level = freshness(status);
+    return level ? { level, title: status.line } : null;
+  } catch {
+    return null;
+  }
+}
+
+function load(state, cx, { listOnly = false } = {}) {
   if (state.fetching) {
     state.fetchAgain = true;
     return;
@@ -66,9 +81,17 @@ function load(state, cx) {
   cx.spawn(async (cx) => {
     try {
       state.workspaces = await hws(["list"]);
-      const counts = await Promise.all(state.workspaces.map(async (w) => [w.id, await aheadOf(w.folder)]));
-      state.ahead = Object.fromEntries(counts);
       state.problem = null;
+
+      // The list paints first, so a slow `git` or `hws tidy status` cannot hold up a new row.
+      fit(state);
+      cx.notify();
+      if (!listOnly) {
+        // A throwaway's folder is its scratch folder, so git is never asked there.
+        const extras = await Promise.all(state.workspaces.map((w) => Promise.all([w.id, w.kind === "throwaway" ? 0 : aheadOf(w.folder), freshnessOf(w)])));
+        state.ahead = Object.fromEntries(extras.map(([id, ahead]) => [id, ahead]));
+        state.fresh = Object.fromEntries(extras.map(([id, , fresh]) => [id, fresh]));
+      }
     } catch (e) {
       state.problem = message(e);
     }
@@ -86,8 +109,7 @@ function listPx(state) {
   const shown = spaces();
   const px = state.workspaces.reduce((sum, w) => {
     const members = membersOf(w, shown);
-    const addRows = showsAddRows(state, w, members) ? (hasBoard(w, members) ? 1 : 2) : 0;
-    const rows = (showsSpaces(state, w, members) ? members.length : 0) + addRows;
+    const rows = (showsSpaces(state, w, members) ? members.length : 0) + addRowSpecs(state, w, members).length;
     return sum + ROW_PX + rows * SPACE_ROW_PX;
   }, 0);
   return Math.min(Math.max(px, ROW_PX), MAX_LIST_PX);
@@ -103,13 +125,14 @@ function fit(state) {
 
 const changeKey = () => `${spaces().map((s) => s.id).join()}|${shared(WORKSPACES_CHANGED) ?? 0}`;
 
-// A change in the spaces is the cheap signal to reload.
+// A change in the spaces is the cheap signal to reload. The first load only
+// lists, because the manifest may not exist until the delayed load.
 function check(state, cx) {
   const key = changeKey();
   fit(state);
   if (key === state.spaceKey) return;
   state.spaceKey = key;
-  load(state, cx);
+  load(state, cx, { listOnly: true });
   cx.spawn(async (cx) => {
     await cx.sleep(MANIFEST_WAIT_MS);
     load(state, cx);
@@ -125,6 +148,7 @@ export function startSidebar(cx) {
     spaceKey: changeKey(),
     folded: new Set(JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]")),
     ahead: {},
+    fresh: {},
   };
   load(state, cx);
   cx.timer.every(CHECK_MS, (cx) => check(state, cx));
@@ -196,10 +220,11 @@ function foldButton(t, state, id) {
 
 const statusDot = (t, status) => div().size(6).rounded(3).flex_none().bg(t[status] ?? t.dim);
 
-function removeSpace(state, id, cx) {
+// Runs a change and reloads the list. A failure shows in place of the list.
+function changeThenLoad(state, cx, work) {
   cx.spawn(async (cx) => {
     try {
-      await hws(["space", "remove", "--space", id]);
+      await work();
       state.problem = null;
     } catch (e) {
       state.problem = message(e);
@@ -208,6 +233,10 @@ function removeSpace(state, id, cx) {
     }
     load(state, cx);
   });
+}
+
+function removeSpace(state, id, cx) {
+  changeThenLoad(state, cx, () => hws(["space", "remove", "--space", id]));
 }
 
 function openAddSpace(workspace) {
@@ -244,17 +273,7 @@ function spaceRow(t, state, workspace, space) {
 }
 
 function addBoard(state, workspace, cx) {
-  cx.spawn(async (cx) => {
-    try {
-      showBoard(await hws(["board", "add", "--workspace", workspace.id]));
-      state.problem = null;
-    } catch (e) {
-      state.problem = message(e);
-      cx.notify();
-      return;
-    }
-    load(state, cx);
-  });
+  changeThenLoad(state, cx, async () => showBoard(await hws(["board", "add", "--workspace", workspace.id])));
 }
 
 function addRow(t, id, label, onClick) {
@@ -276,11 +295,12 @@ function addRow(t, id, label, onClick) {
     .child(label);
 }
 
-function addRows(t, state, workspace, members) {
-  return [
-    addRow(t, `sidebar-add-space-${workspace.id}`, "Add space", () => openAddSpace(workspace)),
-    ...(hasBoard(workspace, members) ? [] : [addRow(t, `sidebar-add-board-${workspace.id}`, "Add board", (cx) => addBoard(state, workspace, cx))]),
-  ];
+// Sizing and drawing both read this list, so the block always fits its rows.
+function addRowSpecs(state, workspace, members) {
+  if (!showsAddRows(state, workspace, members)) return [];
+  const addSpace = { id: `sidebar-add-space-${workspace.id}`, label: "Add space", onClick: () => openAddSpace(workspace) };
+  if (hasBoard(workspace, members)) return [addSpace];
+  return [addSpace, { id: `sidebar-add-board-${workspace.id}`, label: "Add board", onClick: (cx) => addBoard(state, workspace, cx) }];
 }
 
 function workspaceRow(t, state, workspace, members) {
@@ -288,6 +308,7 @@ function workspaceRow(t, state, workspace, members) {
   const status = mostUrgent(members);
   const target = members.find((s) => s.active) ?? members[0];
   const ahead = state.ahead[workspace.id] ?? 0;
+  const fresh = state.fresh[workspace.id] ?? null;
   return h_flex()
     .id(`sidebar-workspace-${workspace.id}`)
     .h(ROW_PX)
@@ -303,6 +324,7 @@ function workspaceRow(t, state, workspace, members) {
     .when(members.length > 1, (el) => el.child(foldButton(t, state, workspace.id)))
     .child(svg(icon("layers")).size(14).flex_none().text_color(isActive ? t.foreground : t.dim))
     .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(workspace.name))
+    .when(Boolean(fresh), (el) => el.child(div().id(`sidebar-fresh-${workspace.id}`).flex_none().child(freshnessDot(t, fresh.level)).tooltip(fresh.title)))
     .when(workspace.kind === "throwaway", (el) => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child("Throwaway")))
     .when(Boolean(status), (el) => el.child(statusDot(t, status)))
     .when(ahead > 0, (el) => el.child(div().flex_none().text_size(11.5).text_color(t.ansi2).child(`\u2191${ahead}`)))
@@ -319,7 +341,7 @@ function rows(t, state) {
     return [
       workspaceRow(t, state, w, members),
       ...(showsSpaces(state, w, members) ? boardFirst(w, members).map((space) => spaceRow(t, state, w, space)) : []),
-      ...(showsAddRows(state, w, members) ? addRows(t, state, w, members) : []),
+      ...addRowSpecs(state, w, members).map(({ id, label, onClick }) => addRow(t, id, label, onClick)),
     ];
   });
 }

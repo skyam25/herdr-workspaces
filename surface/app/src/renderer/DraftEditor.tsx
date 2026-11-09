@@ -188,7 +188,7 @@ export function DraftEditor(props: {
       )}
       {draft.source && (
         <p className="draft-source muted" data-testid="draft-source">
-          {sourceLine(draft.source.path, sourceOutline)}
+          {sourceLine(draft.source.path, sourceOutline, props.surface ? 'Done' : 'Send')}
         </p>
       )}
       {draft.source && fileChanged && (

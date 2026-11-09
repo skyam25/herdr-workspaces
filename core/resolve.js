@@ -19,6 +19,11 @@ export function workspaceOfTerminal(terminal) {
   return manifest;
 }
 
+// Reads a comma-separated flag. A missing flag is an empty list.
+export function splitList(value) {
+  return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+}
+
 export function callingTerminal(flags) {
   return flags.terminal ?? process.env.HC_TERMINAL_ID;
 }
