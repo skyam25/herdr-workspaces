@@ -3,11 +3,10 @@ import { act, keepingSelection, requireLive } from '../herdr.js';
 import { withLock } from '../lock.js';
 import { manifestOfSpace, readManifest, updateManifest } from '../manifest.js';
 import { expandFolder } from '../paths.js';
-import { requireFlag, resolveWorkspace, workspaceByRef } from '../resolve.js';
+import { callerIsAgent, requireFlag, resolveWorkspace, workspaceByRef } from '../resolve.js';
 import { requireFolder } from '../settings.js';
 import { boardOf, moveCards } from './todo.js';
 
-// The tab bar hides a tab with this name, because the sidebar lists the Board.
 const BOARD_TAB = 'Workspace board';
 
 function liveSpace(id) {
@@ -90,7 +89,7 @@ function ensureBoard(id) {
   const openBoard = () => act('tab.new', { name: BOARD_TAB, space, mod: 'hws-work', props: { view: 'tasks' } });
 
   // An agent adding a Board must not take the window from the person.
-  const { tab } = process.env.HC_TERMINAL_ID ? keepingSelection(openBoard) : openBoard();
+  const { tab } = callerIsAgent() ? keepingSelection(openBoard) : openBoard();
   if (fresh) act('tab.close', { id: fresh.tab, confirmed: true });
   const board = { space, tab };
   updateManifest(id, (draft) => {

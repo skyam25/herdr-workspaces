@@ -459,7 +459,7 @@ test("+ Add opens a new to-do for the active space", async () => {
   H.hws["todo list"] = todoList();
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("add");
-  assert.deepEqual(H.overlays.map((o) => o.props), [{ space: "spc1", members: [], plainSpace: false, view: "todo", height: 480 }]);
+  assert.deepEqual(H.overlays.map((o) => o.props), [{ space: "spc1", members: [], view: "todo", height: 480 }]);
   assert.equal(H.overlays[0].mod, "hws-work");
   assert.equal(H.overlays[0].kind, "dialog");
 });
@@ -469,7 +469,7 @@ test("Add several opens its own dialog for the active space", async () => {
   H.hws["todo list"] = todoList();
   const m = await mount("hws-work", { view: "tasks" });
   await m.click("add-several");
-  assert.deepEqual(H.overlays[0].props, { space: "spc1", members: [], plainSpace: false, view: "add-several" });
+  assert.deepEqual(H.overlays[0].props, { space: "spc1", members: [], view: "add-several" });
   assert.equal(H.overlays[0].height, 342);
 });
 
@@ -794,6 +794,13 @@ test("a worker silent since it was claimed counts as blocked", async () => {
   H.hws["todo list"].items = [todo("a", "A", { column: "doing", terminal: "t20", updatedAt: 1 })];
   const m = await mount("hws-work", { view: "tasks" });
   assert.match(textOf(findNode(m, "run-status")), /^1 blocked, press Open/);
+});
+
+test("a worker that has taken a turn is not blocked by staying quiet", async () => {
+  const H = orchWorld(null, { terminals: [{ address: "t20", state: "live", status: null, turn: 2, labels: { "hws.todo": "a" } }] });
+  H.hws["todo list"].items = [todo("a", "A", { column: "doing", terminal: "t20", updatedAt: 1 })];
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.doesNotMatch(textOf(findNode(m, "run-status")), /blocked/);
 });
 
 test("the header counts what is running and what waits on you", async () => {
@@ -1206,7 +1213,7 @@ test("a press and release on the same card opens the to-do without a visible dra
   assert.equal(findNode(m, "lane-todo").bg, "color:chrome");
   assert.equal(findNode(m, "todo-a1").opacity, undefined);
   await release(m, "todo-a1", "lane-todo", "root");
-  assert.deepEqual(H.overlays.map((o) => o.props), [{ view: "todo", height: 480, space: "spc1", members: [], plainSpace: false, id: "a1" }]);
+  assert.deepEqual(H.overlays.map((o) => o.props), [{ view: "todo", height: 480, space: "spc1", members: [], id: "a1" }]);
   assert.equal(moves(H).length, 0);
   assert.equal(m.view.drag, null);
 });
@@ -1763,22 +1770,13 @@ test("hws-work uses only methods and imports Herdr provides", () => {
   }
 });
 
-// A Board in a plain space
+// A Board tab left in a plain space
 
-test("a plain space's Board keeps the person's cards and offers nothing that reaches an agent", async () => {
+test("a plain space shows why it has no Board and offers no controls", async () => {
   const H = orchWorld(null);
-  H.hws["todo list"] = { ...todoList(todo("r1", "Ready", { owner: "agent" }), todo("u1", "Open"), todo("u2", "Also open"), todo("d1", "Old", { column: "done", session: { tool: "claude", id: "s", folder: "/w" } })), workspace: null };
-  const m = await mount("hws-work", { view: "tasks" });
+  H.hws["todo list"] = { items: [], orchestrator: null, spaces: ["spc1"], workspace: null };
+  const m = await mount("hws-work", { view: "tasks" }, H);
 
-  assert.match(m.text(), /Open/);
-  for (const id of ["run-board", "allow-all", "allow-u1", "resume-d1"]) assert.equal(m.has(id), false, id);
-});
-
-test("the to-do dialog in a plain space has no Send to, Reply or Agent owner", async () => {
-  const H = dialogWorld(todo("a1", "Fix login", { column: "waiting", note: "Which host?", terminal: "t1" }));
-  const m = await mount("hws-work", { view: "todo", space: "spc1", overlay: "ov9", id: "a1", plainSpace: true }, H);
-
-  assert.equal(/Send to|Reply/.test(m.text()), false);
-  assert.equal(m.has("owner-agent"), false);
-  assert.equal(m.has("owner-mine"), true);
+  assert.match(m.text(), /only available inside a workspace/);
+  for (const id of ["add", "add-several", "run-board", "board"]) assert.equal(m.has(id), false, id);
 });

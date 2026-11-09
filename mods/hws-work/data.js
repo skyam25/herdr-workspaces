@@ -136,7 +136,8 @@ export function board(bound, docs) {
   return columns;
 }
 
-export const todoItems = (listed) => listed?.items ?? [];
+// Summaries are worked out once per load, because the Board draws every card on each render.
+export const todoItems = (listed) => (listed?.items ?? []).map((item) => ({ ...item, summary: cardSummary(item) }));
 
 function modelName(settings, role) {
   const { tool, model } = settings[role];

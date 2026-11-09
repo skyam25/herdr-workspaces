@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync, rmdirSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { resumeArgv } from '../agent-session.js';
@@ -6,7 +6,7 @@ import { moveDir, relocateArtifact } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isIdleShell, killTerminal, listLive, requireLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
-import { STANDALONE, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
+import { STANDALONE, captureDir, terminalSessionDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
 import { applyPlaces, assertRole, assertStage, ensurePlace, parseAssignment, placeOf, writablePlace } from '../places.js';
 import { resolveWorkspace } from '../resolve.js';
 import { containsFile, isStored, lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
@@ -18,6 +18,7 @@ import { spaceOfTerminal } from './todo.js';
 const HOUR_MS = 60 * 60 * 1000;
 const THROWAWAY_IDLE_MS = 24 * HOUR_MS;
 const RETIRED_KEEP_MS = 30 * 24 * HOUR_MS;
+const HINT_KEEP_MS = 30 * 24 * HOUR_MS;
 
 // `done` means an answer nobody has looked at yet, so it counts as in use.
 const QUIET_STATUSES = new Set([null, undefined, '', 'idle']);
@@ -64,6 +65,15 @@ function dropEmptyClosedWindows() {
     updateManifest(manifest.id, (draft) => {
       draft.surfaces = draft.surfaces.filter((surface) => !closed.includes(surface.id));
     });
+  }
+}
+
+// Markers and session records are hints, so old ones go without asking about their terminals.
+function dropOldHints(dir) {
+  const cutoff = Date.now() - HINT_KEEP_MS;
+  for (const name of existsSync(dir) ? readdirSync(dir) : []) {
+    const path = join(dir, name);
+    if (statSync(path).mtimeMs < cutoff) rmSync(path, { force: true });
   }
 }
 
@@ -151,6 +161,8 @@ export function prune() {
     return { data: { pruned: [], expired: [], skipped: true }, text: 'the Herdr window did not answer, so nothing changed' };
   }
   dropEmptyClosedWindows();
+  dropOldHints(captureDir());
+  dropOldHints(terminalSessionDir());
   const liveIds = new Set(live.spaces.map((space) => space.id));
   const pruned = [];
   const open = [];

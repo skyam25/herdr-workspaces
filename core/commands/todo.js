@@ -1,14 +1,16 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 import { callerSession, resumeArgv, sessionOfTerminal } from '../agent-session.js';
+import { agentArgv, agentTool } from '../agent-tools.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, listLive, sendText, startWorker, terminalInfo, windowStatus } from '../herdr.js';
 import { withLock } from '../lock.js';
 import { manifestOfSpace, readManifest, writeJsonAtomic } from '../manifest.js';
-import { todosPath } from '../paths.js';
-import { requireFlag, splitList } from '../resolve.js';
-import { agentArgv, agentModels } from '../settings.js';
+import { capturePath, todosPath } from '../paths.js';
+import { callerIsAgent, requireFlag, splitList } from '../resolve.js';
+import { agentModels } from '../settings.js';
 import { workerPrompt } from '../worker-prompt.js';
 
 const COLUMNS = ['todo', 'doing', 'waiting', 'done'];
@@ -47,23 +49,23 @@ function callerSpace(flags) {
   return selected;
 }
 
-// The person keeps a list in a plain space, but agents use a Board only inside a workspace.
 export function requireWorkspace(space) {
-  if (!manifestOfSpace(space)) throw new HwsError(`agents can use the Board only inside a workspace, and space ${space} is not in one`);
+  if (!manifestOfSpace(space)) throw new HwsError(`the Board is only available inside a workspace, and space ${space} is not in one`);
 }
 
 function resolveSpace(flags) {
   const space = callerSpace(flags);
-  if (process.env.HC_TERMINAL_ID) requireWorkspace(space);
+  requireWorkspace(space);
   return space;
 }
 
-// Spaces in a workspace share its board. A space that left a workspace it founded
-// shares that workspace's id, so its own board needs a different name.
+// Spaces in a workspace share its board. A space that left a workspace it founded shares
+// that workspace's id, so its own board keeps a different name, even once the workspace closes.
 export function boardOf(space) {
   const manifest = manifestOfSpace(space);
   if (manifest) return manifest.id;
-  return readManifest(space) ? `${space}~space` : space;
+  const own = `${space}~space`;
+  return readManifest(space) || existsSync(todosPath(own)) ? own : space;
 }
 
 export function resolveBoard(flags) {
@@ -136,14 +138,14 @@ function findOpenItem(todos, id) {
 
 // A Herdr terminal is an agent's, and the Board runs with no terminal set.
 function refuseAgentOnMine(item) {
-  if (item.owner === 'mine' && process.env.HC_TERMINAL_ID) {
+  if (item.owner === 'mine' && callerIsAgent()) {
     throw new HwsError(`to-do ${item.id} is the person's own, so change it on the Board`);
   }
 }
 
 // Only the person assigns work, so the Board is the one place that can.
 function refuseAgentAssigning(id) {
-  if (process.env.HC_TERMINAL_ID) throw new HwsError(`to-do ${id} needs the person to press Allow on the Board`);
+  if (callerIsAgent()) throw new HwsError(`to-do ${id} needs the person to press Allow on the Board`);
 }
 
 function findChangeableItem(todos, id) {
@@ -245,14 +247,19 @@ function textToSend(item) {
 }
 
 export function todoList(flags) {
-  const space = resolveSpace(flags);
+  const space = callerSpace(flags);
+  const manifest = manifestOfSpace(space);
+
+  // A mod asks with no terminal, and a plain space answers that it has no Board.
+  if (!manifest && !callerIsAgent()) return { data: { items: [], orchestrator: null, spaces: [space], workspace: null } };
+
+  requireWorkspace(space);
   const todos = readTodos(boardOf(space));
   const shown = todos.items.filter((item) => flags.archived || !item.archived).sort((a, b) => b.updatedAt - a.updatedAt);
 
   // An agent reading the board skips the reports, which can be long.
-  const items = process.env.HC_TERMINAL_ID && !flags.reports ? shown.map(({ report, reportFrom, ...item }) => item) : shown;
-  const manifest = manifestOfSpace(space);
-  return { data: { items, orchestrator: orchestratorState(todos), spaces: manifest?.spaces ?? [space], workspace: manifest?.id ?? null } };
+  const items = callerIsAgent() && !flags.reports ? shown.map(({ report, reportFrom, ...item }) => item) : shown;
+  return { data: { items, orchestrator: orchestratorState(todos), spaces: manifest.spaces, workspace: manifest.id } };
 }
 
 function addTitles(flags) {
@@ -291,6 +298,13 @@ export function todoEdit(flags) {
   return { data: changeOpenItem(resolveBoard(flags), id, changes) };
 }
 
+// The Stop hook skips a terminal with no marker, so most turns start no process at all.
+function expectCapture(terminal) {
+  const marker = capturePath(terminal);
+  mkdirSync(dirname(marker), { recursive: true });
+  writeFileSync(marker, '');
+}
+
 export function todoMove(flags) {
   const id = requireFlag(flags, 'id');
   if (!COLUMNS.includes(flags.column)) throw new UsageError('--column must be todo, doing, waiting or done');
@@ -303,7 +317,9 @@ export function todoMove(flags) {
 
   // Back in To do, a card has no runner until the next one claims it.
   if (flags.column === 'todo') Object.assign(changes, { terminal: null, session: null });
-  return { data: changeOpenItem(resolveBoard(flags), id, changes, true) };
+  const item = changeOpenItem(resolveBoard(flags), id, changes, true);
+  if (changes.reportFrom) expectCapture(changes.reportFrom);
+  return { data: item };
 }
 
 // Copies a session's closing message onto the cards it ended in that turn.
@@ -327,6 +343,7 @@ export function todoCapture(flags) {
   const { items } = readTodos(board);
   const finished = cardIds.length > 0 && cardIds.every((id) => ['done', 'todo'].includes(items.find((item) => item.id === id)?.column));
   const closed = finished && killTerminal(terminal);
+  if (closed || cardIds.length === 0) rmSync(capturePath(terminal), { force: true });
   return { data: { captured: cards?.length ?? 0, closed } };
 }
 
@@ -344,13 +361,15 @@ export function todoStart(flags) {
   const packet = flags['packet-file'] ? readFileSync(flags['packet-file'], 'utf8') : '';
 
   // Naming Claude's session up front means a worker that dies early can still be resumed.
-  const session = worker.tool === 'claude' ? { tool: 'claude', id: randomUUID(), folder, model: worker.model, effort: worker.effort } : null;
-  const prompt = workerPrompt({ items, space, orchestrator, packet, owns: splitList(flags.owns), avoid: splitList(flags.avoid), hooks: Boolean(session) });
+  const tool = agentTool(worker.tool);
+  const session = tool.sessionFlag ? { tool: worker.tool, id: randomUUID(), folder, model: worker.model, effort: worker.effort } : null;
+  const prompt = workerPrompt({ items, space, orchestrator, packet, owns: splitList(flags.owns), avoid: splitList(flags.avoid), hooks: tool.reportsByHook });
   const name = `todo-${ids[0]}-${randomBytes(2).toString('hex')}`;
-  const started = startWorker({ name, label: `hws.todo=${ids.join(',')}`, cwd: folder, argv: [...agentArgv(worker), ...(session ? ['--session-id', session.id] : []), prompt] });
+  const started = startWorker({ name, label: `hws.todo=${ids.join(',')}`, cwd: folder, argv: [...agentArgv(worker), ...(session ? [tool.sessionFlag, session.id] : []), prompt] });
   updateTodos(board, (current) => {
     for (const id of ids) claim(findOpenItem(current, id), started.address, { session });
   });
+  if (tool.reportsByHook) expectCapture(started.address);
   return { data: { ...started, cards: ids, tool: worker.tool, model: worker.model } };
 }
 
@@ -381,9 +400,7 @@ export function todoClaim(flags) {
 export function todoSend(flags) {
   const id = requireFlag(flags, 'id');
   const terminal = requireFlag(flags, 'terminal');
-  const space = resolveSpace(flags);
-  requireWorkspace(space);
-  const board = boardOf(space);
+  const board = resolveBoard(flags);
   const item = findChangeableItem(readTodos(board), id);
   if (item.owner !== 'agent') refuseAgentAssigning(id);
   if (!isTerminalAlive(terminal)) throw new HwsError(`terminal ${terminal} is not live`);
@@ -400,7 +417,6 @@ export function todoReply(flags) {
   const id = requireFlag(flags, 'id');
   const text = textFrom(flags);
   const space = resolveSpace(flags);
-  requireWorkspace(space);
   const board = boardOf(space);
   const { title, terminal, note, replies, session } = findChangeableItem(readTodos(board), id);
   if (!terminal && !session) throw new HwsError(`to-do ${id} has no terminal`);
@@ -436,7 +452,6 @@ export function todoStatus(flags) {
 export function todoResume(flags) {
   const id = requireFlag(flags, 'id');
   const space = resolveSpace(flags);
-  requireWorkspace(space);
   const board = boardOf(space);
   const item = findChangeableItem(readTodos(board), id);
   if (!item.session) throw new HwsError(`to-do ${id} has no saved session`);

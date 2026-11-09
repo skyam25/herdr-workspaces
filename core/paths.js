@@ -67,13 +67,27 @@ export function retiredPath(id) {
   return join(retiredDir(), `${encodeURIComponent(id)}.json`);
 }
 
-export function claudeHome() {
-  return process.env.CLAUDE_CONFIG_DIR || join(home(), '.claude');
-}
-
 // Claude Code stores a session under its start folder with each symbol turned into a dash.
 export function transcriptPath(folder, sessionId) {
-  return join(claudeHome(), 'projects', folder.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
+  const claudeHome = process.env.CLAUDE_CONFIG_DIR || join(home(), '.claude');
+  return join(claudeHome, 'projects', folder.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`);
+}
+
+export function captureDir() {
+  return join(stateRoot(), 'capture');
+}
+
+// plugin/hooks/stop.sh checks this path itself.
+export function capturePath(terminal) {
+  return join(captureDir(), encodeURIComponent(terminal));
+}
+
+export function terminalSessionDir() {
+  return join(stateRoot(), 'terminal-sessions');
+}
+
+export function terminalSessionPath(terminal) {
+  return join(terminalSessionDir(), `${encodeURIComponent(terminal)}.json`);
 }
 
 export function lockDir(name) {

@@ -4,9 +4,11 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, closeOverlay, exec, appHome, writeTextFile, setShared, run } from "herdr";
+import { props, theme, closeOverlay, exec, appHome, writeTextFile, shared, setShared, run } from "herdr";
 import { hws, submitDialog, problemLine } from "./hws.js";
 import { openBoard } from "./board.js";
+
+const BOARD_LIST = "hws-pane.boards";
 
 // One shell runs the chooser and the open, because the popup can close while the chooser has
 // focus and an exec already started keeps running. Error -128 means the person cancelled.
@@ -68,10 +70,16 @@ export default class Actions extends View {
     if (r.code !== 0) throw new Error(r.stderr.trim() || "Couldn't send that file.");
   }
 
+  // The list refreshes when a terminal changes, and discarding a draft changes none.
+  async discardBoard(id) {
+    await hws(["surface", "discard", "--id", id]);
+    setShared(BOARD_LIST, (shared(BOARD_LIST) ?? []).filter((b) => b.id !== id));
+  }
+
   boardRows(boards) {
     return boards.flatMap((b, i) => [
       { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${b.title}`, icon: "sketch", divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
-      ...(b.open ? [] : [{ id: `discard-${b.id}`, name: `Discard ${b.title}`, icon: "close", work: () => hws(["surface", "discard", "--id", b.id]) }]),
+      ...(b.open ? [] : [{ id: `discard-${b.id}`, name: `Discard ${b.title}`, icon: "close", work: () => this.discardBoard(b.id) }]),
     ]);
   }
 

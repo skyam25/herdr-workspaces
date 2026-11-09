@@ -223,7 +223,7 @@ export class TodoForm extends DialogForm {
 
   // A finished card takes feedback too, which reopens its session when that has closed.
   canReply() {
-    if (props().plainSpace || this.item?.archived) return false;
+    if (this.item?.archived) return false;
     if (this.waiting()) return true;
     return this.item?.column === "done" && Boolean(this.item.session || this.item.terminal);
   }
@@ -375,8 +375,7 @@ export class TodoForm extends DialogForm {
       this.owner = key;
       cx.notify();
     };
-    const owners = props().plainSpace ? OWNERS.filter(({ key }) => key !== "agent") : OWNERS;
-    return owners.map(({ key, name }) => this.chip(t, `owner-${key}`, name, key === this.owner, choose(key)));
+    return OWNERS.map(({ key, name }) => this.chip(t, `owner-${key}`, name, key === this.owner, choose(key)));
   }
 
   ownerRow(t) {
@@ -415,7 +414,7 @@ export class TodoForm extends DialogForm {
     const lists = { terminals: terminals(), targets, orchestrator: this.orchestrator };
     const rows = sessions.map(({ role, address }) => {
       const { name, status, live } = describeSession(lists, address);
-      const canResume = !props().plainSpace && !live && role === "Run by" && Boolean(this.item.session);
+      const canResume = !live && role === "Run by" && Boolean(this.item.session);
       const resume = canResume ? this.rowButton(t, `session-resume-${address}`, "Resume", (_e, cx) => this.resume(cx), enabled) : null;
       const open = live ? this.rowButton(t, `session-open-${address}`, "Open", (_e, cx) => this.openLinked(address, cx), enabled) : resume;
       return this.row(t, `session-row-${address}`, `${role} ${name}`, [status, address].filter(Boolean).join(" · "), open);
@@ -456,7 +455,7 @@ export class TodoForm extends DialogForm {
       ...this.linkedSessions(t, enabled, targets),
       this.labeled(t, "Column", this.columnChoice(t)),
       this.labeled(t, "Owner", this.ownerRow(t)),
-      ...(this.id && !props().plainSpace ? [this.labeled(t, "Send to", this.sendTo(t, enabled, targets))] : []),
+      ...(this.id ? [this.labeled(t, "Send to", this.sendTo(t, enabled, targets))] : []),
     ]);
     const fields = [h_flex().flex_none().items_start().gap(FORM.columnGap).child(reading).child(controls)];
     const footer = this.footer()

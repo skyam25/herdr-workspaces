@@ -210,12 +210,14 @@ test("outputs selects its panel view and shows the panel", async () => {
 
 const SPACE = (tabs) => [{ id: "spc1", active: true, machine: null, tabs }];
 
-test("Tasks opens a Board tab when the active space has none", async () => {
+test("Tasks in a plain space opens nothing and says the Board needs a workspace", async () => {
   const H = world({ spaces: SPACE([{ id: "tb1", name: "1", active: true }]), panes: [AGENT_PANE] });
+  H.notices = [];
   const m = await mount("hws-actions", TERMINAL);
   await m.click("tasks");
 
-  assert.deepEqual(H.runs, [{ name: "tab.new", args: { name: "Board", mod: "hws-work", props: { view: "tasks" } } }]);
+  assert.deepEqual(H.runs, []);
+  assert.match(H.notices.at(-1).title, /needs a workspace/);
   assert.deepEqual(H.closed, ["ov1"]);
 });
 
@@ -497,4 +499,13 @@ test("the + menu resumes and discards a draft and has no discard for an open boa
   const list = rows(m);
   assert.ok(list.includes("Resume Plan") && list.includes("Discard Plan") && list.includes("Show Flow"));
   assert.equal(list.includes("Discard Flow"), false);
+});
+
+test("discarding a draft takes it off the shared list at once", async () => {
+  const H = boardsWorld([draft, { ...draft, id: "s2", open: true }]);
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [draft] });
+  await m.click("discard-s1");
+  await settle();
+  assert.ok(openArgs(H).some((args) => args.join(" ") === "surface discard --id s1 --json"));
+  assert.deepEqual(H.sharedSets.at(-1).value.map((b) => b.id), ["s2"]);
 });

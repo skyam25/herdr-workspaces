@@ -11,7 +11,8 @@ import { TIDY_ROLE, updateManifest, writeJsonAtomic, writeTextAtomic } from '../
 import { STANDALONE, transcriptPath, workspaceDir } from '../paths.js';
 import { ROLES, allPlaces, isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { locateTerminal, requireFlag, resolveWorkspace, splitList, workspaceByRef } from '../resolve.js';
-import { agentArgv, agentModels } from '../settings.js';
+import { agentArgv } from '../agent-tools.js';
+import { agentModels } from '../settings.js';
 import { modifiedAt, typedPrompt } from '../retired.js';
 import { moveToTrash } from '../trash.js';
 import { assertStatus, assertSupersedes, isInside, realOf } from './artifact.js';

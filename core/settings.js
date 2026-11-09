@@ -59,11 +59,6 @@ export function setAgentModel(role, value) {
   writeSettings({ models: { ...(readSettings().models ?? {}), [role]: value } });
 }
 
-// The start of the command line for an agent with these settings.
-export function agentArgv({ tool, model, effort }) {
-  return tool === 'codex' ? ['codex', '-m', model, '-c', `model_reasoning_effort="${effort}"`] : ['claude', '--model', model, '--effort', effort];
-}
-
 // The folder new work starts in: the last one used, else ~/Projects, else home.
 export function parentFolder() {
   const last = remembered();

@@ -1,5 +1,5 @@
-import { listManifests, updateManifest } from '../manifest.js';
-import { workspaceDir } from '../paths.js';
+import { listManifests, updateManifest, writeJsonAtomic } from '../manifest.js';
+import { terminalSessionPath, workspaceDir } from '../paths.js';
 import { callingTerminal, locateTerminal, requireCallingTerminal, requireFlag, workspaceOfTerminal } from '../resolve.js';
 import { parentFolder } from '../settings.js';
 
@@ -33,10 +33,11 @@ export function list() {
   return { data: manifests, text };
 }
 
-// A normal terminal has no manifest, so it registers nothing and still succeeds.
+// A terminal outside a workspace records only its session, and still succeeds.
 export function register(flags) {
   const terminal = requireFlag(flags, 'terminal');
   const session = requireFlag(flags, 'session');
+  writeJsonAtomic(terminalSessionPath(terminal), { id: session });
   const { manifest, tabId } = locateTerminal(terminal);
   if (!manifest) return { data: { registered: false }, text: `${terminal} is not in a workspace` };
   updateManifest(manifest.id, (draft) => {

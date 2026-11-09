@@ -319,6 +319,6 @@ test('start refuses a plain space and opens nothing', (t) => {
   const result = box.hws(['orchestrator', 'start', '--space', 'sp1', '--folder', box.folder('project')]);
 
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /only inside a workspace/);
+  assert.match(result.stderr, /only available inside a workspace/);
   assert.deepEqual(tabsOpened(box), []);
 });

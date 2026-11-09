@@ -5,9 +5,9 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, panes, spaces, focused, props, exec, hc, theme, run, openOverlay, closeOverlay, readTextFile, shared, setShared, watchFolder } from "herdr";
+import { agents, panes, spaces, focused, props, exec, hc, theme, run, openOverlay, closeOverlay, readTextFile, shared, watchFolder } from "herdr";
 import { hws, message, submitDialog, openWorkspaceForm, KINDS, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
-import { startSidebar, drawSidebar, WORKSPACES_CHANGED } from "./sidebar.js";
+import { startSidebar, drawSidebar } from "./sidebar.js";
 import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, noteLines, placeRows, resolvePath, validStatus } from "./context.js";
 import { copy, openCite, openPath } from "./cites.js";
 import { artifactsSection, currentSection, headerSection, placesSection, recordSection, sectionTitle, sinceSection } from "./sections.js";
@@ -382,14 +382,12 @@ export default class Panel extends View {
     const name = this.values.name.trim();
     submitDialog(this, "add", async () => {
       await hws(["space", "add", "--workspace", props().workspace, ...(name ? ["--name", name] : [])]);
-      setShared(WORKSPACES_CHANGED, Date.now());
     }, cx);
   }
 
   moveSpace(space, cx) {
     submitDialog(this, `move-${space.id}`, async () => {
       await hws(["space", "move", "--space", space.id, "--workspace", props().workspace]);
-      setShared(WORKSPACES_CHANGED, Date.now());
     }, cx);
   }
 

@@ -4,6 +4,9 @@
 
 [ -n "${HC_TERMINAL_ID:-}" ] || exit 0
 
+# Only a session with a card to report on has a marker, so every other turn stops here.
+[ -e "${HWS_HOME:-$HOME/.local/state/herdr-workspaces}/capture/$HC_TERMINAL_ID" ] || exit 0
+
 # ~/.local/bin comes first, so hws resolves there before the rest of PATH.
 export PATH="$HOME/.local/bin:$PATH"
 

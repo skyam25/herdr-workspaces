@@ -48,7 +48,7 @@ When you land a decision mid-session, you may add one dated line with a cite und
 
 ## Task list
 
-All the spaces in a workspace share one task list. The person sees it on the Board. Agents can use the task list and the Board only inside a workspace, so when `hws current --line` prints nothing, tell the person the Board needs a workspace and run none of these commands. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
+All the spaces in a workspace share one task list. The person sees it on the Board. The task list and the Board exist only inside a workspace, so when `hws current --line` prints nothing, tell the person the Board needs a workspace and run none of these commands. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
 
 | Command | Does |
 |---|---|

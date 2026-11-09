@@ -159,7 +159,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws new throwaway [--name N]` | Creates a throwaway with one tab running `claude` in its scratch folder. The space opens on a shell in the parent folder, which closes once the tab is open |
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list` | Every manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest |
-| `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal |
+| `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane]` | Starts the host and records the surface. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T. For an agent flipped to Chat, `--beside-pane` and `--space` name its chat pane P and space S, and fail unless T's `herdr.chat` label equals P |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open}]`. Leaves out closed windows with no work |
@@ -419,7 +419,7 @@ A running host raises its window on `POST /open`. The Window menu's Keep on Top 
 | `+` menu | Resume or Show, and Discard for drafts, per board | `hws surface resume`, `hws surface discard` |
 | Workspace panel, Open surfaces | Every window and draft, including standalone ones | `hws surface resume` |
 
-`hws-pane` polls `hws surface list` every 5 seconds, one header copy at a time, and shares the result as `hws-pane.boards`.
+`hws-pane` runs `hws surface list` when the set of live terminals changes and at least every 60 seconds, one header copy at a time, and shares the result as `hws-pane.boards`.
 
 ## Web host
 
@@ -574,7 +574,7 @@ Each region of the `hws` layout has one job.
 | Pane header | Act on this agent | `hws-pane` `+`, always visible on agent and chat panes |
 | Chat composer | Act on this agent while typing | The same menu, plus Attach file |
 | Own window, or a pane beside the agent | Do the work | Boards in their own window, notes and pages in a pane |
-| Board | Plan and dispatch work | Full-width kanban, `hws-work` with `{"view":"tasks"}`. One Board space per workspace, or a Board tab in a plain space |
+| Board | Plan and dispatch work | Full-width kanban, `hws-work` with `{"view":"tasks"}`. One Board space per workspace. A plain space has none |
 | Right panel | See what the work produced | Files, Changes, Outputs |
 | Workspace panel | Read and keep the workspace's context | `hws-panel`, toggled by `mod.open:hws-panel`. A pane beside the terminal until a treatment is chosen in `docs/panel-options.md` |
 
@@ -661,14 +661,14 @@ A flipped agent has no pane, and `herdr-app ls` does not list chat panes. Mods f
 
 A Board is a tab whose pane runs `hws-work` with `{"view":"tasks"}`.
 
-A workspace starts with no Board. The person or an agent adds one, at most one, with `hws board add`. It is a Board space, a member of the workspace named Board. Its Board tab is named `Workspace board`, and the tab bar hides a tab with that name. Agents run in other tabs of that space. A plain space has at most one Board tab, shown in the tab bar.
+A workspace starts with no Board. The person or an agent adds one, at most one, with `hws board add`. It is a Board space, a member of the workspace named Board. Its Board tab is named `Workspace board`, and the tab bar hides it by id, using the ids the sidebar shares as `hws.board.tabs`. Agents run in other tabs of that space. A plain space has at most one Board tab, shown in the tab bar.
 
 | Tasks button in the tab bar | Result |
 |---|---|
 | The active space holds a Board that is not showing | `tab.select` |
 | The space is in a workspace that has a Board elsewhere | `hws board open`, then `space.select` and `tab.select` |
 | The space is in a workspace with no Board | A notification points to Add board. Nothing is created |
-| The space is plain and holds no Board | `tab.new` with `name` Board, `mod` `hws-work`, `props` `{"view":"tasks"}` |
+| The space is plain | A notification says the Board needs a workspace. Nothing is created |
 | The Board is showing | Returns to the space the button came from, else `tab.select` on the tab shown before it |
 
 The pane header names it Board. The board shows your to-dos beside the agents' items.
@@ -719,7 +719,7 @@ Outputs lists each agent's outputs, newest first. A local `.html`, `.htm` or `.m
 
 ### To-dos: `hws todo`
 
-Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its id, and every space in it reads and writes that board. A space outside a workspace has its own board, named by its id, or `<id>~space` when that id also names a workspace it founded and left. Boards survive closing a workspace.
+Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its id, and every space in it reads and writes that board. A space outside a workspace has no Board. Cards saved for one stay in a file named by its id, or `<id>~space` when that id also names a workspace it founded and left, a name that stays once that workspace closes, and join W's Board on `hws space move`. Boards survive closing a workspace.
 
 `--space` takes any space id and resolves to its board. `hws todo list` also prints `spaces`, the spaces that share the board. Tasks and Outputs cover the agents in all of them.
 
@@ -731,7 +731,7 @@ Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its 
 
 | Command | Does |
 |---|---|
-| `hws todo list [--archived] [--space S]` | Prints unarchived items, newest `updatedAt` first, `orchestrator` as `{ terminal, live }` or null, and `workspace`, the workspace id or null for a plain space. `--archived` adds archived items, which the card dialog shows read-only |
+| `hws todo list [--archived] [--space S]` | Prints unarchived items, newest `updatedAt` first, `orchestrator` as `{ terminal, live }` or null, and `workspace`, the workspace id. With no `$HC_TERMINAL_ID`, a plain space prints no items and a null `workspace`, and the Board shows that it needs a workspace. `--archived` adds archived items, which the card dialog shows read-only |
 | `hws todo add --title X [--notes N] [--owner mine\|unassigned\|agent] [--worktree] [--space S]` | Adds to `todo`. `owner` defaults to unassigned |
 | `hws todo add --titles T [--space S]` | Adds one card for each non-blank line of T, and prints `{ items }` |
 | `hws todo edit --id I [--title X] [--notes N] [--owner mine\|unassigned\|agent] [--worktree true\|false] [--space S]` | Changes the text or flags |
@@ -741,7 +741,7 @@ Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its 
 | `hws todo start --ids I,J --folder D [--owns A,B] [--avoid C,D] [--packet-file F] [--space S]` | From the orchestrator's terminal, starts one worker on the cards, in order, with the Models setting. Names it `todo-I-<random>` with label `hws.todo=I,J`, claims the cards for it, and saves a Claude worker's session id, model and effort up front |
 | `hws models` | Prints `orchestrator`, `worker`, each `{ tool, model, effort }`, `catalog`, and `recommended` with the default `orchestrator` and `worker` |
 | `hws models set --role orchestrator\|worker [--tool claude\|codex] --model M --effort E` | Saves a role. The orchestrator must use Claude Code |
-| `hws todo capture --terminal T --text X [--space S]` | Copies X to `report` on the cards whose `reportFrom` is T, then clears it. Only cards T ran take the report. If T is a worker with no card left in progress or waiting, closes T. The plugin's Stop hook runs this with the session's closing message |
+| `hws todo capture --terminal T --text X [--space S]` | Copies X to `report` on the cards whose `reportFrom` is T, then clears it. Only cards T ran take the report. If T is a worker with no card left in progress or waiting, closes T. The plugin's Stop hook runs this with the session's closing message, only when `<state root>/capture/<T>` exists. `hws todo move` and `hws todo start` write that marker, and capture removes it once T has nothing left to report |
 | `hws todo note --id I --text X [--space S]` | Sets `note`, the latest word from the worker. A Herdr terminal on a card outside To do that sets it fills an empty `terminal` |
 | `hws todo next --terminal T [--space S]` | Claims the oldest To do card owned by agent, and prints it or null |
 | `hws todo claim --id I --terminal T [--space S]` | Moves a To do card to `doing` and sets `terminal`. Fails when the owner is not agent or the card is not in To do |
@@ -749,11 +749,11 @@ Only `hws` writes `<state root>/todos/<board>.json`. A workspace's board is its 
 | `hws todo reply --id I --text X [--space S]` | Pastes X into the card's `terminal`, clears `note`, moves to `doing` |
 | `hws todo archive --id I [--space S]` | Sets `archived`. Nothing is deleted |
 
-Agents can use a Board only inside a workspace. Every `hws todo` and `hws orchestrator` command fails when `$HC_TERMINAL_ID` is set and the space is plain. `hws todo send`, `reply` and `resume` and `hws orchestrator start` reach an agent, so they fail on a plain space for every caller. A Board in a plain space stays the person's own list, with no Allow, Run, Resume, Reply or Send to, and no Agent owner. The session-start hook names the task list only inside a workspace.
+The Board exists only inside a workspace. Every `hws todo` and `hws orchestrator` command fails on a plain space, apart from the `hws todo list` case above. The session-start hook names the task list only inside a workspace.
 
 `--space` defaults to the calling agent's own space, from `$HC_TERMINAL_ID`. A terminal Herdr cannot place is an error, so a card never lands on another space's board. With no `$HC_TERMINAL_ID`, it defaults to the window's selected space. Mods always pass it.
 
-`session` is `{ tool, id, folder }`, where `tool` is `claude` or `codex`. A report or claim from an agent's own shell fills it from `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. `hws todo send` finds it from the terminal's process, or from Codex's thread database when exactly one Codex thread started in that folder since the terminal opened. `replies` lists each `{ question, answer, at }` from `hws todo reply`, and the dialog shows them after the update. `hws todo claim` and `next` clear `note`. `hws orchestrator start`, and `hws board add` from an agent, return the window to where it was. `report` holds what happened, up to 8000 characters. `hws todo list` leaves out `report` and `reportFrom` for a caller with `$HC_TERMINAL_ID` set unless it passes `--reports`.
+`session` is `{ tool, id, folder }`, where `tool` is `claude` or `codex`. A report or claim from an agent's own shell fills it from `CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`. `hws todo send` finds it from what the session gave `hws register`, or from Codex's thread database when exactly one Codex thread started in that folder since the terminal opened. `replies` lists each `{ question, answer, at }` from `hws todo reply`, and the dialog shows them after the update. `hws todo claim` and `next` clear `note`. `hws orchestrator start`, and `hws board add` from an agent, return the window to where it was. `report` holds what happened, up to 8000 characters. `hws todo list` leaves out `report` and `reportFrom` for a caller with `$HC_TERMINAL_ID` set unless it passes `--reports`.
 
 A card added with `$HC_TERMINAL_ID` set is an agent's. It records `addedBy` as that terminal and starts unassigned, or mine when it passes `--owner mine`, so an orchestrator takes it only after you press Allow. `--owner agent` from an agent fails.
 
@@ -761,7 +761,7 @@ A card has one `owner`. `mine` is yours to track, and agents only read it. A cal
 
 Items written before these fields existed read `worktree` as false, `note` and `report` as empty, `replies` as empty, and `addedBy`, `reportFrom` and `session` as null. An item from before `owner` converts on read. A held item with `addedBy` becomes unassigned, a held item without it becomes mine, and any other becomes agent.
 
-Every agent can use the list. The session-start hook tells each Claude session in a Herdr terminal that it exists, and the `herdr-workspace` skill explains it.
+Every agent in a workspace can use the list. The session-start hook tells each Claude session in a workspace that it exists, and the `herdr-workspace` skill explains it.
 
 ### Orchestrator
 

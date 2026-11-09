@@ -2,7 +2,10 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, panes, terminals, focused, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
 import { Flipped } from "./flipped.js";
-import { WORKSPACE_BOARD_TAB, boardTab, openBoard } from "./board.js";
+import { boardTab, openBoard } from "./board.js";
+
+// The sidebar shares the Board tab ids, because it lists each Board.
+const BOARD_TABS = "hws.board.tabs";
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 
@@ -77,7 +80,8 @@ export default class Tabs extends View {
   render() {
     const t = theme();
     const space = spaces().find(p => p.active);
-    const shown = (space?.tabs ?? []).filter((c) => c.name !== WORKSPACE_BOARD_TAB);
+    const hidden = shared(BOARD_TABS) ?? [];
+    const shown = (space?.tabs ?? []).filter((c) => !hidden.includes(c.id));
     const stop = (_e, cx) => cx.stop_propagation();
     const paneList = panes();
     const board = boardTab(space, paneList);

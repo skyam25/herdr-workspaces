@@ -3,7 +3,8 @@ import { act, isLiveChild, isTerminalAlive, keepingSelection, killTerminal, send
 import { withLock } from '../lock.js';
 import { expandFolder } from '../paths.js';
 import { requireFlag } from '../resolve.js';
-import { agentArgv, agentModels, requireFolder } from '../settings.js';
+import { agentArgv } from '../agent-tools.js';
+import { agentModels, requireFolder } from '../settings.js';
 import { boardOf, orchestratorState, readTodos, requireWorkspace, resolveBoard, updateTodos } from './todo.js';
 
 const BOARD_CHANGED = 'The board changed. Run hws todo status and start whatever is ready.';

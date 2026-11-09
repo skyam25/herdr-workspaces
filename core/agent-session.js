@@ -3,19 +3,19 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { terminalInfo } from './herdr.js';
-import { claudeHome, home } from './paths.js';
-import { agentArgv } from './settings.js';
+import { agentTool } from './agent-tools.js';
+import { home, terminalSessionPath } from './paths.js';
 
-// Claude resumes on the person's default model unless told, so a worker's model goes with it.
 // Both tools take an optional first message after the session id.
 export function resumeArgv({ tool, id, model, effort }, message) {
-  const argv = tool === 'codex' ? ['codex', 'resume', id] : [...(model ? agentArgv({ tool, model, effort }) : ['claude']), '--resume', id];
+  const argv = agentTool(tool).resumeArgv({ id, model, effort });
   return message ? [...argv, message] : argv;
 }
 
-function claudeSessionOfProcess(pid) {
+// The SessionStart hook registers every Claude session against its terminal.
+function claudeSessionOfTerminal(terminal) {
   try {
-    return JSON.parse(readFileSync(join(claudeHome(), 'sessions', `${pid}.json`), 'utf8')).sessionId ?? null;
+    return JSON.parse(readFileSync(terminalSessionPath(terminal), 'utf8')).id ?? null;
   } catch {
     return null;
   }
@@ -37,7 +37,7 @@ export function sessionOfTerminal(terminal) {
   const running = info?.foreground;
   if (!running?.cwd) return null;
   const program = String(running.argv?.[0] ?? '').split('/').pop();
-  const lookup = { claude: () => claudeSessionOfProcess(running.pid), codex: () => codexSessionInFolder(running.cwd, info.created_ms) }[program];
+  const lookup = { claude: () => claudeSessionOfTerminal(terminal), codex: () => codexSessionInFolder(running.cwd, info.created_ms) }[program];
   const id = lookup?.();
   return id ? { tool: program, id, folder: running.cwd } : null;
 }

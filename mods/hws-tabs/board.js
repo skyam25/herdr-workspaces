@@ -1,11 +1,9 @@
-// Finds or opens the Board. A workspace may have one Board space, and a plain space a Board tab.
+// Finds the Board. Only a workspace has one, in its own Board space.
 // hws-work runs as a pane only on a Board, because the right panel holds it in a layout block
 // and panes() lists tab panes.
 // hws-tabs and hws-actions hold identical copies, and a test compares them.
 
 import { exec, home, notify, spaces, panes, run } from "herdr";
-
-export const WORKSPACE_BOARD_TAB = "Workspace board";
 
 export function boardTab(space, paneList) {
   return space?.tabs.find((tab) => paneList.some((p) => p.tab === tab.id && p.mod === "hws-work")) ?? null;
@@ -35,5 +33,5 @@ export async function openBoard() {
     run("space.select", { id: opened.space });
     run("tab.select", { id: opened.tab });
   } else if (opened?.workspace) notify({ title: "This workspace has no Board", body: "Choose Add board under the workspace in the sidebar." });
-  else run("tab.new", { name: "Board", mod: "hws-work", props: { view: "tasks" } });
+  else notify({ title: "The Board needs a workspace", body: "Add this space to a workspace to use the Board." });
 }

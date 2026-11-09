@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { sandbox } from './helpers.js';
@@ -54,7 +56,8 @@ test('moving a plain space in brings its cards to the shared board', (t) => {
   const box = sandbox(t);
   const manifest = box.app('demo');
   const plain = plainSpace(box);
-  box.json(['todo', 'add', '--title=Mine', '--space', plain]);
+  mkdirSync(join(box.root, 'todos'), { recursive: true });
+  writeFileSync(join(box.root, 'todos', `${plain}.json`), JSON.stringify({ version: 1, space: plain, items: [{ id: 't1', title: 'Mine', notes: '', column: 'todo', terminal: null, owner: 'unassigned', archived: false, createdAt: 1, updatedAt: 1 }] }));
   box.json(['space', 'move', '--space', plain, '--workspace', manifest.id]);
   assert.deepEqual(box.manifest(manifest.id).spaces, [manifest.id, plain]);
   assert.deepEqual(box.json(['todo', 'list', '--space', manifest.id]).items.map((item) => item.title), ['Mine']);
@@ -226,4 +229,18 @@ test('closing a workspace closes its Board space', (t) => {
   const bystander = plainSpace(box);
   box.json(['close', '--workspace', manifest.id]);
   assert.deepEqual(openIds(box), [bystander]);
+});
+
+test('a space brings its ~space cards after the workspace it founded has closed', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app('target');
+  const id = plainSpace(box);
+  const card = (cardId) => ({ id: cardId, title: cardId, notes: '', column: 'todo', terminal: null, owner: 'unassigned', archived: false, createdAt: 1, updatedAt: 1 });
+  mkdirSync(join(box.root, 'todos'), { recursive: true });
+  writeFileSync(join(box.root, 'todos', `${id}.json`), JSON.stringify({ version: 1, space: id, items: [card('from-closed-workspace')] }));
+  writeFileSync(join(box.root, 'todos', `${id}~space.json`), JSON.stringify({ version: 1, space: `${id}~space`, items: [card('its-own')] }));
+
+  box.json(['space', 'move', '--space', id, '--workspace', manifest.id]);
+  const items = box.json(['todo', 'list', '--space', manifest.id]).items.map((item) => item.id);
+  assert.deepEqual(items, ['its-own']);
 });

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { liveFixtures, sandbox } from './helpers.js';
@@ -109,4 +111,13 @@ test('register needs a terminal and a session', (t) => {
   const box = sandbox(t);
   assert.equal(box.hws(['register', '--session', 's']).code, 2);
   assert.equal(box.hws(['register', '--terminal', 't1']).code, 2);
+});
+
+test('register records the session of a terminal outside any workspace', (t) => {
+  const box = sandbox(t);
+  const result = box.json(['register', '--terminal', 't-plain', '--session', 'uuid-2']);
+  assert.equal(result.registered, false);
+  const path = join(box.root, 'terminal-sessions', 't-plain.json');
+  assert.equal(existsSync(path), true);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).id, 'uuid-2');
 });

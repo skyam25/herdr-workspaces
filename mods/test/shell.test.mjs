@@ -298,12 +298,14 @@ const spacesOn = (active, tabs = [...SPACES[0].tabs, BOARD_TAB]) => [{ ...SPACES
 const boardWorld = (active, overrides = {}) => tabWorld({ spaces: spacesOn(active), panes: [boardPane()], terminals: [], ...overrides });
 const selected = (view) => byId(view, "panel-tasks").bg === "color:selected";
 
-test("Tasks opens a Board tab when the active space has none", async () => {
+test("Tasks in a plain space opens nothing and says the Board needs a workspace", async () => {
   const H = tabWorld();
+  H.notices = [];
   const view = await mount("hws-tabs");
   assert.equal(selected(view), false);
   await view.click("panel-tasks");
-  assert.deepEqual(H.runs, [{ name: "tab.new", args: { name: "Board", mod: "hws-work", props: { view: "tasks" } } }]);
+  assert.deepEqual(H.runs, []);
+  assert.match(H.notices.at(-1).title, /needs a workspace/);
 });
 
 test("Tasks in a workspace shows its Board space and adds no tab", async () => {
@@ -327,11 +329,18 @@ test("Tasks in a workspace with no Board adds nothing and says where to add one"
 test("the tab bar hides a workspace's Board tab and keeps agents beside it", async () => {
   const hidden = { id: "tbb", name: "Workspace board", index: 1, status: null };
   const agent = { id: "tba", name: "Worker", index: 2, status: null };
-  tabWorld({ spaces: [{ ...SPACES[0], tabs: [{ ...hidden, active: true }, agent] }], panes: [boardPane("tbb")], terminals: [] });
+  tabWorld({ spaces: [{ ...SPACES[0], tabs: [{ ...hidden, active: true }, agent] }], panes: [boardPane("tbb")], terminals: [], sharedValues: { "hws.board.tabs": ["tbb"] } });
   const view = await mount("hws-tabs");
   assert.equal(byId(view, "tab-tbb"), null);
   assert.match(textOf(byId(view, "tab-tba")), /Worker/);
   assert.equal(selected(view), true);
+});
+
+test("the tab bar keeps a person's tab that only shares the Board's name", async () => {
+  const named = { id: "tbx", name: "Workspace board", index: 1, status: null };
+  tabWorld({ spaces: [{ ...SPACES[0], tabs: [{ ...named, active: true }] }], panes: [], terminals: [], sharedValues: { "hws.board.tabs": ["tbb"] } });
+  const view = await mount("hws-tabs");
+  assert.match(textOf(byId(view, "tab-tbx")), /Workspace board/);
 });
 
 test("Tasks on a workspace's Board returns to the space it came from", async () => {
@@ -350,7 +359,7 @@ test("a Board in another space does not count", async () => {
   const H = tabWorld({ panes: [boardPane("tb3")] });
   const view = await mount("hws-tabs");
   await view.click("panel-tasks");
-  assert.equal(H.runs[0].name, "tab.new");
+  assert.deepEqual(H.runs, []);
 });
 
 test("Tasks selects an inactive Board tab", async () => {

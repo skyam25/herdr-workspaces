@@ -1026,6 +1026,14 @@ test("keys.example.json avoids the chords Herdr binds", () => {
 
 const SIDEBAR_LAYOUT = { id: "root", children: [{ id: "sidebar", size: { px: 268 }, children: [{ id: "workspaces", size: { px: 69 } }] }] };
 
+test("the sidebar shares the Board tab ids and watches the manifests", async () => {
+  const H = setup({ hws: { list: [{ ...THROWAWAY, board: { space: "spb", tab: "tbb" }, dir: "/state/workspaces/spc1" }] }, sharedSets: [], sharedValues: {} });
+  await mount("hws-panel", { view: "sidebar" });
+  await settle();
+  assert.deepEqual(H.sharedSets.find((x) => x.key === "hws.board.tabs").value, ["tbb"]);
+  assert.ok(H.watches.includes("/state/workspaces"));
+});
+
 test("the empty sidebar section offers New workspace and the launcher", async () => {
   const H = setup({ hws: { list: [] } });
   const m = await mount("hws-panel", { view: "sidebar" });

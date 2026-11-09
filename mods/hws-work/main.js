@@ -18,11 +18,14 @@ const LOADING = "Loading…";
 const TRACKING_OFF = "Item tracking is off for these sessions. Turn it on in the Agent Brief app.";
 const NO_AGENT_ITEMS = { waiting: [], progress: [], done: [] };
 const BOARD_HINT = "Add a card, press Allow on it, then press Run.";
-const PLAIN_HINT = "Add a card to keep track of it. Agents can use the Board only inside a workspace.";
+const NEEDS_WORKSPACE = "The Board is only available inside a workspace. Add this space to a workspace to use it.";
 const STOP_QUESTION = "Stop orchestrator and its workers?";
 
 // Claude reports no status while a start-up prompt is open, so silence this long means it is waiting.
 const SILENT_START_MS = 20000;
+
+// A session on a start-up prompt reports nothing and has taken no turn.
+const silentSince = (record, since) => !record.status && !(record.turn > 0) && Date.now() - since > SILENT_START_MS;
 
 const message = (e) => String(e?.message ?? e);
 
@@ -100,8 +103,9 @@ export default class Work extends View {
     this.fetching = true;
     cx.spawn(async (cx) => {
       try {
-        if (this.kind === "outputs") await this.loadMembers();
-        const r = await exec("agent-brief", ["sessions", "--json"]);
+        const [, brief] = await Promise.allSettled([this.kind === "outputs" ? this.loadMembers() : null, exec("agent-brief", ["sessions", "--json"])]);
+        if (brief.status === "rejected") throw brief.reason;
+        const r = brief.value;
         if (r.code === 0) {
           this.sessions = JSON.parse(r.stdout).sessions ?? [];
           this.problem = null;
@@ -177,7 +181,7 @@ export default class Work extends View {
   }
 
   openDialog({ width, height }, dialogProps) {
-    openOverlay({ mod: "hws-work", kind: "dialog", modal: true, width, height, props: { space: this.todoSpace, members: this.members, plainSpace: this.plainSpace, ...dialogProps } });
+    openOverlay({ mod: "hws-work", kind: "dialog", modal: true, width, height, props: { space: this.todoSpace, members: this.members, ...dialogProps } });
   }
 
   openTodo(id) {
@@ -281,12 +285,12 @@ export default class Work extends View {
   orchestratorNeedsYou() {
     const record = this.frame.live.find((x) => x.address === this.orchestrator?.terminal);
     if (!record) return false;
-    return record.status === "blocked" || (!record.status && Date.now() - (this.orchestrator.startedAt ?? Date.now()) > SILENT_START_MS);
+    return record.status === "blocked" || silentSince(record, this.orchestrator.startedAt ?? Date.now());
   }
 
   // A worker on a start-up prompt reports nothing, so a silent one past the limit counts too.
   blockedWorkers() {
-    const silent = (x) => !x.status && (this.todos ?? []).some((card) => card.terminal === x.address && Date.now() - card.updatedAt > SILENT_START_MS);
+    const silent = (x) => (this.todos ?? []).some((card) => card.terminal === x.address && silentSince(x, card.updatedAt));
     return this.frame.live.filter((x) => x.state === "live" && x.labels?.["hws.todo"] && (x.status === "blocked" || silent(x))).length;
   }
 
@@ -511,6 +515,7 @@ export default class Work extends View {
   tasksBody(t, blocker) {
     // One copy per render, because every card reads these and `terminals()` copies the whole list.
     this.frame = { live: terminals(), counts: this.boardCounts() };
+    if (this.plainSpace) return { header: this.header(t, "Board", null, h_flex()), quiet: null, content: this.message(t, NEEDS_WORKSPACE) };
 
     const agentColumns = blocker === null ? board(this.bound, this.docs) : NO_AGENT_ITEMS;
     const columns = mergeBoard(this.todos ?? [], agentColumns);
@@ -538,14 +543,14 @@ export default class Work extends View {
   runStatus(t) {
     const { ready, unassigned, running, waiting } = this.frame.counts;
     const blocked = this.blockedWorkers();
-    const parts = [blocked > 0 && `${blocked} blocked, press Open`, running > 0 && `${running} running`, waiting > 0 && `${waiting} waiting on you`, !this.plainSpace && ready === 0 && unassigned.length > 0 && `${unassigned.length} to Allow`].filter(Boolean);
+    const parts = [blocked > 0 && `${blocked} blocked, press Open`, running > 0 && `${running} running`, waiting > 0 && `${waiting} waiting on you`, ready === 0 && unassigned.length > 0 && `${unassigned.length} to Allow`].filter(Boolean);
     return div().id("run-status").flex_none().px(6).text_size(11).text_color(t.dim).child(parts.join(" · "));
   }
 
   // One button starts a run and adds to one, and it only appears when a card can start.
   runButton(t) {
     const { ready } = this.frame.counts;
-    if (this.plainSpace || ready === 0 || this.confirmingStop) return [];
+    if (ready === 0 || this.confirmingStop) return [];
     const text = this.orchestratorBusy === "send" ? "Starting…" : `Run ${ready} ready`;
     return [this.headerButton(t, "run-board", text, (_e, cx) => this.runBoard(cx), this.orchestratorBusy === null, true)];
   }
@@ -630,9 +635,9 @@ export default class Work extends View {
       .child(div().flex_none().size(8).rounded_full().bg(t[column.color]))
       .child(div().text_size(12).font_medium().text_color(t.muted).child(column.name))
       .child(div().text_size(12).text_color(t.dim).child(String(cards.length)))
-      .when(!this.plainSpace && column.key === "todo" && unassigned.length > 1, (el) => el.child(div().flex_1()).child(this.headerButton(t, "allow-all", `Allow all ${unassigned.length}`, (_e, cx) => this.allowAll(unassigned, cx))));
+      .when(column.key === "todo" && unassigned.length > 1, (el) => el.child(div().flex_1()).child(this.headerButton(t, "allow-all", `Allow all ${unassigned.length}`, (_e, cx) => this.allowAll(unassigned, cx))));
     const rows = this.laneRows(t, column, cards);
-    if (empty && column.key === "todo") rows.push(div().id("board-hint").flex_none().px(4).py(4).text_size(11.5).text_color(t.dim).whitespace_normal().child(this.plainSpace ? PLAIN_HINT : BOARD_HINT));
+    if (empty && column.key === "todo") rows.push(div().id("board-hint").flex_none().px(4).py(4).text_size(11.5).text_color(t.dim).whitespace_normal().child(BOARD_HINT));
     const lane = v_flex()
       .id(`lane-${column.key}`)
       .h_full()
@@ -705,15 +710,15 @@ export default class Work extends View {
       .items_center()
       .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child([`${role} ${name}`, status].filter(Boolean).join(" · ")))
       .when(live, (row) => row.child(this.rowAction(t, `open-${item.id}`, "Open", () => openSession(address))))
-      .when(!this.plainSpace && !live && Boolean(item.session), (row) => row.child(this.rowAction(t, `resume-${item.id}`, "Resume", (cx) => this.resumeTodo(item.id, cx))));
+      .when(!live && Boolean(item.session), (row) => row.child(this.rowAction(t, `resume-${item.id}`, "Resume", (cx) => this.resumeTodo(item.id, cx))));
   }
 
   todoCard(t, item, columnKey) {
-    const summary = cardSummary(item);
+    const summary = item.summary ?? cardSummary(item);
     const session = item.terminal ? cardSessions(item)[0] : null;
     const addedElsewhere = item.addedBy && item.addedBy !== item.terminal;
     const tags = [...this.ownerTags(item), ...(item.worktree ? ["Worktree"] : []), ...(addedElsewhere ? [`From ${this.describe(item.addedBy).name}`] : [])];
-    const canAllow = !this.plainSpace && item.owner === "unassigned" && item.column === "todo";
+    const canAllow = item.owner === "unassigned" && item.column === "todo";
     return v_flex()
       .id(`todo-${item.id}`)
       .flex_none()

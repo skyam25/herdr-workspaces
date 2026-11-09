@@ -3,7 +3,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, layout, openOverlay, run, shared, spaces, theme } from "herdr";
+import { exec, layout, openOverlay, run, setShared, shared, spaces, theme, watchFolder } from "herdr";
 import { hws, message, openWorkspaceForm } from "./hws.js";
 import { freshness } from "./context.js";
 import { freshnessDot } from "./sections.js";
@@ -21,7 +21,8 @@ const GIT_TIMEOUT_MS = 5000;
 const FOLDED_KEY = "sidebar.folded";
 const STATUS_ORDER = ["blocked", "done", "working", "idle"];
 
-export const WORKSPACES_CHANGED = "hws.workspaces.changed";
+// hws-tabs reads this key.
+const BOARD_TABS = "hws.board.tabs";
 
 // `hws new workspace` makes the space before it writes the manifest.
 const MANIFEST_WAIT_MS = 1500;
@@ -72,6 +73,31 @@ async function freshnessOf(workspace) {
   }
 }
 
+// The tab bar hides these, because this list already shows each Board.
+function publishBoardTabs(workspaces) {
+  const tabs = workspaces.flatMap((w) => (w.board ? [w.board.tab] : []));
+  if (JSON.stringify(tabs) !== JSON.stringify(shared(BOARD_TABS) ?? [])) setShared(BOARD_TABS, tabs);
+}
+
+// An agent or the CLI can change who is in a workspace with no change to the spaces.
+function watchManifests(state, cx) {
+  const dir = state.workspaces[0]?.dir;
+  if (state.watching || !dir) return;
+  state.watching = true;
+  const root = dir.slice(0, dir.lastIndexOf("/"));
+  cx.spawn(async (cx) => {
+    try {
+      for (;;) {
+        const changed = await watchFolder(root);
+        if (changed.some((p) => p === root || p.endsWith("/workspace.json"))) load(state, cx);
+      }
+    } catch {
+      // The timer keeps the list current without a watch.
+    }
+    state.watching = false;
+  });
+}
+
 function load(state, cx, { listOnly = false } = {}) {
   if (state.fetching) {
     state.fetchAgain = true;
@@ -82,6 +108,8 @@ function load(state, cx, { listOnly = false } = {}) {
     try {
       state.workspaces = await hws(["list"]);
       state.problem = null;
+      publishBoardTabs(state.workspaces);
+      watchManifests(state, cx);
 
       // The list paints first, so a slow `git` or `hws tidy status` cannot hold up a new row.
       fit(state);
@@ -123,7 +151,7 @@ function fit(state) {
   if (block.size?.px !== px) run("layout.resize", { id: NODE, px });
 }
 
-const changeKey = () => `${spaces().map((s) => s.id).join()}|${shared(WORKSPACES_CHANGED) ?? 0}`;
+const changeKey = () => spaces().map((s) => s.id).join();
 
 // A change in the spaces is the cheap signal to reload. The first load only
 // lists, because the manifest may not exist until the delayed load.

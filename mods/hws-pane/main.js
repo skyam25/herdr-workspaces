@@ -20,20 +20,26 @@ const LEAVING = "hws-chat.leaving";
 const MENU_WIDTH = 240;
 const BOARDS = "hws-pane.boards";
 const BOARDS_MS = 5000;
+const BOARDS_SLOW_MS = 60000;
 
 // Every header copy shares these.
 let lastSwap = 0;
 let lastSweep = 0;
 let lastBoards = 0;
 let boardsJson = "";
+let boardsTerminals = "";
 let resuming = false;
 
 const hws = (args) => exec(`${home()}/.local/bin/hws`, [...args, "--json"]);
 const boardsOf = (terminal) => (shared(BOARDS) ?? []).filter((b) => b.terminal === terminal);
 
 // One header copy reads the list, and shared state carries it to the others.
+// A window opens and closes with its host terminal, so the slow timer only catches the rest.
 async function refreshBoards() {
-  if (Date.now() - lastBoards < BOARDS_MS / 2) return;
+  const live = terminals().filter((x) => x.state === "live").map((x) => x.address).join();
+  const sinceLast = Date.now() - lastBoards;
+  if (sinceLast < BOARDS_MS / 2 || (live === boardsTerminals && sinceLast < BOARDS_SLOW_MS)) return;
+  boardsTerminals = live;
   lastBoards = Date.now();
   let r;
   try { r = await hws(["surface", "list"]); } catch { return; }

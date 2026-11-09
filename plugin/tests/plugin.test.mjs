@@ -306,8 +306,21 @@ describe("session-start hook", () => {
 describe("stop hook", () => {
   const stopInput = (message) => JSON.stringify({ hook_event_name: "Stop", last_assistant_message: message });
 
+  function expectCapture() {
+    const dir = join(home, ".local", "state", "herdr-workspaces", "capture");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "t13"), "");
+  }
+
+  it("skips a terminal with nothing to report", () => {
+    homeStub();
+    assertSilent(run(STOP_HOOK, { input: stopInput("Changed the token check") }));
+    assert.deepEqual(calls(), []);
+  });
+
   it("copies the closing message to the board", () => {
     homeStub();
+    expectCapture();
     const result = run(STOP_HOOK, { input: stopInput("-Changed the token check") });
 
     assertSilent(result);
@@ -316,6 +329,7 @@ describe("stop hook", () => {
 
   it("does nothing without a message or outside Herdr", () => {
     homeStub();
+    expectCapture();
     assertSilent(run(STOP_HOOK, { input: JSON.stringify({ hook_event_name: "Stop" }) }));
     assertSilent(run(STOP_HOOK, { input: stopInput("done"), terminal: null }));
     assertSilent(run(STOP_HOOK, { input: "not json" }));

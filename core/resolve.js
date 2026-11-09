@@ -19,6 +19,9 @@ export function workspaceOfTerminal(terminal) {
   return manifest;
 }
 
+// Herdr sets this in every terminal, and the Board runs with none.
+export const callerIsAgent = () => Boolean(process.env.HC_TERMINAL_ID);
+
 // Reads a comma-separated flag. A missing flag is an empty list.
 export function splitList(value) {
   return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);

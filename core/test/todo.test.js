@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { test } from 'node:test';
 
+import { todosPath } from '../paths.js';
 import { liveFixtures, sandbox as plainSandbox } from './helpers.js';
 
 const { space, tab, terminal } = liveFixtures;
@@ -232,6 +233,7 @@ test('--space defaults to the selected space', (t) => {
 test('--space wins over the selected space', (t) => {
   const box = sandbox(t);
   box.setState({ selected: 'sp1' });
+  box.inWorkspace('sp2');
   const item = box.json(['todo', 'add', '--title', 'there', '--space', 'sp2']);
   assert.deepEqual(readTodos(box, 'sp2').items, [item]);
   assert.equal(existsSync(todoFile(box, 'sp1')), false);
@@ -244,20 +246,9 @@ test('no --space and no selected space is a usage error', (t) => {
   assert.equal(box.hws(['todo', 'add', '--title', 'x']).code, 2);
 });
 
-test('a remote space id keeps its to-dos in one file', (t) => {
-  const box = sandbox(t);
-  const item = box.json(['todo', 'add', '--title', 'remote', '--space', 'studio/sp1']);
-
-  assert.deepEqual(box.json(['todo', 'list', '--space', 'studio/sp1']).items, [item]);
-  assert.deepEqual(readdirSync(join(box.root, 'todos')), ['studio%2Fsp1.json']);
-  assert.deepEqual(readdirSync(join(box.root, 'locks')), []);
-});
-
-test('a space id cannot leave the to-dos folder', (t) => {
-  const box = sandbox(t);
-  box.json(['todo', 'add', '--title', 'x', '--space', '../escape']);
-  assert.equal(existsSync(join(box.root, 'escape.json')), false);
-  assert.deepEqual(readdirSync(join(box.root, 'todos')), ['..%2Fescape.json']);
+test('a board name cannot leave the to-dos folder', () => {
+  assert.equal(basename(todosPath('studio/sp1')), 'studio%2Fsp1.json');
+  assert.equal(basename(todosPath('../escape')), '..%2Fescape.json');
 });
 
 test('a damaged file is reported and kept', (t) => {
@@ -293,7 +284,7 @@ test('to-dos survive closing a workspace', (t) => {
 
   box.json(['close', '--workspace', manifest.id]);
 
-  assert.deepEqual(box.json(['todo', 'list', '--space', manifest.id]).items, [item]);
+  assert.deepEqual(readTodos(box, manifest.id).items, [item]);
 });
 
 test('surface open refuses a remote terminal before any Herdr call', (t) => {
@@ -1083,7 +1074,19 @@ test('an agent in a plain space cannot use the Board', (t) => {
   for (const args of [['list'], ['status'], ['add', '--title', 'x'], ['add', '--title', 'x', '--space', 'sp1'], ['next', '--terminal', 't7']]) {
     const result = box.hws(['todo', ...args], { HC_TERMINAL_ID: 't7' });
     assert.notEqual(result.code, 0, args.join(' '));
-    assert.match(result.stderr, /only inside a workspace/);
+    assert.match(result.stderr, /only available inside a workspace/);
+  }
+  assert.equal(existsSync(todoFile(box)), false);
+});
+
+test('a plain space has no Board for the person either', (t) => {
+  const box = plainSandbox(t);
+
+  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'], workspace: null });
+  for (const args of [['add', '--title', 'x'], ['send', '--id', 'a', '--terminal', 't7'], ['reply', '--id', 'a', '--text', 'go'], ['resume', '--id', 'a'], ['status']]) {
+    const result = box.hws(['todo', ...args, '--space', 'sp1']);
+    assert.notEqual(result.code, 0, args[0]);
+    assert.match(result.stderr, /only available inside a workspace/);
   }
   assert.equal(existsSync(todoFile(box)), false);
 });
@@ -1094,14 +1097,39 @@ test('an agent can reach a workspace board from any terminal', (t) => {
   assert.equal(box.hws(['todo', 'add', '--title', 'x', '--json'], { HC_TERMINAL_ID: 't7' }).code, 0);
 });
 
-test('the person keeps a list in a plain space, with no agent reaching it', (t) => {
-  const box = plainSandbox(t);
-  const item = add(box, 'mine');
+test('a move that waits for a report leaves a marker, and capture removes it', (t) => {
+  const box = sandbox(t);
+  const marker = join(box.root, 'capture', 't7');
+  const item = add(box, 'card');
+  const asAgent = (...args) => box.hws(['todo', ...args, '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7' });
 
-  assert.equal(box.json(['todo', 'list', '--space', 'sp1']).workspace, null);
-  for (const args of [['send', '--terminal', 't7'], ['reply', '--text', 'go'], ['resume']]) {
-    const result = box.hws(['todo', ...args, '--id', item.id, '--space', 'sp1']);
-    assert.notEqual(result.code, 0, args[0]);
-    assert.match(result.stderr, /only inside a workspace/);
-  }
+  assert.equal(existsSync(marker), false);
+  asAgent('move', '--id', item.id, '--column', 'done');
+  assert.equal(existsSync(marker), true);
+  asAgent('capture', '--terminal', 't7', '--text', 'finished');
+  assert.equal(existsSync(marker), false);
+});
+
+test('a move that brings its own report leaves no marker', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'card');
+  box.hws(['todo', 'move', '--id', item.id, '--column', 'done', '--report', 'written here', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't7' });
+  assert.equal(existsSync(join(box.root, 'capture', 't7')), false);
+});
+
+test('todo start leaves a marker for its Claude worker', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'build it', '--owner', 'agent');
+  box.setState({ spaces: [space('sp1', [tab('tb1', [])])], selected: 'sp1' });
+  box.hws(['todo', 'start', '--ids', item.id, '--folder', '/w', '--space', 'sp1', '--json'], { HC_TERMINAL_ID: 't9' });
+  assert.equal(existsSync(join(box.root, 'capture', 't90')), true);
+});
+
+test('todo send links the session the terminal registered', (t) => {
+  const box = sandbox(t);
+  const item = add(box, 'card');
+  box.setState({ hc: { t5: { foreground: { name: 'claude', argv: ['claude'], cwd: '/work' } } } });
+  box.json(['register', '--terminal', 't5', '--session', 'uuid-5']);
+  const sent = box.json(['todo', 'send', '--id', item.id, '--terminal', 't5', '--space', 'sp1']);
+  assert.deepEqual(sent.session, { tool: 'claude', id: 'uuid-5', folder: '/work' });
 });
