@@ -34,8 +34,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install -g npm@latest
       - run: npm install -g @anthropic-ai/claude-code
+
+      # Later npm versions block Claude Code's postinstall, so npm upgrades after it.
+      - run: npm install -g npm@latest
+
 
       # CI has no Herdr app, so stubs stand in for its two commands.
       - name: Stub Herdr
