@@ -287,3 +287,59 @@ test('an archive with the wrong checksum is rejected and the surface builds inst
   assert.equal(readFileSync(join(box.root, 'surface/app/out/main/index.cjs'), 'utf8'), '');
   assert.ok(ranPnpm(box.calls(), 'build'));
 });
+
+function commitAll(root) {
+  for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'first']]) {
+    const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  }
+}
+
+const stamp = (box) => join(box.home, '.local/state/herdr-workspaces/install-version');
+
+test('a finished install records its version and doctor agrees', (t) => {
+  const box = setup(t);
+  commitAll(box.root);
+  const { code, output } = box.install();
+  assert.equal(code, 0, output);
+  assert.match(readFileSync(stamp(box), 'utf8'), /^[0-9a-f]{16}\n$/);
+  assert.match(output, /ok {2,}Installed version/);
+});
+
+test('a run that skips built parts keeps the recorded version', (t) => {
+  const box = setup(t);
+  commitAll(box.root);
+  box.install();
+  writeFileSync(stamp(box), 'older\n');
+  assert.equal(box.install().code, 0);
+  assert.equal(readFileSync(stamp(box), 'utf8'), 'older\n');
+});
+
+test('a forced run replaces the recorded version', (t) => {
+  const box = setup(t);
+  commitAll(box.root);
+  box.install();
+  writeFileSync(stamp(box), 'older\n');
+  assert.equal(box.install('--force').code, 0);
+  assert.notEqual(readFileSync(stamp(box), 'utf8'), 'older\n');
+});
+
+test('a forced run whose surface build fails records nothing', (t) => {
+  const box = setup(t);
+  commitAll(box.root);
+  box.install();
+  writeFileSync(stamp(box), 'older\n');
+  tool(box.bin, 'npm', `echo "npm $*" >> /dev/null
+case "$*" in *pnpm*) exit 1 ;; esac`);
+  box.install('--force');
+  assert.equal(readFileSync(stamp(box), 'utf8'), 'older\n');
+});
+
+test('a forced run with local edits removes the recorded version', (t) => {
+  const box = setup(t);
+  commitAll(box.root);
+  box.install();
+  writeFileSync(join(box.root, 'install.sh'), `${readFileSync(join(box.root, 'install.sh'), 'utf8')}\n`);
+  assert.equal(box.install('--force').code, 0);
+  assert.equal(existsSync(stamp(box)), false);
+});

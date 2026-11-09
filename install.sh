@@ -11,6 +11,7 @@ APP_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 PNPM_VERSION=12.15.0
 FORCE=0
 MODS_OK=1
+COMPLETE=1
 
 for arg in "$@"; do
   case "$arg" in
@@ -21,6 +22,7 @@ done
 
 say() { printf '\n== %s\n' "$1"; }
 warn() { echo "warning: $1" >&2; }
+unfinished() { warn "$1"; COMPLETE=0; }
 stop() { echo "error: $1" >&2; exit 1; }
 
 check_prerequisites() {
@@ -56,9 +58,9 @@ link_cli() {
 install_mods() {
   say "Herdr mods"
   if [ "$FORCE" -eq 1 ]; then
-    sh "$ROOT/mods/install.sh" --force || { warn "some mods failed their check"; MODS_OK=0; }
+    sh "$ROOT/mods/install.sh" --force || { unfinished "some mods failed their check"; MODS_OK=0; }
   else
-    sh "$ROOT/mods/install.sh" || { warn "some mods failed their check"; MODS_OK=0; }
+    sh "$ROOT/mods/install.sh" || { unfinished "some mods failed their check"; MODS_OK=0; }
   fi
 }
 
@@ -89,8 +91,9 @@ install_pixel() {
   pixel="$(sh "$ROOT/surface/pixel-path.sh")"
   if [ -x "$pixel" ] && [ "$FORCE" -eq 0 ]; then
     echo "already installed"
+    COMPLETE=0
   else
-    install_pixel_packages || warn "Pixel did not install, so boards, notes and page review won't open. Run this script again to retry"
+    install_pixel_packages || unfinished "Pixel did not install, so boards, notes and page review won't open. Run this script again to retry"
   fi
 }
 
@@ -134,25 +137,26 @@ build_app() {
   say "Surface app"
   if [ -f "$BUNDLE" ] && [ "$FORCE" -eq 0 ]; then
     echo "already built"
+    COMPLETE=0
     return
   fi
   download_app && return
   (cd "$ROOT/surface/app" && pnpm_run install --frozen-lockfile && pnpm_run build) \
-    || warn "the surface did not build, so boards, notes and page review won't open. Run this script again to retry"
+    || unfinished "the surface did not build, so boards, notes and page review won't open. Run this script again to retry"
 }
 
 install_plugin() {
   say "Claude plugin"
   if ! command -v claude >/dev/null; then
-    warn "Claude Code is not on PATH, so the plugin was skipped"
+    unfinished "Claude Code is not on PATH, so the plugin was skipped"
     return
   fi
   if ! claude plugin marketplace list 2>/dev/null | grep -q herdr-workspaces; then
-    claude plugin marketplace add "$ROOT" || { warn "could not add the plugin marketplace"; return; }
+    claude plugin marketplace add "$ROOT" || { unfinished "could not add the plugin marketplace"; return; }
   fi
-  claude plugin marketplace update herdr-workspaces || warn "could not refresh the plugin marketplace"
-  claude plugin install herdr-workspaces@herdr-workspaces || warn "could not install the plugin"
-  claude plugin update herdr-workspaces@herdr-workspaces || warn "could not update the plugin"
+  claude plugin marketplace update herdr-workspaces || unfinished "could not refresh the plugin marketplace"
+  claude plugin install herdr-workspaces@herdr-workspaces || unfinished "could not install the plugin"
+  claude plugin update herdr-workspaces@herdr-workspaces || unfinished "could not update the plugin"
 }
 
 check_prerequisites
@@ -166,7 +170,13 @@ install_plugin
 show_layout
 
 say "Check"
-"$ROOT/bin/hws" doctor
+
+# A run that skipped or failed a part leaves that part at an older version, so it records nothing.
+if [ "$COMPLETE" -eq 1 ]; then
+  "$ROOT/bin/hws" doctor --record
+else
+  "$ROOT/bin/hws" doctor
+fi
 status=$?
 
 if [ "$status" -eq 0 ]; then

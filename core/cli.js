@@ -138,7 +138,7 @@ const ROUTES = [
   { path: ['find'], run: find, options: {}, positionals: 'any' },
   { path: ['reopen'], run: reopen, options: {}, positionals: 1 },
   { path: ['prune'], run: prune, options: {} },
-  { path: ['doctor'], run: doctor, options: {} },
+  { path: ['doctor'], run: doctor, options: { record: flag } },
   { path: ['update'], run: update, options: {} },
 ];
 

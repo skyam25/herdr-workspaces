@@ -31,6 +31,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Thing | Location |
 |---|---|
 | State root | `$HWS_HOME`, default `~/.local/state/herdr-workspaces` |
+| Install version | `<state root>/install-version`, a hash of the git trees at the repo root except `.github`, `.gitignore`, `CLAUDE.md`, `LICENSE`, `README.md`, `bin`, `core` and `docs` |
 | Manifest | `<root>/workspaces/<spaceId>/workspace.json` |
 | Surface data | `<root>/workspaces/<spaceId>/surfaces/<surfaceId>/` |
 | Surface socket | `/tmp/hws-<surfaceId>.sock`, kept short for the Unix limit |
@@ -160,8 +161,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 
 | Command | Result |
 |---|---|
-| `hws doctor` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, the layout the window shows, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. Being behind, or a window on another layout, prints a `note` and never fails. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
-| `hws update` | Pulls `main` with `--ff-only`, then runs `install.sh --force` with its output on stderr, and prints `{updated,from,commit}`. Prints `{updated:false,commit}` and installs nothing when there is nothing new. Fails with no change on another branch or with uncommitted changes to tracked files |
+| `hws doctor [--record]` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, the layout the window shows, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. It compares the install version with the recorded one. Being behind, a stale install, or a window on another layout prints a `note` and never fails. `--record` writes the install version once every other check passes, or removes it when tracked files have uncommitted changes. Only `install.sh` passes `--record`, after a run that skipped and failed nothing. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
+| `hws update` | Pulls `main` with `--ff-only`, then runs `install.sh --force` with its output on stderr when the checkout's install version differs from `<state root>/install-version` or that file is missing. Prints `{updated,from,commit,installed}`, or `{updated:false,commit}` when the pull found nothing and the install is current. Fails with no change on another branch or with uncommitted changes to tracked files. A failed install records nothing, so the next `hws update` installs again |
 | `hws new terminal [--folder F]` | Opens a normal tab. No manifest |
 | `hws new workspace --name N --folder F [--home H] [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
 | `hws board add [--workspace W]` | Adds W's one Board space, or finds it, and prints `{workspace,space,tab}`. W defaults to the current workspace |

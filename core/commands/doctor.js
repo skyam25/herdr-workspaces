@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { checkout, commitsBehind } from '../checkout.js';
+import { checkout, commitsBehind, installedVersion, installVersion, recordInstall } from '../checkout.js';
 import { home } from '../paths.js';
 
 const PLUGIN_ID = 'herdr-workspaces@herdr-workspaces';
@@ -122,6 +122,17 @@ function checkUpdates() {
   return { name, ok: true, note: true, detail: `${behind} ${behind === 1 ? 'commit' : 'commits'} behind GitHub`, fix: 'Run hws update' };
 }
 
+// A stale install is news like being behind, so it never fails the report either.
+function checkInstalled() {
+  const name = 'Installed version';
+  const version = installVersion();
+  if (version === null) return { name, ok: true, detail: 'not checked, because this is not a git checkout' };
+  const installed = installedVersion();
+  if (installed === version) return { name, ok: true, detail: `${version} matches this checkout` };
+  const detail = installed === null ? 'no finished install is recorded' : `${installed} differs from this checkout's ${version}`;
+  return { name, ok: true, note: true, detail, fix: 'Run hws update' };
+}
+
 function report(checks) {
   const width = Math.max(...checks.map(({ name }) => name.length));
   return checks
@@ -133,7 +144,7 @@ function report(checks) {
     .join('\n');
 }
 
-export function doctor() {
+export function doctor({ record = false } = {}) {
   const checks = [
     checkNode(),
     checkTool('Herdr app', process.env.HWS_HERDR_APP || 'herdr-app'),
@@ -148,6 +159,8 @@ export function doctor() {
     checkUpdates(),
   ];
   const ok = checks.every((check) => check.ok);
+  if (ok && record) recordInstall();
+  checks.push(checkInstalled());
   if (!ok) process.exitCode = 1;
   return { data: { ok, checks }, text: report(checks) };
 }

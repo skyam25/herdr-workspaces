@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
-import { checkout, git } from '../checkout.js';
+import { checkout, git, installedVersion, installVersion } from '../checkout.js';
 import { HwsError } from '../errors.js';
 
 const PULL_MS = 120_000;
@@ -13,7 +13,7 @@ function requireCleanMain() {
   if (git(['status', '--porcelain', '--untracked-files=no']) !== '') throw new HwsError('this checkout has uncommitted changes, so commit or stash them first');
 }
 
-// Brings this machine to GitHub's main and reinstalls every part.
+// Brings this machine to GitHub's main and installs when the installed version differs.
 export function update() {
   requireCleanMain();
   const before = git(['rev-parse', '--short', 'HEAD']);
@@ -21,10 +21,19 @@ export function update() {
     throw new HwsError('could not pull from GitHub, so check the connection and that this checkout has no commits of its own');
   }
   const after = git(['rev-parse', '--short', 'HEAD']);
-  if (after === before) return { data: { updated: false, commit: after }, text: `Already up to date at ${after}` };
+  const pulled = after !== before;
+
+  if (installVersion() === installedVersion()) {
+    if (!pulled) return { data: { updated: false, commit: after }, text: `Already up to date at ${after}` };
+    return { data: { updated: true, from: before, commit: after, installed: false }, text: `Updated from ${before} to ${after}, with nothing to install` };
+  }
 
   // The installer's output goes to stderr, so stdout holds only the result.
   const install = spawnSync('sh', [join(checkout(), 'install.sh'), '--force'], { stdio: ['ignore', 2, 2] });
-  if (install.status !== 0) throw new HwsError(`updated to ${after}, but the install reported problems, so read the checks above`);
-  return { data: { updated: true, from: before, commit: after }, text: `Updated from ${before} to ${after}` };
+  if (install.status !== 0) {
+    const stage = pulled ? `updated to ${after}, but the install` : `the install at ${after}`;
+    throw new HwsError(`${stage} reported problems, so read the checks above and run hws update again`);
+  }
+  const text = pulled ? `Updated from ${before} to ${after}` : `Installed ${after}`;
+  return { data: { updated: true, from: before, commit: after, installed: true }, text };
 }

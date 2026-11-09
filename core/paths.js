@@ -16,6 +16,10 @@ export function stateRoot() {
   return resolve(process.env.HWS_HOME || join(home(), '.local/state/herdr-workspaces'));
 }
 
+export function installVersionPath() {
+  return join(stateRoot(), 'install-version');
+}
+
 export function workspaceDir(id) {
   return join(stateRoot(), 'workspaces', id);
 }
