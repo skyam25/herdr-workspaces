@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -158,6 +158,29 @@ test('a symlink to another checkout changes only with --force', (t) => {
   box.install('--force');
   assert.equal(readlinkSync(link), join(box.root, 'bin/hws'));
   assert.ok(lstatSync(link).isSymbolicLink());
+});
+
+test('--force rewrites only the mod files that changed', (t) => {
+  const box = setup(t);
+  const source = join(box.root, 'mods/hws-new');
+  const installed = join(box.home, '.config/herdr-app/mods/hws-new');
+  const layout = join(box.home, '.config/herdr-app/layouts/hws.json');
+  mkdirSync(join(source, 'core'));
+  writeFileSync(join(source, 'core/changed.js'), 'old');
+  writeFileSync(join(source, 'core/same.js'), 'same');
+  box.install();
+
+  const untouched = [join(installed, 'mod.json'), join(installed, 'core/same.js'), layout];
+  const past = new Date('2020-01-01T00:00:00Z');
+  for (const file of untouched) utimesSync(file, past, past);
+  writeFileSync(join(source, 'core/changed.js'), 'new');
+
+  const { code, output } = box.install('--force');
+
+  assert.equal(code, 0, output);
+  assert.equal(readFileSync(join(installed, 'core/changed.js'), 'utf8'), 'new');
+  for (const file of untouched) assert.equal(statSync(file).mtimeMs, past.getTime(), file);
+  assert.match(output, /hws-new: updated 1 file/);
 });
 
 test('unknown flags stop with usage', (t) => {
