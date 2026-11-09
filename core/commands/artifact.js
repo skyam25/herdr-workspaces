@@ -5,9 +5,10 @@ import { findArtifact, linkFor, moveDir } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, listLive } from '../herdr.js';
 import { listManifests, updateManifest } from '../manifest.js';
-import { placeOf, writablePlace } from '../places.js';
+import { isKept, placeOf, writablePlace } from '../places.js';
 import { requireFlag, resolveWorkspace, workspaceByRef } from '../resolve.js';
 import { listRetired } from '../retired.js';
+import { scanWorkspace } from '../scan.js';
 import { newId } from './surface.js';
 
 export const ARTIFACT_STATUSES = ['draft', 'current', 'superseded'];
@@ -80,26 +81,62 @@ function landFile(manifest, source) {
   return target;
 }
 
+function requireKept(manifest, option) {
+  if (!isKept(manifest)) throw new HwsError(`${option} needs a kept workspace, and ${manifest.name} is a ${manifest.kind ?? 'standalone store'}`);
+}
+
+// A file that stays where it is, or a web document, is only ever pointed at.
+// Registering the same one twice returns the first record.
+function pointerRecord(manifest, flags) {
+  if (flags.url !== undefined) {
+    if (flags.file !== undefined) throw new UsageError('pass --file or --url, not both');
+    if (!/^https?:\/\//i.test(flags.url)) throw new UsageError('--url must start with http:// or https://');
+    requireKept(manifest, '--url');
+    return { type: 'link', path: flags.url, prompt: flags.url, url: flags.url, title: flags.title || flags.url };
+  }
+  requireKept(manifest, '--in-place');
+  const path = realOf(resolve(requireFlag(flags, 'file')));
+  if (!existsSync(path)) throw new HwsError(`no file ${path}`);
+  return { type: 'file', path, prompt: path, inPlace: true, title: flags.title || basename(path) };
+}
+
+function record(fields) {
+  return { id: newId('a'), ...fields, fromTerminal: process.env.HC_TERMINAL_ID || null, createdAt: Date.now(), status: 'current', supersedes: null };
+}
+
+function addPointer(flags) {
+  const manifest = resolveWorkspace(flags);
+  const fields = pointerRecord(manifest, flags);
+  const existing = manifest.artifacts.find((item) => item.path === fields.path);
+  if (existing) return { data: { ...existing, workspace: manifest.id, existing: true }, text: `${fields.path} is already ${existing.id}` };
+  const artifact = record(fields);
+  updateManifest(manifest.id, (draft) => {
+    draft.artifacts.push(artifact);
+  });
+  return { data: { ...artifact, workspace: manifest.id }, text: `registered ${artifact.id} at ${artifact.path}` };
+}
+
 export function artifactAdd(flags) {
+  if (flags.url !== undefined || flags['in-place']) return addPointer(flags);
   const source = resolve(requireFlag(flags, 'file'));
   if (!existsSync(source)) throw new HwsError(`no file ${source}`);
   const manifest = resolveWorkspace(flags);
   const path = landFile(manifest, source);
-  const artifact = {
-    id: newId('a'),
-    type: 'file',
-    title: flags.title || basename(path),
-    path,
-    prompt: path,
-    fromTerminal: process.env.HC_TERMINAL_ID || null,
-    createdAt: Date.now(),
-    status: 'current',
-    supersedes: null,
-  };
+  const artifact = record({ type: 'file', title: flags.title || basename(path), path, prompt: path });
   updateManifest(manifest.id, (draft) => {
     draft.artifacts.push(artifact);
   });
   return { data: { ...artifact, workspace: manifest.id }, text: `registered ${artifact.id} at ${path}` };
+}
+
+export function artifactScan(flags) {
+  const found = scanWorkspace(resolveWorkspace(flags));
+  const lines = [
+    ...found.tracked.map((item) => `tracked\t${item.id}\t${item.type}\t${item.title}\t${item.path}`),
+    ...found.candidates.map((item) => `untracked\t${item.kind}\t${item.title ?? ''}\t${item.url ?? item.path}`),
+    ...(found.more ? [`and ${found.more} more`] : []),
+  ];
+  return { data: found, text: lines.join('\n') };
 }
 
 export function link(_flags, [artifactId]) {

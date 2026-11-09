@@ -13,6 +13,13 @@ const TASK_LIST = [
   "Run `~/.local/bin/hws` if `hws` is not on PATH.",
 ].join(" ");
 
+const NOTE_RULE = [
+  "When the person asks to update the current note or the current state, or to catch up on where this work stands, load the herdr-workspaces:tidy skill before you read or write anything, and follow it.",
+  "Never rewrite the current note yourself. Only a tidy pass may, because it records what the note covers.",
+].join(" ");
+
+const LISTED_ARTIFACTS = 12;
+
 // Resolves to trimmed stdout, or null when hws fails or outlives HWS_MS.
 function hws(args) {
   return new Promise((resolve) => {
@@ -62,6 +69,22 @@ function placesSentence(places, folder) {
   return `${text[0].toUpperCase()}${text.slice(1)}.`;
 }
 
+const oneLine = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+
+// What the workspace tracks, and how much it does not track yet.
+function artifactsContext(scan) {
+  const live = (scan?.tracked ?? []).filter((item) => item.status !== "superseded");
+  const parts = [];
+  if (live.length > 0) {
+    const rows = live.slice(0, LISTED_ARTIFACTS).map((item) => `- ${oneLine(item.title) || item.id} (${item.type}, id ${item.id}): ${item.path}`);
+    const more = live.length - rows.length;
+    parts.push(["Artifacts this workspace tracks:", ...rows, ...(more > 0 ? [`- and ${more} more, listed by \`hws artifact scan\``] : [])].join("\n"));
+  }
+  const untracked = (scan?.candidates?.length ?? 0) + (scan?.more ?? 0);
+  if (untracked > 0) parts.push(`${untracked} existing ${untracked === 1 ? "file or link looks" : "files and links look"} like this workspace's work but ${untracked === 1 ? "is" : "are"} not tracked. Run \`hws artifact scan\` before you judge what this workspace holds.`);
+  return parts.join("\n\n");
+}
+
 async function main() {
   const input = JSON.parse(await readStdin());
   const sessionId = input.session_id;
@@ -77,11 +100,12 @@ async function main() {
   ]);
 
   // Places and freshness only exist inside a workspace. Reading them never creates a folder.
-  const status = line ? parse(await hws(["tidy", "status", "--json"])) : null;
+  const [status, scan] = line ? (await Promise.all([hws(["tidy", "status", "--json"]), hws(["artifact", "scan", "--json"])])).map(parse) : [null, null];
   const freshness = typeof status?.line === "string" ? status.line.trim() : "";
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
-  const context = [workspace.filter(Boolean).join(" "), line && inHerdrApp() && TASK_LIST].filter(Boolean).join("\n\n");
+  const kept = Boolean(status?.places?.current);
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

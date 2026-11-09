@@ -9,7 +9,7 @@ import { run } from "herdr";
 import { tilde } from "./hws.js";
 import { revealLabel } from "./cites.js";
 import { openArtifactMenu } from "./artifactmenu.js";
-import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, isNote, livePass, placeRows, recordedSessions } from "./context.js";
+import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, isNote, linkCite, livePass, placeRows, recordedSessions } from "./context.js";
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
 
@@ -120,14 +120,33 @@ function citeChips(t, host, workspace, key, cites) {
   return cites.map((cite, i) => chip(t, `cite-${key}-${i}`, citeLabel(cite, workspace), (_e, cx) => host.citeAction(cite, workspace, cx)));
 }
 
+function noteMarkdown(host, workspace, line, i) {
+  return TextView.markdown(`note-${workspace.id}-${i}`, line.text || " ")
+    .selectable(true)
+    .on_link_click((url, cx) => {
+      const cite = linkCite(url, host.context?.currentPath);
+      if (cite) host.citeAction(cite, workspace, cx);
+    });
+}
+
 function noteLine(t, host, workspace, line, i) {
+  if (line.kind === "table") {
+    return v_flex()
+      .flex_none()
+      .px(8)
+      .py(4)
+      .gap(4)
+      .text_size(12)
+      .text_color(t.foreground)
+      .child(noteMarkdown(host, workspace, line, i))
+      .when(line.cites.length > 0, (el) => el.child(h_flex().flex_wrap().gap(4).children(citeChips(t, host, workspace, i, line.cites))));
+  }
   const words = div()
     .flex_1()
     .min_w(0)
     .whitespace_normal()
-    .when(line.kind === "heading", (el) => el.pt(6).text_size(11.5).font_semibold().text_color(t.muted))
-    .when(line.kind !== "heading", (el) => el.text_size(12).text_color(t.foreground))
-    .child(line.text || " ");
+    .when(line.kind === "heading", (el) => el.pt(8).font_semibold().text_color(t.foreground).text_size(line.level === 1 ? 15 : 14).child(line.text || " "))
+    .when(line.kind !== "heading", (el) => el.text_size(12).text_color(t.foreground).child(noteMarkdown(host, workspace, line, i)));
   return h_flex()
     .flex_none()
     .px(8)

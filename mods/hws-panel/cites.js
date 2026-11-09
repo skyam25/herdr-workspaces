@@ -67,6 +67,7 @@ async function bundleFile(artifact) {
 }
 
 async function openArtifact(artifact, { target, workspace }) {
+  if (artifact.type === "link") return openExternally(artifact.url ?? artifact.path);
   const file = artifact.type === "file" ? artifact.path : await bundleFile(artifact);
   if (!file) return openExternally(artifact.type === "board" ? `${artifact.path}/sketch.png` : artifact.path);
   return openPath(file, { target, workspace, title: artifact.title || artifact.id });
@@ -97,6 +98,7 @@ export function resumeSession(id, workspace, space) {
 // The second argument names the workspace, the agent pages open beside or null,
 // and the space new tabs open in.
 export async function openCite(cite, { workspace, target, space }) {
+  if (cite.kind === "url") return openExternally(cite.value);
   if (cite.kind === "card") return openCard(cite.value, workspace, space);
   if (cite.kind === "session") return resumeSession(cite.value, workspace, space);
   if (cite.kind === "commit") {

@@ -26,6 +26,8 @@ Keep the folder where you cloned it, because `hws` and the plugin run from it.
 
 The installer links `hws`, copies the mods, installs Pixel, prepares the surface, adds the Claude plugin, and finishes with `hws doctor`. It can run again safely. If one part fails, the others still install and the report names the fix.
 
+A new install switches the Herdr window to the `hws` layout, which holds the Workspaces sidebar and launcher. Herdr loads mods and layouts live, so it needs no restart. `herdr-app do layout.switch --name main` goes back and `--name hws` returns. Later installs and updates keep the layout you chose.
+
 The installer downloads a prebuilt surface when CI has published one for that commit. Otherwise it builds the surface with a pinned pnpm that npm fetches, so you do not install pnpm yourself.
 
 Update with `hws update`, which pulls `main`, reinstalls every part and runs the checks. `hws doctor` checks the install and says when GitHub has newer commits.

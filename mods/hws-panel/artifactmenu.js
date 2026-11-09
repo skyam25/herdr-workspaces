@@ -17,6 +17,12 @@ function externalItem({ type, path }) {
 }
 
 function menuItems(artifact) {
+  if (artifact.type === "link") {
+    return [
+      { id: "external", label: "Open in browser", run: () => openExternally(artifact.path) },
+      { id: "copy", label: "Copy link", run: () => copy(artifact.path) },
+    ];
+  }
   const external = externalItem(artifact);
   return [
     { id: external.id, label: external.label, run: () => openExternally(external.file) },

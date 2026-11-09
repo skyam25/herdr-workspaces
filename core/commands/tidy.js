@@ -10,6 +10,7 @@ import { withLock } from '../lock.js';
 import { TIDY_ROLE, updateManifest, writeJsonAtomic, writeTextAtomic } from '../manifest.js';
 import { STANDALONE, transcriptPath, workspaceDir } from '../paths.js';
 import { ROLES, allPlaces, hasOwnHome, homeOf, isForeign, isKept, placeOf, writablePlace } from '../places.js';
+import { scanWorkspace } from '../scan.js';
 import { locateTerminal, requireFlag, resolveWorkspace, splitList, workspaceByRef } from '../resolve.js';
 import { agentArgv } from '../agent-tools.js';
 import { agentModels } from '../settings.js';
@@ -90,7 +91,7 @@ function artifactsSince(manifest, through) {
     const changed = isNew ? null : modifiedAt(path);
     const isEdited = changed !== null && changed > through;
     if (!isNew && !isEdited) continue;
-    found.push({ id, title: title ?? null, path, status, createdAt: createdAt ?? null, ...(type === 'note' ? { type } : {}), ...(isEdited ? { editedAt: changed } : {}) });
+    found.push({ id, title: title ?? null, path, status, createdAt: createdAt ?? null, ...(type === 'note' || type === 'link' ? { type } : {}), ...(isEdited ? { editedAt: changed } : {}) });
   }
   return found;
 }
@@ -247,7 +248,7 @@ function joinWords(parts) {
 }
 
 function freshnessSentence(status) {
-  if (!status.tidiedAt) return 'No current note yet';
+  if (!status.tidiedAt) return existsSync(status.places.current ?? '') ? 'Current note not tidied yet' : 'No current note yet';
   const when = shortDate(status.tidiedAt);
   const parts = SOURCES.filter(({ key }) => status.landed[key] > 0).map(({ key, one }) => plural(status.landed[key], one));
   if (parts.length === 0) {
@@ -313,6 +314,7 @@ function writePacket(manifest) {
     },
     live: { artifacts: liveArtifacts(manifest), decisions: inForceDecisions(manifest), cards: openCards(manifest) },
     since,
+    candidates: scanWorkspace(manifest).candidates,
     cutoff: { sessionsThrough: now, artifactsThrough: now, commit: gitInfo.head },
   });
   return path;
@@ -360,8 +362,25 @@ function openTidy(manifest, packet, pane) {
   return opened.terminal;
 }
 
+// The agent already talking to the person runs the pass, so nothing is recorded
+// and an abandoned pass leaves no state behind. `tidy apply` still checks the note.
+function tidyHere(flags) {
+  const terminal = process.env.HC_TERMINAL_ID;
+  if (!terminal) throw new HwsError('--here needs a terminal in the workspace');
+  const { id } = resolveWorkspace(flags);
+  const packet = tidyLock(id, () => {
+    const manifest = workspaceByRef(id);
+    if (!isKept(manifest)) throw new HwsError(`${manifest.name} is a ${manifest.kind}, which has no current note`);
+    const live = livePass(manifest);
+    if (live && live.terminal !== terminal) throw new HwsError(`a tidy pass is running in ${live.terminal}, so finish it there or run hws tidy stop`);
+    return writePacket(manifest);
+  });
+  return { data: { started: true, here: true, terminal, packet }, text: packet };
+}
+
 // A start lock apart from the manifest lock makes two clicks open one tab.
 export function tidyStart(flags) {
+  if (flags.here) return tidyHere(flags);
   const { id } = resolveWorkspace(flags);
   const result = tidyLock(id, () => {
     const manifest = workspaceByRef(id);

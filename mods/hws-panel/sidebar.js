@@ -48,7 +48,8 @@ const isCurrent = (members) => members.some((s) => s.active);
 const mostUrgent = (members) => STATUS_ORDER.find((status) => members.some((s) => s.status === status)) ?? null;
 
 // One space needs no list of its own, because the workspace row already stands for it.
-const showsSpaces = (state, workspace, members) => members.length > 1 && !state.folded.has(workspace.id);
+// A lone space has no chevron, so it can never stay folded.
+const showsSpaces = (state, workspace, members) => members.length === 1 || !state.folded.has(workspace.id);
 const showsAddRows = (state, workspace, members) => isCurrent(members) && !state.folded.has(workspace.id);
 const hasBoard = (workspace, members) => members.some((s) => s.id === workspace.board?.space);
 
@@ -282,7 +283,7 @@ function showBoard(board) {
   run("tab.select", { id: board.tab });
 }
 
-function spaceRow(t, state, workspace, space) {
+function spaceRow(t, state, workspace, space, canRemove) {
   const isBoard = workspace.board?.space === space.id;
   return h_flex()
     .id(`sidebar-space-${space.id}`)
@@ -300,9 +301,9 @@ function spaceRow(t, state, workspace, space) {
     .when(!space.active, (el) => el.hover((s) => s.bg(t.hover)))
     .on_click(() => (isBoard ? showBoard(workspace.board) : run("space.select", { id: space.id })))
     .child(svg(isBoard ? "mods/hws-panel/board.svg" : icon("terminal")).size(12).flex_none())
-    .child(div().flex_1().min_w(0).truncate().child(space.name))
+    .child(div().flex_1().min_w(0).truncate().child(space.name || workspace.name))
     .when(Boolean(space.status), (el) => el.child(statusDot(t, space.status)))
-    .when(!isBoard, (el) => el.child(iconButton(t, `sidebar-remove-${space.id}`, "minus", 18, (cx) => removeSpace(state, space.id, cx)).tooltip("Take out of this workspace. The space stays open.")));
+    .when(!isBoard && canRemove, (el) => el.child(iconButton(t, `sidebar-remove-${space.id}`, "minus", 18, (cx) => removeSpace(state, space.id, cx)).tooltip("Take out of this workspace. The space stays open.")));
 }
 
 function addBoard(state, workspace, cx) {
@@ -440,7 +441,7 @@ function rows(t, state) {
     const members = membersOf(w, shown);
     return [
       workspaceRow(t, state, w, members),
-      ...(showsSpaces(state, w, members) ? boardFirst(w, members).map((space) => spaceRow(t, state, w, space)) : []),
+      ...(showsSpaces(state, w, members) ? boardFirst(w, members).map((space) => spaceRow(t, state, w, space, members.length > 1)) : []),
       ...addRowSpecs(state, w, members).map(({ id, label, onClick }) => addRow(t, id, label, onClick)),
     ];
   });

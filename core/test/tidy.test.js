@@ -180,6 +180,40 @@ test('with no current note every item is behind', (t) => {
   assert.equal(result.line, 'No current note yet');
 });
 
+test('a note written outside a tidy pass reads as not tidied', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  writeFileSync(status(box, manifest).places.current, '# Plan\n');
+
+  assert.equal(status(box, manifest).line, 'Current note not tidied yet');
+});
+
+test('tidy start --here writes a packet and records no pass', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const terminal = manifest.terminals[0].terminal;
+  box.clearCalls();
+
+  const started = box.json(['tidy', 'start', '--here'], { HC_TERMINAL_ID: terminal });
+
+  assert.equal(started.here, true);
+  assert.ok(existsSync(started.packet));
+  assert.deepEqual(JSON.parse(readFileSync(started.packet, 'utf8')).candidates, []);
+  assert.equal(box.manifest(manifest.id).tidy, undefined);
+  assert.deepEqual(box.actions(), []);
+});
+
+test('tidy start --here refuses while another terminal runs a pass', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const live = box.json(['tidy', 'start', '--workspace', manifest.id]);
+
+  const result = box.hws(['tidy', 'start', '--here', '--workspace', manifest.id], { HC_TERMINAL_ID: manifest.terminals[0].terminal });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout + result.stderr, new RegExp(`running in ${live.terminal}`));
+});
+
 test('status carries the resolved places and the line, and creates no folder', (t) => {
   const box = sandbox(t);
   const manifest = box.app();

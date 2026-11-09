@@ -6,6 +6,7 @@ import { updateManifest, listManifests } from './manifest.js';
 import { listRetired } from './retired.js';
 
 export function linkFor(promptPath) {
+  if (/^https?:/i.test(promptPath)) return promptPath;
   return /\s/.test(promptPath) ? `@"${promptPath}"` : `@${promptPath}`;
 }
 

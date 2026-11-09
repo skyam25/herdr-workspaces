@@ -16,6 +16,7 @@ Run `~/.local/bin/hws` if `hws` is not on PATH.
 | `hws current --line` | One sentence, or nothing outside a workspace |
 | `hws current --json` | The full manifest |
 | `hws artifact list` | Artifacts, each with a `prompt` path to its `prompt.md` |
+| `hws artifact scan` | This workspace's artifacts, and existing files and links it does not track yet |
 | `hws link ARTIFACT` | An `@path` reference to the artifact's prompt |
 
 Read the manifest before inferring anything from the folder or git state. If `$HC_TERMINAL_ID` is empty or `hws current --line` prints nothing, this session is in a normal terminal with no workspace.
@@ -34,7 +35,11 @@ Read the manifest before inferring anything from the folder or git state. If `$H
 | `history` | Earlier notes, the update log and demoted docs |
 | `meetings` | Transcribed meeting notes, when set |
 
-Put every document, note and artifact you write for this workspace in one of these places, and register a finished file with `hws artifact add --file F --title X`. A temp folder is only for throwaway work. `hws` resolves these under the workspace's own folder, which can sit below the folder you run in.
+To update the current note, or to catch up on where the work stands, load the `herdr-workspaces:tidy` skill. It starts a pass in this session with `hws tidy start --here`. Never rewrite the note yourself.
+
+Put every document, note and artifact you write for this workspace in one of these places, and register a finished file with `hws artifact add --file F --title X`. Register work that lives elsewhere without moving it, with `hws artifact add --file F --in-place --title X` for a file or `hws artifact add --url URL --title X` for a claude.ai artifact or other web document. A temp folder is only for throwaway work. `hws` resolves these under the workspace's own folder, which can sit below the folder you run in.
+
+To change that folder, run `hws set --home PATH`. PATH must already exist. `hws set --home ""` puts the files back in the folder you run in. The change moves no files and only sets where new work lands, so tell the person if existing work should move too.
 
 Session start names the current, notes, artifacts and scratch paths. Run `hws place ROLE` before you write into a place. It prints the absolute path, creates the `artifacts` or `scratch` folder on first use, and prints nothing when the role is unset.
 

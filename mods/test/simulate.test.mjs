@@ -292,6 +292,19 @@ test("Choose fills the folder, and cancelling leaves it", async () => {
   assert.equal(m.view.values.folder, "/picked");
 });
 
+test("Choose fills the files folder, which stays editable and reaches hws", async () => {
+  const { H, m } = await form({ pickResult: "/picked/files" });
+  await m.click("choose-home");
+  assert.equal(m.view.values.home, "/picked/files");
+  assert.equal(m.view.values.folder, "~/Projects");
+  m.view.inputs.home.type("/typed/files", m.cx);
+  await m.settle();
+  assert.equal(m.view.values.home, "/typed/files");
+  await m.click("create");
+  const sent = args(H).at(-1);
+  assert.equal(sent[sent.indexOf("--home") + 1], "/typed/files");
+});
+
 test("Enter in a field submits, and a double submit runs once", async () => {
   const { H, m } = await form();
   m.view.inputs.folder.type("/x/d", m.cx);
@@ -831,6 +844,35 @@ test("note lines keep headings and bullets, pull out cites and stop at the first
   assert.equal(long.more, 30 - ctx.NOTE_LINES);
 });
 
+test("a note table is one entry that keeps its rows and gives up its cites", () => {
+  const table = ["| Horizon | What |", "|---|---|", "| Now | Boards [commit:ba7d965] |", "| Next | Notes |"].join("\n");
+  const { lines, more } = ctx.noteLines(`# Plan\n\nBefore\n${table}\nAfter`);
+  assert.equal(more, 0);
+  assert.deepEqual(lines.map((line) => line.kind), ["heading", "text", "table", "text"]);
+  assert.equal(lines[2].text, ["| Horizon | What |", "|---|---|", "| Now | Boards |", "| Next | Notes |"].join("\n"));
+  assert.deepEqual(lines[2].cites, [{ kind: "commit", value: "ba7d965" }]);
+});
+
+test("a line with a pipe stays text without a rule row under it", () => {
+  assert.deepEqual(ctx.noteLines("a | b\nc | d").lines.map((line) => line.kind), ["text", "text"]);
+});
+
+test("a table counts once toward the first screen", () => {
+  const rows = Array.from({ length: 40 }, (_, i) => `| ${i} | x |`).join("\n");
+  const { lines, more } = ctx.noteLines(`| a | b |\n|---|---|\n${rows}`);
+  assert.equal(lines.length, 1);
+  assert.equal(more, 0);
+});
+
+test("a note link resolves against the note and a web link stays a url", () => {
+  const note = "/w/05-projects/plan/CURRENT.md";
+  assert.deepEqual(ctx.linkCite("story.html", note), { kind: "file", value: "/w/05-projects/plan/story.html" });
+  assert.deepEqual(ctx.linkCite("../cert/my%20plan.html#top", note), { kind: "file", value: "/w/05-projects/cert/my plan.html" });
+  assert.deepEqual(ctx.linkCite("file:///w/a.pptx", note), { kind: "file", value: "/w/a.pptx" });
+  assert.deepEqual(ctx.linkCite("https://claude.ai/artifact/abc", note), { kind: "url", value: "https://claude.ai/artifact/abc" });
+  assert.equal(ctx.linkCite("#open-items", note), null);
+});
+
 test("backlog rows turn status items into cites", () => {
   assert.deepEqual(ctx.backlogRow({ kind: "commit", id: "abc1234", title: "Fix it", at: 5, path: null }), { source: "commit", title: "Fix it", at: 5, cite: { kind: "commit", value: "abc1234" } });
   assert.equal(ctx.backlogRow({ kind: "session", id: "abcdef123456", title: null }).title, "Session abcdef12");
@@ -1345,11 +1387,11 @@ test("the sidebar folds archived workspaces under one row and restores on click"
   const archived = { ...APP, id: "spa", name: "old work", spaces: [], archived: { at: 1, spaces: [] } };
   const H = setup({ hws: { list: [APP], "list --archived": [archived] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 147 } });
-  assert.equal(m.has("sidebar-archived-spa"), false);
-  H.layout.children[0].children[0].size.px = 147;
-  await m.click("sidebar-archived-toggle");
   assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 173 } });
+  assert.equal(m.has("sidebar-archived-spa"), false);
+  H.layout.children[0].children[0].size.px = 173;
+  await m.click("sidebar-archived-toggle");
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 199 } });
   await m.click("sidebar-archived-spa");
   assert.deepEqual([H.overlays.at(-1).props.view, H.overlays.at(-1).props.action, H.overlays.at(-1).props.workspace], ["confirm", "restore", "spa"]);
   await m.rightClick("sidebar-archived-spa");
@@ -1359,8 +1401,8 @@ test("the sidebar folds archived workspaces under one row and restores on click"
 test("the sidebar section sizes its block to its rows and hides them when narrow", async () => {
   const H = setup({ hws: { list: [APP, THROWAWAY] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 203 } });
-  H.layout.children[0].children[0].size.px = 203;
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 255 } });
+  H.layout.children[0].children[0].size.px = 255;
   H.runs.length = 0;
   await m.fireTimer(1000);
   assert.deepEqual(H.runs, []);
@@ -1386,11 +1428,12 @@ test("sidebar lists a workspace's spaces and shows its most urgent status", asyn
   assert.deepEqual(H.runs.at(-1), { name: "space.select", args: { id: "spc3" } });
 });
 
-test("a workspace with one space has no space rows and still offers Add space", async () => {
+test("a workspace with one space shows it, with no fold or minus, and offers Add space", async () => {
   const H = setup({ hws: { list: [APP] }, spaces: SPACED });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.equal(m.has("sidebar-space-spc1"), false);
+  assert.equal(m.has("sidebar-space-spc1"), true);
   assert.equal(m.has("sidebar-fold-spc1"), false);
+  assert.equal(m.has("sidebar-remove-spc1"), false);
   await m.click("sidebar-add-space-spc1");
   assert.deepEqual(H.overlays.at(-1).props, { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1"] });
 });

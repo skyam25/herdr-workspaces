@@ -1,29 +1,30 @@
 ---
 name: tidy
-description: This skill should be used when a prompt names the herdr-workspaces:tidy skill or asks to tidy a workspace's current note. Explains how to read the tidy packet, ask what is unclear, rewrite the current note, log decisions, propose demotions and open the proposal for the person to review.
+description: This skill should be used when a prompt names the herdr-workspaces:tidy skill, asks to tidy a workspace's current note, or, in a Herdr workspace, asks to update the current note or the current state, refresh it, or catch up on where the work stands. Explains how to read the tidy packet, ask what is unclear, rewrite the current note, log decisions, propose demotions and open the proposal for the person to review.
 ---
 
 # Tidy the current note
 
 A workspace keeps three layers. The current note says what is true now. The decision log records what was decided and what replaced it. The stream holds everything else, such as transcripts, artifacts, commits and cards. A tidy pass reads what the stream gained since the last pass and proposes a new note and any new decisions. You propose, the person reviews, and `hws` applies. You never edit the note or the log or move files yourself.
 
-The person runs this in a terminal beside the workspace, so ask here when something is unclear.
+A pass runs in one of two places. The Tidy button opens a terminal beside the workspace and names the packet in its first prompt. An agent the person is already talking to runs the pass in that same session. Either way, ask here when something is unclear.
 
 Run `~/.local/bin/hws` if `hws` is not on PATH.
 
 ## Steps
 
-1. Read the packet.
-2. Read the current note and every stream item the packet lists.
-3. Check for conflicts against the live artifacts and decisions.
-4. Ask the person what the evidence does not settle.
-5. Write `proposal.json` and `proposal.md` in the packet's folder.
-6. Open `proposal.md` in a page surface and end the turn.
-7. On Done, apply the proposal.
+1. Read the packet, starting one if the prompt names none.
+2. Offer to adopt existing work the packet lists under `candidates`.
+3. Read the current note, every stream item and every live artifact that bears on the note.
+4. Check for conflicts against the live artifacts and decisions.
+5. Ask the person what the evidence does not settle.
+6. Write `proposal.json` and `proposal.md` in the packet's folder.
+7. Open `proposal.md` in a page surface and end the turn.
+8. On Done, apply the proposal.
 
 ## Read the packet
 
-The first prompt names the packet. Otherwise read `tidy.packet` from `hws current --json`. It sits at `<state>/workspaces/<id>/tidy/packet.json`.
+The first prompt names the packet when the Tidy button started the pass. Otherwise run `hws tidy start --here`, which writes a fresh packet and prints its path, and carry on in this session. It sits at `<state>/workspaces/<id>/tidy/packet.json`.
 
 | Field | Use |
 |---|---|
@@ -38,6 +39,7 @@ The first prompt names the packet. Otherwise read `tidy.packet` from `hws curren
 | `live.decisions` | The decision log's `path` and the entries still `inForce` |
 | `live.cards` | Cards not yet done. Next draws on these |
 | `since` | Stream items newer than the last pass, by source. An artifact with `editedAt` changed after the last pass. Every card in `since.cards` is Done |
+| `candidates` | Existing files and web documents the workspace does not track yet, below |
 | `cutoff` | What the pass covers. `hws` stamps it on apply, so leave it alone |
 
 | Stage | Do |
@@ -47,6 +49,19 @@ The first prompt names the packet. Otherwise read `tidy.packet` from `hws curren
 | `building` | Record decisions, and flag only what contradicts one in force |
 | `settled` | Keep the note short, and flag anything that reopens a decision |
 | missing | Treat it as `discovery` |
+
+## Adopt existing work
+
+A workspace only tracks what was recorded after it was created, so work that came first shows up under `candidates`. A candidate is a suggestion from a folder scan, so never register one without the person's yes.
+
+When `candidates` is not empty, ask with the AskUserQuestion tool which ones belong to this workspace, naming each by title and path. Register each yes, then run `hws tidy start --here` again so the packet lists them.
+
+| Candidate | Register with |
+|---|---|
+| `kind` `file` | `hws artifact add --file PATH --in-place --title X`, which leaves the file where it is |
+| `kind` `link` | `hws artifact add --url URL --title X` |
+
+If you cannot ask, register nothing and read the candidates whose titles bear on the note anyway. Name them in the summary so the person can adopt them later.
 
 ## Read the stream
 
@@ -58,6 +73,17 @@ The first prompt names the packet. Otherwise read `tidy.packet` from `hws curren
 | `since.cards` | `notes`, `note`, `report` and `replies` are inline. A Done card's `report` says what happened |
 
 Read the whole current note when `current.exists` is true. Read only what you need to decide what is true now. You are not writing a log.
+
+Each artifact needs the reader that fits it.
+
+| Artifact | Read it with |
+|---|---|
+| `type` `link`, a claude.ai artifact | The Artifact tool with `action` `read`. List its published files with `scope` `files` and read any bundled page by `path` |
+| Another `type` `link` | The connector or web tool that reaches it |
+| `.pptx`, `.docx`, `.xlsx` or `.pdf` | The matching document skill, or a text extraction when no skill is listed |
+| A file with a `<file>.feedback.md` beside it | Read that log too, because it holds the review decisions |
+
+A link has no modified time, so read every live link on each pass. Read a source before you say the note matches it, because one more read beats writing that it was not checked. When a source truly cannot be read, name it under Open questions and do not claim the work is unchanged.
 
 ## Decide what counts
 
@@ -133,6 +159,8 @@ The note has five fixed headings, in this order.
 - Build Next from `live.cards` and what the stream says comes next.
 - Move finished items out of Next. Drop Now lines that stopped being true. Drop an open question once it is answered.
 - Add nothing the stream does not support.
+- Write for a later reader and never as "I". State what is unknown as a fact about the work.
+- Say how strong the evidence is. A rough estimate or a placeholder is never a verified fact, and a page cannot verify itself.
 
 | Cite | Points at |
 |---|---|
@@ -211,6 +239,6 @@ Do not poll. The person reads the page and presses Done, and their feedback arri
 | `I reviewed proposal.md in Agent Brief and changed nothing`, or accepts in words | `hws tidy apply --file <packet folder>/proposal.json` |
 | Turns down whole parts | Add `--skip` with any of `current`, `decisions`, `demote`, `artifacts`, `cards` |
 | `My edited copy of proposal.md`, comments, or asks for changes | Carry the changes into both files and open the page again. `hws tidy apply` reads only `proposal.json` |
-| Cancels | `hws tidy stop` |
+| Cancels | `hws tidy stop`, or just end the turn when you started with `--here` |
 
 `hws tidy apply` saves the previous note to history and adds an entry to the update log. It refuses when the current note changed after the packet was written, when its place moved, when a listed card has left Done, or when `replaces` names a decision that is gone or already replaced. It checks everything before it writes, so a refused apply changes nothing. Fix the proposal or tell the person, because a new `hws tidy start` writes a fresh packet. When apply succeeds, report what it printed and end the turn.

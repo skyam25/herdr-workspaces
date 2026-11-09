@@ -1,5 +1,5 @@
 {
-  "description": "Register the session with its Herdr workspace, tell Claude which workspace it is in, where files land and how fresh the current note is, copy a closing message onto the cards it finished, and show a flipped agent's permission requests in its chat.",
+  "description": "Register the session with its Herdr workspace, tell Claude which workspace it is in, where files land, how fresh the current note is, what work it tracks and how the note gets updated, keep direct writes off the current note, copy a closing message onto the cards it finished, and show a flipped agent's permission requests in its chat.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,18 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
             "timeout": 6
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-note.sh\"",
+            "timeout": 4
           }
         ]
       }

@@ -71,6 +71,21 @@ function checkLayout() {
   return { name: 'Layout', ok, detail: installed, fix: install(' --force') };
 }
 
+// A window on another layout may be the person's choice, so this never fails the report.
+function checkLayoutShown() {
+  const name = 'Layout shown';
+  const status = probe(process.env.HWS_HERDR_APP || 'herdr-app', ['status']);
+  let layout;
+  try {
+    layout = JSON.parse(status.stdout).layout;
+  } catch {
+    layout = undefined;
+  }
+  if (!layout) return { name, ok: true, detail: 'not checked, because no Herdr window answered' };
+  if (layout === 'hws') return { name, ok: true, detail: 'hws' };
+  return { name, ok: true, note: true, detail: `the window shows ${layout}, so the Workspaces sidebar is hidden`, fix: 'Run herdr-app do layout.switch --name hws' };
+}
+
 function checkPixel() {
   const found = probe('sh', [join(checkout(), 'surface/pixel-path.sh')]);
   const path = found.stdout?.trim() ?? '';
@@ -126,6 +141,7 @@ export function doctor() {
     checkLink(),
     checkMods(),
     checkLayout(),
+    checkLayoutShown(),
     checkPixel(),
     checkApp(),
     checkPlugin(),

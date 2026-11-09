@@ -67,7 +67,7 @@ test('a fresh install sets up every part and passes doctor', (t) => {
   assert.ok(ranPnpm(box.calls(), 'install --frozen-lockfile'));
   assert.ok(box.calls().includes(`claude plugin marketplace add ${box.root}`));
   assert.ok(box.calls().includes('claude plugin install herdr-workspaces@herdr-workspaces'));
-  assert.match(output, /== Next\n.*\/reload-plugins/);
+  assert.match(output, /== Next[\s\S]*\/reload-plugins/);
 });
 
 test('a second run skips finished parts and still passes', (t) => {
@@ -192,6 +192,43 @@ test('--force rewrites only the mod files that changed', (t) => {
   assert.equal(readFileSync(join(installed, 'core/changed.js'), 'utf8'), 'new');
   for (const file of untouched) assert.equal(statSync(file).mtimeMs, past.getTime(), file);
   assert.match(output, /hws-new: updated 1 file/);
+});
+
+const SWITCH = 'herdr-app do layout.switch --name hws';
+
+test('a new install shows the hws layout and later runs leave the window alone', (t) => {
+  const box = setup(t);
+  const { code, output } = box.install();
+  assert.equal(code, 0, output);
+  assert.match(output, /now shows the hws layout/);
+  assert.ok(box.calls().includes(SWITCH));
+
+  const before = box.calls().length;
+  box.install('--force');
+  assert.equal(box.calls().slice(before).includes(SWITCH), false);
+});
+
+test('a layout the person already has is never switched to', (t) => {
+  const box = setup(t);
+  mkdirSync(join(box.home, '.config/herdr-app/layouts'), { recursive: true });
+  writeFileSync(join(box.home, '.config/herdr-app/layouts/hws.json'), '{}');
+  box.install();
+  assert.equal(box.calls().includes(SWITCH), false);
+});
+
+test('a closed Herdr window gets the command to run later', (t) => {
+  const box = setup(t);
+  tool(box.bin, 'herdr-app', '[ "$1" != do ] || exit 2');
+  const { code, output } = box.install();
+  assert.equal(code, 0, output);
+  assert.match(output, /Herdr is not open.*layout\.switch --name hws/);
+});
+
+test('a mod that fails its check keeps the window on its layout', (t) => {
+  const box = setup(t);
+  tool(box.bin, 'herdr-app', `echo "herdr-app $*" >> "${join(box.dir, 'log')}"; [ "$1" != check ] || exit 1`);
+  box.install();
+  assert.equal(box.calls().includes(SWITCH), false);
 });
 
 test('unknown flags stop with usage', (t) => {

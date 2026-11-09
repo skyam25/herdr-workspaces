@@ -10,6 +10,7 @@ BUNDLE="$ROOT/surface/app/out/main/index.cjs"
 APP_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 PNPM_VERSION=12.15.0
 FORCE=0
+MODS_OK=1
 
 for arg in "$@"; do
   case "$arg" in
@@ -55,9 +56,20 @@ link_cli() {
 install_mods() {
   say "Herdr mods"
   if [ "$FORCE" -eq 1 ]; then
-    sh "$ROOT/mods/install.sh" --force || warn "some mods failed their check"
+    sh "$ROOT/mods/install.sh" --force || { warn "some mods failed their check"; MODS_OK=0; }
   else
-    sh "$ROOT/mods/install.sh" || warn "some mods failed their check"
+    sh "$ROOT/mods/install.sh" || { warn "some mods failed their check"; MODS_OK=0; }
+  fi
+}
+
+# A new install shows its layout. Later runs keep the layout the person chose.
+show_layout() {
+  [ "$NEW_LAYOUT" -eq 1 ] && [ "$MODS_OK" -eq 1 ] || return 0
+  say "Layout"
+  if herdr-app do layout.switch --name hws >/dev/null 2>&1; then
+    echo "The Herdr window now shows the hws layout. Run herdr-app do layout.switch --name main to go back."
+  else
+    echo "Herdr is not open. Open it and run herdr-app do layout.switch --name hws to show Workspaces in the sidebar."
   fi
 }
 
@@ -144,11 +156,14 @@ install_plugin() {
 }
 
 check_prerequisites
+NEW_LAYOUT=1
+[ ! -f "$APP_HOME/layouts/hws.json" ] || NEW_LAYOUT=0
 link_cli
 install_mods
 install_pixel
 build_app
 install_plugin
+show_layout
 
 say "Check"
 "$ROOT/bin/hws" doctor
@@ -156,6 +171,7 @@ status=$?
 
 if [ "$status" -eq 0 ]; then
   say "Next"
+  echo "Herdr loads mods and layouts live, so it needs no restart."
   echo "Run /reload-plugins in open Claude Code sessions, or start new ones, to load the plugin."
   echo "Keep this folder at $ROOT, because hws and the plugin run from it."
   echo "Optional key bindings are in $ROOT/mods/keys.example.json. Copy the ones you want to $APP_HOME/keys.json."

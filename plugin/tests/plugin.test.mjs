@@ -35,7 +35,8 @@ function status({ places = PLACES, line = FRESHNESS } = {}) {
 }
 
 const REGISTER = "bin register --terminal t13 --session sess-1 --json";
-const WORKSPACE_CALLS = [REGISTER, "bin current --line", "bin tidy status --json"].sort();
+const WORKSPACE_CALLS = [REGISTER, "bin artifact scan --json", "bin current --line", "bin tidy status --json"].sort();
+const NOTE_RULE_TEXT = "load the herdr-workspaces:tidy skill";
 
 let dir;
 let home;
@@ -64,6 +65,7 @@ function stub(
     current = `echo '${LINE}'`,
     json = `echo '${MANIFEST}'`,
     tidy = ":",
+    scan = ":",
   } = {},
 ) {
   mkdirSync(folder, { recursive: true });
@@ -77,6 +79,7 @@ case "$1 $2" in
   "current --line") ${current} ;;
   "current --json") ${json} ;;
   "tidy status") ${tidy} ;;
+  "artifact scan") ${scan} ;;
   register*) ${register} ;;
 esac
 `,
@@ -123,6 +126,53 @@ function assertTaskList(context) {
   }
 }
 
+const GUARD = join(ROOT, "hooks", "guard-note.sh");
+
+function writeTo(file) {
+  return JSON.stringify({ tool_name: "Write", tool_input: { file_path: file }, cwd: FOLDER });
+}
+
+describe("current note guard", () => {
+  const NOTE = `${FOLDER}/docs/NEXT-STEPS.md`;
+
+  function stubPlace(body) {
+    mkdirSync(join(home, ".local", "bin"), { recursive: true });
+    const path = join(home, ".local", "bin", "hws");
+    writeFileSync(path, `#!/bin/bash\n${body}\n`);
+    chmodSync(path, 0o755);
+  }
+
+  it("denies a write to the current note and names the way forward", () => {
+    stubPlace(`echo '${JSON.stringify({ role: "current", path: NOTE, writer: null })}'`);
+    const output = JSON.parse(run(GUARD, { input: writeTo(NOTE) }).stdout).hookSpecificOutput;
+
+    assert.equal(output.hookEventName, "PreToolUse");
+    assert.equal(output.permissionDecision, "deny");
+    assert.match(output.permissionDecisionReason, /hws tidy start --here/);
+  });
+
+  it("resolves a relative path against the session folder", () => {
+    stubPlace(`echo '${JSON.stringify({ role: "current", path: NOTE, writer: null })}'`);
+    assert.match(run(GUARD, { input: writeTo("docs/NEXT-STEPS.md") }).stdout, /deny/);
+  });
+
+  it("allows every other file", () => {
+    stubPlace(`echo '${JSON.stringify({ role: "current", path: NOTE, writer: null })}'`);
+    assertSilent(run(GUARD, { input: writeTo(`${FOLDER}/docs/other.md`) }));
+  });
+
+  it("allows the note when another tool owns it", () => {
+    stubPlace(`echo '${JSON.stringify({ role: "current", path: NOTE, writer: "pmos" })}'`);
+    assertSilent(run(GUARD, { input: writeTo(NOTE) }));
+  });
+
+  it("allows the write when hws fails or no terminal is set", () => {
+    stubPlace("exit 1");
+    assertSilent(run(GUARD, { input: writeTo(NOTE) }));
+    assertSilent(run(GUARD, { input: writeTo(NOTE), terminal: "" }));
+  });
+});
+
 describe("session-start hook", () => {
   it("registers the session and returns the line as context", () => {
     homeStub();
@@ -138,7 +188,29 @@ describe("session-start hook", () => {
   it("adds the places and freshness sentences after the line", () => {
     homeStub({ tidy: status() });
 
-    assert.equal(contextOf(run(HOOK)), `${LINE} ${PLACES_SENTENCE} ${FRESHNESS}`);
+    const [first, rule] = contextOf(run(HOOK)).split("\n\n");
+    assert.equal(first, `${LINE} ${PLACES_SENTENCE} ${FRESHNESS}`);
+    assert.ok(rule.includes(NOTE_RULE_TEXT));
+    assert.ok(rule.includes("Never rewrite the current note yourself"));
+  });
+
+  it("lists what the workspace tracks and counts what it does not", () => {
+    const tracked = [
+      { id: "a1", type: "link", title: "Live story", path: "https://claude.ai/artifact/x", status: "current" },
+      { id: "a2", type: "file", title: "Old", path: "/w/old.html", status: "superseded" },
+    ];
+    const candidates = [{ kind: "file", path: "/w/deck.pptx" }, { kind: "link", url: "https://claude.ai/artifact/y" }];
+    homeStub({ tidy: status(), scan: `echo '${JSON.stringify({ tracked, candidates, more: 1 })}'` });
+
+    const context = contextOf(run(HOOK));
+    assert.ok(context.includes("- Live story (link, id a1): https://claude.ai/artifact/x"));
+    assert.ok(!context.includes("/w/old.html"));
+    assert.ok(context.includes("3 existing files and links look like this workspace's work"));
+  });
+
+  it("gives no note rule outside a kept workspace", () => {
+    homeStub({ tidy: status({ places: { current: null, artifacts: null, scratch: null } }) });
+    assert.ok(!contextOf(run(HOOK)).includes(NOTE_RULE_TEXT));
   });
 
   it("keeps the task list paragraph after the new sentences", () => {
@@ -153,7 +225,7 @@ describe("session-start hook", () => {
     homeStub({ tidy: status({ places: { ...PLACES, artifacts: null, current: "/elsewhere/CURRENT.md" }, line: "" }) });
 
     assert.equal(
-      contextOf(run(HOOK)),
+      contextOf(run(HOOK)).split("\n\n")[0],
       `${LINE} Drafts land in .herdr-workspace/checkout-1234/scratch/, the current note is /elsewhere/CURRENT.md.`,
     );
   });

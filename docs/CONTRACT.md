@@ -114,7 +114,9 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `artifacts[].role` | `tidy` on a review saved from the tidy terminal. Freshness leaves it out. Absent on other artifacts |
 | `artifacts[].status` | `draft`, `current` or `superseded`. Done writes `current`. A record without it reads as `current` |
 | `artifacts[].supersedes` | The id of the artifact this one replaces, or null. Absent reads as null |
-| `artifacts[].type` | `board`, `note` or `page` from Done, `file` from `hws artifact add` |
+| `artifacts[].type` | `board`, `note` or `page` from Done, `file` or `link` from `hws artifact add` |
+| `artifacts[].inPlace` | True on a file registered with `--in-place`, which `hws` never moves. Absent otherwise |
+| `artifacts[].url` | The address of a `link` artifact. Absent otherwise |
 
 ### Places
 
@@ -158,7 +160,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 
 | Command | Result |
 |---|---|
-| `hws doctor` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. Being behind prints a `note` and never fails. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
+| `hws doctor` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, the layout the window shows, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. Being behind, or a window on another layout, prints a `note` and never fails. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
 | `hws update` | Pulls `main` with `--ff-only`, then runs `install.sh --force` with its output on stderr, and prints `{updated,from,commit}`. Prints `{updated:false,commit}` and installs nothing when there is nothing new. Fails with no change on another branch or with uncommitted changes to tracked files |
 | `hws new terminal [--folder F]` | Opens a normal tab. No manifest |
 | `hws new workspace --name N --folder F [--home H] [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
@@ -167,11 +169,12 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws space add --workspace W [--name N] [--folder F]` | Opens a new space in W. F defaults to W's folder |
 | `hws space move --space S --workspace W` | Moves an open local space into W. A plain space's cards join W's Board. A space leaving another workspace leaves its cards there. Fails when S is that workspace's last space or its Board space |
 | `hws space remove --space S` | Takes S out of its workspace and leaves it open as a plain space. Its cards stay on the Board. Fails on the workspace's last space or its Board space |
-| `hws set [--workspace W] [--name N] [--kind K] [--instructions X] [--stage S] [--home H] [--place ROLE=PATH ...] [--writer ROLE=NAME ...]` | Changes a workspace's name, instructions and stage, or a kept workspace's kind and places. `--name` also renames any space that carries the old name, moves no files and keeps the default place folders where they were. An empty name exits 2. An unknown role or stage exits 2. `--place ROLE=` drops the role from the manifest. A new path keeps the role's writer. `--writer` needs the role to have a manifest path, and `--writer ROLE=hws` clears it |
+| `hws set [--workspace W] [--name N] [--kind K] [--instructions X] [--stage S] [--home H] [--place ROLE=PATH ...] [--writer ROLE=NAME ...]` | Changes a workspace's name, instructions and stage, or a kept workspace's kind and places. `--home H` changes where a kept workspace's files live. H must exist, an empty value clears `home`, and no files move. `--name` also renames any space that carries the old name, moves no files and keeps the default place folders where they were. An empty name exits 2. An unknown role or stage exits 2. `--place ROLE=` drops the role from the manifest. A new path keeps the role's writer. `--writer` needs the role to have a manifest path, and `--writer ROLE=hws` clears it |
 | `hws tidy status [--workspace W] [--line]` | Prints how far the current note is behind the stream. See [Tidy](#tidy) |
 | `hws tidy start [--workspace W] [--pane P]` | Writes the packet and opens the pass in a terminal pane, or asks the live pass to read the packet again. See [Tidy](#tidy) |
 | `hws decision add --title X --why Y [--decided-at YYYY-MM-DD] [--cites A,B] [--replaces D-001,D-002] [--workspace W]` | Appends a decision to the log and marks what it replaces. Prints `{ id, decidedAt, title, replaces }`. Fails when another tool writes the `decisions` place, or when `--replaces` names a decision that is gone or already replaced |
 | `hws decision list [--workspace W]` | Prints `{ path, writer, decisions }`, each decision `{ id, decidedAt, title, replacedBy }`. Another tool's log has no entries |
+| `hws tidy start --here [--workspace W]` | Writes a fresh packet for the agent in this terminal to work from and prints its path. Records no pass, so it opens no terminal and `hws tidy stop` has nothing to end. Fails when another terminal runs a pass |
 | `hws tidy apply --file PROPOSAL [--skip current,decisions,demote,artifacts,cards] [--workspace W]` | Applies an accepted proposal, stamps `current` and clears `tidy`. See [Tidy](#tidy) |
 | `hws tidy stop [--workspace W]` | Clears `tidy` and ends its terminal. Prints `no tidy pass is running` when none is recorded |
 | `hws place ROLE [--workspace W]` | Prints the absolute path for ROLE, or nothing when unset. `--json` prints `{role,path,writer}`. Creates the `scratch` and `artifacts` folders on first use when `hws` is their writer, never the others |
@@ -196,6 +199,9 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws artifact list [--workspace W]` | Artifacts, including those of retired throwaways when W is absent |
 | `hws artifact set ID [--status draft\|current\|superseded] [--supersedes ID]` | Changes an artifact in an open workspace and prints its record. Needs one of the two flags. `--supersedes` must name another artifact of the same workspace, and an empty value clears it |
 | `hws artifact add --file F [--title X] [--workspace W]` | Registers F as an artifact with type `file` and status `current`, and prints its record. `path` and `prompt` are the file. A file inside the `artifacts` place stays where it is. Any other file moves to `<artifacts place>/<file name>`, and the command fails when that name is taken or another writer owns the place. The title defaults to the file name |
+| `hws artifact add --file F --in-place [--title X] [--workspace W]` | Kept workspaces only. Registers F where it is, anywhere on disk, with `inPlace: true`. Registering the same path again returns the first record with `existing: true` |
+| `hws artifact add --url URL [--title X] [--workspace W]` | Kept workspaces only. Registers a web document with type `link`. `path`, `prompt` and `url` hold the URL. Registering the same URL again returns the first record |
+| `hws artifact scan [--workspace W]` | Prints `{tracked, candidates, more}`. `candidates` lists output files under the home, files its documents link to and web documents they name, none of them tracked. Writes nothing |
 | `hws link ARTIFACT` | Prints `@<absolute prompt.md path>`, ready to paste into Claude |
 | `hws todo list\|add\|edit\|move\|send\|archive` | To-dos for a workspace, or for a space outside one. See [To-dos](#to-dos-hws-todo) |
 | `hws artifact terminal ARTIFACT` | Opens a new tab running `claude` with that artifact's prompt |
@@ -361,7 +367,8 @@ Counted on read against `current.covers`.
 
 | State | Sentence |
 |---|---|
-| No `current` | `No current note yet` |
+| No `current` and no note file | `No current note yet` |
+| No `current`, with a note file | `Current note not tidied yet` |
 | Something landed | `Current is 2 artifacts and 1 card behind, last tidied Nov 3`. Zero sources, sessions and drafts are left out. The year follows the day when it is not this year |
 | Only sessions or drafts behind | `Nothing has landed since Nov 3` |
 | Nothing behind | `Current is up to date, last tidied Nov 3` |
@@ -399,6 +406,7 @@ Prints `{ terminal, started, packet }`.
     "commits": [{ "sha": "...", "subject": "...", "at": 0 }],
     "cards": [{ "id": "...", "title": "...", "notes": "...", "note": "...", "report": "...", "replies": [], "updatedAt": 0 }]
   },
+  "candidates": [{ "kind": "file", "path": "/abs", "title": null, "foundIn": null, "origin": "folder", "modifiedAt": 0 }, { "kind": "link", "url": "https://claude.ai/artifact/x", "title": null, "foundIn": "README.md" }],
   "cutoff": { "sessionsThrough": 0, "artifactsThrough": 0, "commit": "HEAD sha or null" }
 }
 ```
@@ -606,9 +614,9 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | New workspace row, shown when there are none | Opens the workspace form |
 | Workspace row | `space.select` for its showing space, else its first |
 | Chevron, shown with two or more spaces | Folds or unfolds its spaces. The choice is remembered |
-| Space row, shown with two or more spaces | `space.select` for that space |
+| Space row, shown for every space unless folded | `space.select` for that space |
 | Board row, listed first and with no minus | `space.select` for the Board space, then `tab.select` for its Board tab |
-| Minus on a space row | `hws space remove` |
+| Minus on a space row, shown with two or more spaces | `hws space remove` |
 | Add space, shown under the current workspace | Opens the dialog for `hws space add` and `hws space move` |
 | Add board, shown under the current workspace when it has no Board | `hws board add`, then shows the Board |
 | Panel button on the current workspace | `mod.open` for `hws-panel` |
@@ -622,12 +630,13 @@ The `hws` layout uses the `hws-pane` header. Claude Code and Codex panes get a C
 | Step | Command |
 |---|---|
 | Flip the focused pane | `herdr-app do hws-pane.toggle` |
-| To chat | `pane.split --mod hws-chat --props {"terminal":T}`, `hc label T herdr.chat=<chat pane>`, `terminal.park --terminal T` |
-| To terminal | `terminal.keep --terminal T --place right`, `hc label T herdr.chat=`, `pane.close --pane <chat pane>` |
+| To chat | `pane.split --mod hws-chat --props {"terminal":T}`, `pane.swap --pane <agent pane> --target <chat pane>`, `hc label T herdr.chat=<chat pane>`, `terminal.park --terminal T` |
+| To terminal | `terminal.keep --terminal T --place right`, `hc label T herdr.chat=`, `pane.swap --pane <chat pane> --target <new pane>`, `pane.close --pane <chat pane>` |
 
 - The core label `herdr.chat` names the chat pane that shows a parked agent.
 - A parked agent has no pane, so `herdr-app ls` lists no terminal for it and `pane.focus --terminal T` fails.
 - `hws-pane` ends a parked agent once its chat pane has gone.
+- A flip keeps every pane's size. Herdr gives a closed pane's width to its left neighbor, so the new pane moves left of the old one first.
 
 ### Permission hook
 
@@ -900,6 +909,10 @@ A surface runs on this computer. The `+` menu is hidden for a remote agent, and 
 ### Session start
 
 `plugin/hooks/session-start.sh` runs on `SessionStart` when `HC_TERMINAL_ID` is set. It exits 0 on every path and prints nothing when a step fails.
+
+In a kept workspace the hook also tells the session to use the `herdr-workspaces:tidy` skill for any update to the current note, lists up to 12 live artifacts and counts the existing work `hws artifact scan` finds untracked.
+
+`plugin/hooks/guard-note.sh` runs on `PreToolUse` for `Write`. It denies a write to the current note when `hws` owns that place and tells the agent to run a tidy pass. `Edit` stays allowed so an agent can add one dated decision line. It exits 0 on every path, so a failed lookup allows the write.
 
 1. Runs `hws register --terminal T --session S --json` and `hws current --line` in parallel.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.

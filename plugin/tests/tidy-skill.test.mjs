@@ -33,6 +33,17 @@ describe("tidy skill", () => {
     assert.match(description, /herdr-workspaces:tidy/);
   });
 
+  it("triggers on plain requests and starts a pass in the same session", () => {
+    const { description } = frontmatter();
+
+    for (const text of ["update the current note", "current state", "catch up"]) assert.ok(description.includes(text), text);
+    assert.ok(skill.includes("hws tidy start --here"));
+  });
+
+  it("tells the pass how to adopt work and read every artifact type", () => {
+    for (const text of ["`candidates`", "--in-place", "--url URL", "`action` `read`", ".pptx", ".feedback.md"]) assert.ok(skill.includes(text), text);
+  });
+
   it("finds the packet and writes the proposal beside it", () => {
     for (const text of ["tidy/packet.json", "proposal.json", "proposal.md", "`cutoff`"]) {
       assert.ok(skill.includes(text), text);

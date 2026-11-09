@@ -1,5 +1,5 @@
 // A pane header with a Chat | Terminal switch for Claude Code and Codex panes.
-// Chat splits hws-chat beside the agent's pane, then parks the terminal, so the chat takes its spot.
+// Chat splits hws-chat beside the agent's pane, trades places with it, then parks the terminal, so the chat takes its spot.
 // Terminal reverses the swap. Each swap's last step removes this header's pane, so it runs last.
 // The core label herdr.chat=<chat pane> records which chat shows which agent.
 
@@ -16,6 +16,8 @@ const SWEEP_MS = 4000;
 const NEW_COPY_MS = 2000;
 const SWAP_GAP_MS = 3000;
 const CHAT_FADE_OUT_MS = 120;
+const TRADE_TRIES = 10;
+const TRADE_RETRY_MS = 50;
 const LEAVING = "hws-chat.leaving";
 const MENU_WIDTH = 240;
 const BOARDS = "hws-pane.boards";
@@ -89,6 +91,20 @@ async function app(name, args) {
   try { out = JSON.parse(r.stdout || "{}"); } catch { out = {}; }
   if (r.code !== 0 || out.error) throw new Error(out.error || r.stderr?.trim() || `${name} failed`);
   return out;
+}
+
+// Closing a pane gives its width to the pane on its left. Moving the new pane left of the old one
+// makes the new pane the heir, so the neighbors keep their sizes.
+// terminal.keep answers before its pane exists, so this retries. A flip still finishes if it fails.
+async function tradePlaces(old, fresh, cx) {
+  for (let i = 0; i < TRADE_TRIES; i++) {
+    try {
+      await app("pane.swap", { pane: old, target: fresh });
+      return;
+    } catch {
+      await cx.sleep(TRADE_RETRY_MS);
+    }
+  }
 }
 
 function parked(terminal) {
@@ -186,6 +202,7 @@ export default class Pane extends View {
         const out = await app("pane.split", { direction: "right", pane: p.pane, mod: CHAT, props: { terminal } });
         if (!out.pane) throw new Error("Herdr didn't open the chat");
         run("pane.focus", { pane: out.pane });
+        await tradePlaces(p.pane, out.pane, cx);
 
         // These run together so the half-width split barely shows.
         await Promise.all([hc(["label", terminal, `${LABEL}=${out.pane}`]), app("terminal.park", { terminal })]);
@@ -224,7 +241,10 @@ export default class Pane extends View {
       try {
         await app("pane.focus", { pane: chat });
         const [out] = await Promise.all([app("terminal.keep", { terminal, place: "right" }), hc(["label", terminal, `${LABEL}=`])]);
-        if (out.pane) run("pane.focus", { pane: out.pane });
+        if (out.pane) {
+          await tradePlaces(chat, out.pane, cx);
+          run("pane.focus", { pane: out.pane });
+        }
         await app("pane.close", { pane: chat });
       } catch (e) {
         this.going = null;

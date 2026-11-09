@@ -112,6 +112,38 @@ test('missing tools fail instead of crashing', (t) => {
   assert.deepEqual(failed(report), ['Herdr app', 'hc', 'Claude plugin']);
 });
 
+function herdrStatus(box, env, output, code = 0) {
+  const herdr = join(box.dir, 'herdr-status');
+  writeFileSync(herdr, `#!/bin/sh\necho '${output}'\nexit ${code}\n`, { mode: 0o755 });
+  return { ...env, HWS_HERDR_APP: herdr };
+}
+
+const layoutShown = (report) => report.checks.find((check) => check.name === 'Layout shown');
+
+test('a window on another layout gets a note with the switch command and still passes', (t) => {
+  const box = sandbox(t);
+  const report = run(box, herdrStatus(box, installed(box).env, '{"layout":"main"}'));
+  assert.equal(report.ok, true);
+  assert.equal(layoutShown(report).note, true);
+  assert.match(layoutShown(report).detail, /shows main/);
+  assert.match(layoutShown(report).fix, /layout\.switch --name hws/);
+});
+
+test('a window on the hws layout gets no note', (t) => {
+  const box = sandbox(t);
+  const report = run(box, herdrStatus(box, installed(box).env, '{"layout":"hws"}'));
+  assert.equal(layoutShown(report).note, undefined);
+  assert.equal(layoutShown(report).detail, 'hws');
+});
+
+test('a closed Herdr window skips the layout check', (t) => {
+  const box = sandbox(t);
+  const report = run(box, herdrStatus(box, installed(box).env, 'no window', 2));
+  assert.equal(report.ok, true);
+  assert.equal(layoutShown(report).note, undefined);
+  assert.match(layoutShown(report).detail, /not checked/);
+});
+
 test('the plain report prints each failure with its fix', (t) => {
   const box = sandbox(t);
   const { appHome, env } = installed(box);

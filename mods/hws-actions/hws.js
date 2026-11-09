@@ -141,12 +141,12 @@ export function moveFocus(view, back) {
   view.inputs[keys[next]].focus();
 }
 
-export function chooseFolder(view, cx) {
+export function chooseFolder(view, cx, key = "folder") {
   cx.spawn(async (cx) => {
     const path = await pickFolder({ prompt: "Use Folder" }).catch(() => null);
     if (!path) return;
-    view.inputs.folder.set_value(path);
-    view.values.folder = path;
+    view.inputs[key].set_value(path);
+    view.values[key] = path;
     view.problem = null;
     cx.notify();
   });
@@ -204,12 +204,12 @@ export function button(t, id, text, primary, action, enabled = true) {
     .child(text);
 }
 
-export function folderRow(t, view) {
+export function folderRow(t, view, key = "folder") {
   return h_flex()
     .gap(6)
     .items_center()
-    .child(field(t, view, "folder").flex_1())
-    .child(button(t, "choose-folder", "Choose…", false, (_e, cx) => chooseFolder(view, cx)));
+    .child(field(t, view, key).flex_1())
+    .child(button(t, `choose-${key}`, "Choose…", false, (_e, cx) => chooseFolder(view, cx, key)));
 }
 
 export const problemLine = (t, text) => div().text_size(11.5).text_color(t.blocked).child(text);

@@ -64,19 +64,59 @@ function splitCites(text) {
   return { text: text.replace(CITE, "").replace(/\s{2,}/g, " ").trim(), cites };
 }
 
-// The first screen of the current note, as heading, bullet and text lines.
+const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+const startsTable = (line, next) => line.includes("|") && next.includes("|") && TABLE_RULE.test(next);
+
+// The note as heading, bullet, text and table entries. A table is one entry,
+// so the first screen never cuts it in half.
 export function noteLines(markdown) {
+  const source = (markdown ?? "").split("\n").map((raw) => raw.trimEnd());
   const lines = [];
-  for (const raw of (markdown ?? "").split("\n")) {
-    const line = raw.trimEnd();
+  for (let i = 0; i < source.length; i++) {
+    const line = source[i];
     if (!line.trim()) continue;
+    if (startsTable(line, source[i + 1] ?? "")) {
+      let last = i + 1;
+      while (source[last + 1]?.includes("|")) last++;
+      lines.push({ kind: "table", ...splitCites(source.slice(i, last + 1).join("\n")) });
+      i = last;
+      continue;
+    }
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     const bullet = /^\s*(?:[-*+]|\d+\.)\s+(.*)$/.exec(line);
-    if (heading) lines.push({ kind: "heading", ...splitCites(heading[2]) });
+    if (heading) lines.push({ kind: "heading", level: heading[1].length, ...splitCites(heading[2]) });
     else if (bullet) lines.push({ kind: "bullet", ...splitCites(bullet[1]) });
     else lines.push({ kind: "text", ...splitCites(line) });
   }
   return { lines: lines.slice(0, NOTE_LINES), all: lines, more: Math.max(0, lines.length - NOTE_LINES) };
+}
+
+function collapsePath(path) {
+  const parts = [];
+  for (const part of path.split("/")) {
+    if (part === "..") parts.pop();
+    else if (part && part !== ".") parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+}
+
+function decoded(text) {
+  try {
+    return decodeURI(text);
+  } catch {
+    return text;
+  }
+}
+
+// A Markdown link is relative to the note, unlike a [file:PATH] cite.
+// A link to a place inside the note returns null.
+export function linkCite(url, notePath) {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^file:/i.test(url)) return { kind: "url", value: url };
+  const path = decoded(url.replace(/^file:\/\//i, "").replace(/[?#].*$/, ""));
+  if (!path) return null;
+  const folder = (notePath ?? "").replace(/\/[^/]*$/, "");
+  return { kind: "file", value: collapsePath(path.startsWith("/") ? path : `${folder}/${path}`) };
 }
 
 export function citeLabel(cite, workspace) {

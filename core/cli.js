@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-import { artifactAdd, artifactList, artifactSet, artifactTerminal, link } from './commands/artifact.js';
+import { artifactAdd, artifactList, artifactScan, artifactSet, artifactTerminal, link } from './commands/artifact.js';
 import { archive, unarchive } from './commands/archive.js';
 import { doctor } from './commands/doctor.js';
 import { update } from './commands/update.js';
@@ -83,7 +83,8 @@ const ROUTES = [
   { path: ['artifact', 'list'], run: artifactList, options: { workspace: text } },
   { path: ['artifact', 'terminal'], run: artifactTerminal, options: {}, positionals: 1 },
   { path: ['artifact', 'set'], run: artifactSet, options: { status: text, supersedes: text }, positionals: 1 },
-  { path: ['artifact', 'add'], run: artifactAdd, options: { file: text, title: text, workspace: text } },
+  { path: ['artifact', 'add'], run: artifactAdd, options: { file: text, url: text, 'in-place': flag, title: text, workspace: text } },
+  { path: ['artifact', 'scan'], run: artifactScan, options: { workspace: text } },
   { path: ['link'], run: link, options: {}, positionals: 1 },
   { path: ['todo', 'list'], run: todoList, options: { archived: flag, reports: flag, space: text } },
   {
@@ -124,7 +125,7 @@ const ROUTES = [
   },
   { path: ['place'], run: place, options: { workspace: text }, positionals: 1 },
   { path: ['tidy', 'status'], run: tidyStatus, options: { workspace: text, line: flag } },
-  { path: ['tidy', 'start'], run: tidyStart, options: { workspace: text, pane: text } },
+  { path: ['tidy', 'start'], run: tidyStart, options: { workspace: text, pane: text, here: flag } },
   { path: ['tidy', 'apply'], run: tidyApply, options: { file: text, skip: text, workspace: text } },
   { path: ['tidy', 'stop'], run: tidyStop, options: { workspace: text } },
   { path: ['decision', 'add'], run: decisionAdd, options: { title: text, why: text, 'decided-at': text, cites: text, replaces: text, workspace: text } },

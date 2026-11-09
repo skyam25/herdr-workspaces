@@ -15,7 +15,9 @@ function world(overrides) {
     other: (command, args) => {
       if (command !== "herdr-app") return { code: 0, stdout: "{}", stderr: "" };
       log.push(args[1]);
-      return { code: 0, stdout: args[1] === "pane.split" ? '{"pane":"p2"}' : "{}", stderr: "" };
+      if (args[1] === "pane.split") return { code: 0, stdout: '{"pane":"p2"}', stderr: "" };
+      if (args[1] === "terminal.keep") return { code: 0, stdout: '{"pending":true,"pane":"p9"}', stderr: "" };
+      return { code: 0, stdout: "{}", stderr: "" };
     },
     ...overrides,
   });
@@ -59,7 +61,9 @@ test("Chat splits the chat, labels the agent, and parks the terminal last", asyn
   const m = await mount("hws-pane", { pane: "p1" });
   await m.click("ph-mode-p1-chat");
 
-  assert.deepEqual(H.log, ["pane.split", "terminal.park"]);
+  assert.deepEqual(H.log, ["pane.split", "pane.swap", "terminal.park"]);
+  const swap = H.calls.find((c) => c.args[1] === "pane.swap").args;
+  assert.deepEqual([swap[swap.indexOf("--pane") + 1], swap[swap.indexOf("--target") + 1]], ["p1", "p2"]);
   const split = H.calls.find((c) => c.args[1] === "pane.split").args;
   assert.equal(split[split.indexOf("--mod") + 1], "hws-chat");
   assert.equal(split[split.indexOf("--props") + 1], '{"terminal":"t1"}');
@@ -74,8 +78,11 @@ test("Terminal restores the pane, clears the label, and closes the chat last", a
   assert.deepEqual(H.log, [], "the chat fades out before the swap");
 
   await m.fireTimer(120);
-  assert.deepEqual(H.log, ["pane.focus", "terminal.keep", "pane.close"]);
+  assert.deepEqual(H.log, ["pane.focus", "terminal.keep", "pane.swap", "pane.close"]);
+  const swap = H.calls.find((c) => c.args[1] === "pane.swap").args;
+  assert.deepEqual([swap[swap.indexOf("--pane") + 1], swap[swap.indexOf("--target") + 1]], ["p2", "p9"]);
   assert.deepEqual(H.hcCalls, [["label", "t1", "herdr.chat="]]);
+  assert.deepEqual(H.runs, [{ name: "pane.focus", args: { pane: "p9" } }]);
 });
 
 test("the sweep ends a parked agent only after its chat is missing twice", () => {
