@@ -88,8 +88,8 @@ function homeStub(options) {
   stub(join(home, ".local", "bin"), options);
 }
 
-function run(script, { input = STDIN, terminal = "t13", path = `${nodeBin}:/usr/bin:/bin`, bundle } = {}) {
-  const env = { HOME: home, PATH: path };
+function run(script, { input = STDIN, terminal = "t13", path = `${nodeBin}:/usr/bin:/bin`, bundle, platform = "darwin" } = {}) {
+  const env = { HOME: home, PATH: path, HWS_PLATFORM: platform };
   if (terminal) env.HC_TERMINAL_ID = terminal;
   if (bundle) env.__CFBundleIdentifier = bundle;
 
@@ -214,6 +214,14 @@ describe("session-start hook", () => {
   it("leaves out the paragraph in another app's terminal", () => {
     homeStub();
     assert.equal(contextOf(run(HOOK, { bundle: "com.apple.Terminal" })), LINE);
+  });
+
+  it("treats a terminal id as Herdr on Linux, where no bundle id exists", () => {
+    homeStub();
+    const context = contextOf(run(HOOK, { platform: "linux" }));
+
+    assert.ok(context.startsWith(`${LINE}\n\n`));
+    assertTaskList(context);
   });
 
   it("stays silent in a Herdr app with no terminal id", () => {

@@ -127,7 +127,9 @@ export function killTerminal(terminal) {
 export function focusTerminal(terminal) {
   const chatPane = chatPaneOf(terminal);
   act('pane.focus', chatPane ? { pane: chatPane } : { terminal });
-  run(process.env.HWS_OSASCRIPT || '/usr/bin/osascript', ['-e', 'tell application id "dev.herdr.app" to activate'], READ_MS);
+  if (process.platform === 'darwin') {
+    run(process.env.HWS_OSASCRIPT || '/usr/bin/osascript', ['-e', 'tell application id "dev.herdr.app" to activate'], READ_MS);
+  }
 }
 
 export function sendText(terminal, text) {

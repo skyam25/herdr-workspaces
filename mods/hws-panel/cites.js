@@ -1,15 +1,18 @@
 // Turns a cite from the current note or a backlog row into an action.
 // Each action resolves with a note to show, or null.
 
-import { agents, exec, openOverlay, panes, run, terminals } from "herdr";
+import { agents, exec, openOverlay, panes, run, terminals, window } from "herdr";
 import { hws } from "./hws.js";
 import { opensAsPage, resolvePath } from "./context.js";
 
 // The Board's card dialog, at the size the Board itself prefers.
 const CARD_DIALOG = { width: 920, height: 760 };
+const LINUX_COPY = 'if [ -n "${WAYLAND_DISPLAY:-}" ]; then wl-copy; else xclip -selection clipboard; fi';
+
+const onLinux = () => window()?.platform === "linux";
 
 export async function copy(text) {
-  const r = await exec("sh", ["-c", 'printf %s "$1" | pbcopy', "sh", text]);
+  const r = await exec("sh", ["-c", `printf %s "$1" | ${onLinux() ? LINUX_COPY : "pbcopy"}`, "sh", text]);
   if (r.code !== 0) throw new Error("Could not copy.");
 }
 
@@ -20,13 +23,13 @@ function pageArgs(file, target) {
   return chat && panes().some((p) => p.pane === chat) ? [...args, "--beside-pane", chat, "--space", target.space] : args;
 }
 
-// Markdown and HTML open as a page beside the agent. Anything else, or no agent, opens in macOS.
+// Markdown and HTML open as a page beside the agent. Anything else, or no agent, opens in the desktop's default app.
 export async function openPath(path, target) {
   if (opensAsPage(path) && target) {
     await hws(pageArgs(path, target));
     return null;
   }
-  const r = await exec("open", [path]);
+  const r = await exec(onLinux() ? "xdg-open" : "open", [path]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `Could not open ${path}`);
   return null;
 }

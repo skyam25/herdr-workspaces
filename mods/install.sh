@@ -4,7 +4,6 @@
 
 set -eu
 
-MODS="hws-new hws-panel hws-brief hws-pane hws-chat hws-chat-models hws-chat-image hws-actions hws-work hws-tabs hws-agents"
 SOURCE="$(cd "$(dirname "$0")" && pwd)"
 APP_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
 TARGET="$APP_HOME/mods"
@@ -21,7 +20,8 @@ done
 mkdir -p "$TARGET"
 
 failed=0
-for mod in $MODS; do
+for folder in "$SOURCE"/hws-*/; do
+  mod="$(basename "$folder")"
   dest="$TARGET/$mod"
   if [ -d "$dest" ] && [ "$FORCE" -eq 0 ]; then
     echo "$mod: already installed, skipped (use --force to replace)"

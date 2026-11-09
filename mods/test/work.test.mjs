@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { setup, mount, settle, hwsCalls, usedMethods } from "./harness.mjs";
 import { modelsLine, ago, awaitsUser, board, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, mergeBoard, orchestratorFolder, parseItems, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, storyHeight, todoDialogSize, todoLayout } from "../hws-work/data.js";
 
@@ -1759,7 +1759,7 @@ test("nothing in hws-work resizes the layout", () => {
   for (const file of ["main.js", "todo.js", "open.js", "data.js"]) assert.equal(read(`../hws-work/${file}`).includes("layout.resize"), false, file);
 });
 
-test("hws-work uses only methods and imports Herdr provides", () => {
+test("hws-work uses only methods and imports Herdr provides", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {
   const kit = readFileSync(`${process.env.HOME}/.config/herdr-app/gpui-kit.d.ts`, "utf8");
   const unknown = usedMethods().filter((name) => !new RegExp(`\\b${name}\\s*[<(]`).test(kit));
   assert.deepEqual(unknown, []);

@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 
 import { artifactAdd, artifactList, artifactSet, artifactTerminal, link } from './commands/artifact.js';
+import { doctor } from './commands/doctor.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, place, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
@@ -129,6 +130,7 @@ const ROUTES = [
   { path: ['find'], run: find, options: {}, positionals: 'any' },
   { path: ['reopen'], run: reopen, options: {}, positionals: 1 },
   { path: ['prune'], run: prune, options: {} },
+  { path: ['doctor'], run: doctor, options: {} },
 ];
 
 const USAGE = `Usage: hws <command> [--json]

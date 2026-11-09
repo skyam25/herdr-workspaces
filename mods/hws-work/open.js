@@ -1,6 +1,6 @@
 // Opens outputs and agent sessions. A page opens beside its agent and other outputs open in macOS.
 
-import { exec, home, panes, run, spaces, terminals } from "herdr";
+import { exec, home, panes, run, spaces, terminals, window } from "herdr";
 import { locateTerminal, opensAsPage, outputTarget, surfaceArgs } from "./data.js";
 
 let found = null;
@@ -94,7 +94,7 @@ export async function openOutput(agent, session, ref) {
   const target = outputTarget(ref, session.cwd);
   try {
     if (opensAsPage(ref)) return await openPage(agent, target, ref);
-    const r = await exec("open", [target]);
+    const r = await exec(window()?.platform === "linux" ? "xdg-open" : "open", [target]);
     return r.code === 0 ? null : (r.stderr || r.stdout).trim() || `Could not open ${ref}`;
   } catch (e) {
     return String(e?.message ?? e);

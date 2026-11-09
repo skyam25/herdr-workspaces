@@ -84,6 +84,7 @@ function start({ env = {}, request = BASH_REQUEST, bundle = "dev.herdr.app", ter
     ...env,
   };
 
+  childEnv.HWS_PLATFORM ??= "darwin";
   if (bundle) childEnv.__CFBundleIdentifier = bundle;
   if (terminal) childEnv.HC_TERMINAL_ID = terminal;
 
@@ -163,6 +164,13 @@ describe("ask hook gate", () => {
       assert.equal(existsSync(chatAsks), false);
     });
   }
+
+  it("passes the gate on Linux with only a terminal id", async () => {
+    setTerminal(flipped({ labels: { "herdr.chat": "" } }));
+    assertSilent(await start({ bundle: "", env: { HWS_PLATFORM: "linux" } }).finished);
+
+    assert.deepEqual(hcCalls(), [`get ${TERMINAL} --json`]);
+  });
 
   it("does nothing in a Herdr terminal that is not flipped", async () => {
     setTerminal(flipped({ labels: { "herdr.chat": "" } }));

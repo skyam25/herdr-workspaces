@@ -23,7 +23,7 @@ export const setShared = (key, value) => { H().sharedSets?.push({ key, value });
 export const appHome = () => "/Users/me/.config/herdr-app";
 export const writeTextFile = (path, text, expected) => { H().writes?.push({ path, text, expected }); return Promise.resolve(null); };
 export const setAgentOrder = (order) => { H().agentOrder = order; return null; };
-export const window = () => ({});
+export const window = () => globalThis.__herdr?.window ?? {};
 export const playSound = () => null;
 export const knownAgents = () => Promise.resolve([]);
 export const notify = (n) => { H().notices?.push(n); return null; };

@@ -33,7 +33,9 @@ function print(text) {
 }
 
 function inHerdrApp() {
-  return process.env.__CFBundleIdentifier === "dev.herdr.app" && Boolean(process.env.HC_TERMINAL_ID);
+  const platform = process.env.HWS_PLATFORM || process.platform;
+  if (platform === "darwin" && process.env.__CFBundleIdentifier !== "dev.herdr.app") return false;
+  return Boolean(process.env.HC_TERMINAL_ID);
 }
 
 // Shows a path relative to the session folder when it sits inside it.

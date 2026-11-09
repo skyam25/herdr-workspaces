@@ -1,6 +1,7 @@
 {
   "name": "herdr-workspaces",
   "private": true,
+  "license": "MIT",
   "engines": { "node": ">=20" },
   "bin": { "hws": "bin/hws" },
   "scripts": {

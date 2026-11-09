@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -129,6 +129,7 @@ function runReview(H, osascript) {
   const { args } = H.calls.find((c) => c.command === "sh");
   const dir = mkdtempSync(join(tmpdir(), "hws-review-"));
   writeFileSync(join(dir, "osascript"), `#!/bin/sh\n${osascript}\n`, { mode: 0o755 });
+  writeFileSync(join(dir, "uname"), "#!/bin/sh\necho Darwin\n", { mode: 0o755 });
   writeFileSync(join(dir, "hws"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
   return spawnSync("/bin/sh", args, { encoding: "utf8", env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir } });
 }
@@ -143,6 +144,21 @@ test("Review a page offers html, htm and md, then opens the chosen file", async 
   assert.deepEqual(run.stdout.trim().split("\n"), ["surface", "open", "--type", "page", "--file", "/Users/me/a b.html", "--terminal", "t1", "--json"]);
   assert.match(H.calls.find((c) => c.command === "sh").args[1], /of type \{"html", "htm", "md"\}/);
   assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("on Linux, Review a page uses the desktop's file picker and opens its first choice", async () => {
+  const H = world();
+  const m = await mount("hws-actions", TERMINAL);
+  await m.click("review");
+  const { args } = H.calls.find((c) => c.command === "sh");
+  const dir = mkdtempSync(join(tmpdir(), "hws-review-"));
+  writeFileSync(join(dir, "uname"), "#!/bin/sh\necho Linux\n", { mode: 0o755 });
+  writeFileSync(join(dir, "python3"), '#!/bin/sh\necho "$2"\necho /second.html\n', { mode: 0o755 });
+  writeFileSync(join(dir, "hws"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+  const run = spawnSync("/bin/sh", args, { encoding: "utf8", env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir } });
+  assert.equal(run.status, 0);
+  assert.deepEqual(run.stdout.trim().split("\n").slice(0, 5), ["surface", "open", "--type", "page", "--file"]);
+  assert.equal(run.stdout.trim().split("\n")[5], "/Users/me/.config/herdr-app/mods/hws-chat/pick-files.py");
 });
 
 test("a flipped agent's page opens beside its chat pane", async () => {
@@ -256,7 +272,7 @@ test("Esc closes the menu and runs nothing", async () => {
   assert.deepEqual(H.runs, []);
 });
 
-test("hws-actions uses only documented builders and herdr functions", () => {
+test("hws-actions uses only documented builders and herdr functions", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {
   const types = (name) => readFileSync(`${process.env.HOME}/.config/herdr-app/${name}`, "utf8");
   const gpui = types("gpui-kit.d.ts");
   const unknown = usedMethods().filter((name) => !new RegExp(`\\b${name}\\s*[<(]`).test(gpui));

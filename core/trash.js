@@ -19,13 +19,15 @@ function runTrash(bin, args) {
   }
 }
 
-// Moves paths to the macOS Trash and throws when any path stays behind.
+// Moves paths to the desktop Trash and throws when any path stays behind.
 export function moveToTrash(paths) {
   const present = paths.filter((path) => existsSync(path));
   if (present.length === 0) return;
   const trashBin = process.env.HWS_TRASH || '/usr/bin/trash';
   if (existsSync(trashBin)) {
     runTrash(trashBin, present);
+  } else if (process.platform !== 'darwin') {
+    runTrash(process.env.HWS_GIO || 'gio', ['trash', ...present]);
   } else {
     const osascript = process.env.HWS_OSASCRIPT || '/usr/bin/osascript';
     runTrash(osascript, [...FINDER_SCRIPT.flatMap((line) => ['-e', line]), ...present]);

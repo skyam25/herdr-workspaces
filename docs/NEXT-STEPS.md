@@ -98,7 +98,8 @@ The audit found these from reading code.
 
 - [ ] Decide whether General, App and Deliverable stay. They only change how a workspace is described to agents.
 - [ ] Make closing a workspace remove its folder under `~/.local/state/herdr-workspaces/workspaces/`. Closed workspaces leave one behind.
-- [ ] Confirm that a fresh install works. Pixel's patched Electron download returned a GitHub 504, so `surface/node_modules` came from the spike.
+- [x] Add `install.sh`, `hws doctor`, CI and a release workflow.
+- [ ] Confirm that Pixel draws correctly in a real Herdr window on Linux. CI covers the install and tests but has no Herdr window.
 - [ ] Report to terminal-browser that its `ls` and `action` commands assume Ghostty inside Herdr app.
 
 ### 7. Later

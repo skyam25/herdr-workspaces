@@ -246,7 +246,7 @@ test("a flipped agent's board opens in its own window and returns to the chat", 
   const bundle = box.bundle('bundle-window');
   box.clearCalls();
   box.json(['surface', 'done', '--id', surface.id, '--bundle', bundle]);
-  assert.deepEqual(box.actions().at(-2), ['herdr-app', 'do', 'pane.focus', '--pane', chatPane]);
+  assert.deepEqual(box.actions().filter((action) => action[2] === 'pane.focus').at(-1), ['herdr-app', 'do', 'pane.focus', '--pane', chatPane]);
 });
 
 test('done on a glued surface moves the bundle, sends, closes and focuses', (t) => {

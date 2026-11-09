@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - run: node --test tests/*.test.mjs
+        working-directory: plugin
+      - run: node --import ./test/register.mjs --test test/*.test.mjs
+        working-directory: mods
+
+  fresh-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - run: npm install -g @anthropic-ai/claude-code
+
+      # CI has no Herdr app, so stubs stand in for its two commands.
+      - name: Stub Herdr
+        run: |
+          mkdir -p "$HOME/herdr-stub"
+          for tool in herdr-app hc; do
+            printf '#!/bin/sh\nexit 0\n' > "$HOME/herdr-stub/$tool"
+            chmod +x "$HOME/herdr-stub/$tool"
+          done
+          echo "$HOME/herdr-stub" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install
+        run: sh install.sh
+      - name: Install again
+        run: sh install.sh

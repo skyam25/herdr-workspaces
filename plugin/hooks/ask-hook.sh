@@ -2,7 +2,7 @@
 
 # Exits silently with no decision unless this session runs in a Herdr app terminal.
 
-[ "${__CFBundleIdentifier:-}" = "dev.herdr.app" ] || exit 0
+[ "${HWS_PLATFORM:-$(uname -s | tr A-Z a-z)}" != darwin ] || [ "${__CFBundleIdentifier:-}" = "dev.herdr.app" ] || exit 0
 [ -n "${HC_TERMINAL_ID:-}" ] || exit 0
 
 # ~/.local/bin comes first, so hc resolves there before the rest of PATH.

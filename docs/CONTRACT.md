@@ -142,6 +142,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 
 | Command | Result |
 |---|---|
+| `hws doctor` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, Pixel, the surface build and the Claude plugin. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
 | `hws new terminal [--folder F]` | Opens a normal tab. No manifest |
 | `hws new workspace --name N --folder F [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
 | `hws board add [--workspace W]` | Adds W's one Board space, or finds it, and prints `{workspace,space,tab}`. W defaults to the current workspace |
@@ -483,7 +484,9 @@ The original `.excalidraw` file is never overwritten. The bundle's `board.excali
 
 ## External commands
 
-Binaries resolve from `HWS_HERDR_APP`, default `herdr-app`, and `HWS_HC`, default `hc`. Tests point these at fakes.
+Binaries resolve from `HWS_HERDR_APP`, default `herdr-app`, and `HWS_HC`, default `hc`. `HWS_CLAUDE`, `HWS_GIO` and `HWS_CHECKOUT` override `claude`, `gio` and the checkout that `hws doctor` inspects. `HWS_PLATFORM` overrides the platform the plugin hooks see. Tests point these at fakes.
+
+macOS trashes with `/usr/bin/trash` or Finder. Linux trashes with `gio trash`. A failed trash stops the command and leaves the files in place.
 
 | Need | Command |
 |---|---|

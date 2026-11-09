@@ -1,6 +1,6 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { setup, mount, textOf } from "./harness.mjs";
 
 const store = new Map();
@@ -477,7 +477,7 @@ test("the layout is valid and installs what it references", () => {
   visit(layout);
   assert.equal(new Set(ids).size, ids.length, "ids are unique");
 
-  const installs = new Set(read("install.sh").match(/^MODS="([^"]+)"/m)[1].split(" "));
+  const installs = new Set(readdirSync(new URL("../", import.meta.url)).filter((name) => name.startsWith("hws-")));
   const shipped = new Set(["workspace-chrome", "spaces", "files", "changes", "workspace-status"]);
   for (const mod of mods) assert.ok(shipped.has(mod) || installs.has(mod), `${mod} is shipped or installed`);
   for (const mod of ["hws-actions", "hws-work", "hws-tabs", "hws-agents"]) assert.ok(installs.has(mod), mod);

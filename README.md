@@ -15,13 +15,19 @@ Interfaces are in `docs/CONTRACT.md`.
 
 ## Install
 
+You need [Herdr](https://herdr.dev), Node 20 or newer, and Claude Code. macOS is tested end to end. Linux installs and passes its tests, but nobody has confirmed yet that surfaces draw correctly in a real Herdr window there.
+
 ```sh
-ln -s "$PWD/bin/hws" ~/.local/bin/hws
-sh mods/install.sh
-(cd surface/app && pnpm build)
-claude plugin marketplace add "$PWD"
-claude plugin install herdr-workspaces@herdr-workspaces
+git clone https://github.com/skyam25/herdr-workspaces.git
+cd herdr-workspaces
+sh install.sh
 ```
+
+The installer links `hws`, copies the mods, installs Pixel, prepares the surface, adds the Claude plugin, and finishes with `hws doctor`. It can run again safely. If one part fails, the others still install and the report names the fix.
+
+A checkout of a release tag downloads a prebuilt surface. Any other checkout builds the surface, and that needs [pnpm](https://pnpm.io).
+
+Update with `git pull && sh install.sh --force`. `hws doctor` shows what is out of date at any time.
 
 `mods/keys.example.json` lists suggested key bindings for `~/.config/herdr-app/keys.json`.
 
@@ -31,7 +37,7 @@ claude plugin install herdr-workspaces@herdr-workspaces
 |---|---|
 | CLI | `npm test` |
 | Plugin | `cd plugin && node --test tests/*.test.mjs` |
-| Mods | `cd mods && node --import ./test/register.mjs --test test/simulate.test.mjs` |
+| Mods | `cd mods && node --import ./test/register.mjs --test test/*.test.mjs` |
 | Surface app | `cd surface/app && pnpm test` |
 | Surface in a pty | `python3 surface/test/verify.py` |
 
@@ -44,3 +50,7 @@ claude plugin install herdr-workspaces@herdr-workspaces
 - A standalone surface offers Open terminal and Copy link.
 - `hws resume` restarts recorded Claude sessions after a reboot.
 - Delivery failures are written to `~/.local/state/herdr-workspaces/delivery.log`.
+
+## License
+
+MIT. See `LICENSE`. `mods/NOTICE.md` records third-party code and its licenses.

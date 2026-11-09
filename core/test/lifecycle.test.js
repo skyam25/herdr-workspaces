@@ -79,7 +79,19 @@ test('close --trash moves artifacts with trash and closes the space', (t) => {
   assert.equal(existsSync(join(box.root, 'workspaces', manifest.id)), false);
 });
 
-test('close --trash falls back to Finder when the binary is missing', (t) => {
+test('close --trash uses gio on Linux and refuses to delete when it fails', { skip: process.platform === 'darwin' }, (t) => {
+  const box = sandbox(t);
+  const { manifest, artifact } = throwawayWithArtifact(box);
+  const missing = { HWS_TRASH: join(box.dir, 'no-such-trash'), HWS_GIO: join(box.dir, 'no-such-gio') };
+  assert.notEqual(box.hws(['close', '--workspace', manifest.id, '--trash'], missing).code, 0);
+  assert.equal(existsSync(artifact.path), true);
+  const gio = join(box.dir, 'gio');
+  writeFileSync(gio, '#!/bin/sh\nshift\nrm -rf "$@"\n', { mode: 0o755 });
+  box.json(['close', '--workspace', manifest.id, '--trash'], { ...missing, HWS_GIO: gio });
+  assert.equal(existsSync(artifact.path), false);
+});
+
+test('close --trash falls back to Finder when the binary is missing', { skip: process.platform !== 'darwin' }, (t) => {
   const box = sandbox(t);
   const { manifest, artifact } = throwawayWithArtifact(box);
   box.json(['close', '--workspace', manifest.id, '--trash'], { HWS_TRASH: join(box.dir, 'no-such-trash') });

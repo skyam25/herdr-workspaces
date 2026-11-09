@@ -1,6 +1,6 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { HWS, setup, mount, settle, hwsCalls, usedMethods } from "./harness.mjs";
 
 const stored = new Map();
@@ -389,6 +389,18 @@ test("artifact actions call the right commands and copy through pbcopy", async (
   assert.match(m.text(), /Link copied/);
   await m.click("folder-new");
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/art/new"] });
+});
+
+test("on Linux, artifact actions copy through the desktop's clipboard tool and xdg-open", async () => {
+  const H = inWorkspace(APP, { hws: { list: [APP], "link new": { link: "@/art/new/prompt.md" } } });
+  H.window = { platform: "linux" };
+  const m = await mount("hws-panel", {});
+  await m.click("link-new");
+  assert.match(H.calls.at(-1).args[1], /wl-copy/);
+  assert.match(H.calls.at(-1).args[1], /xclip/);
+  assert.doesNotMatch(H.calls.at(-1).args[1], /pbcopy/);
+  await m.click("folder-new");
+  assert.deepEqual(H.calls.at(-1), { command: "xdg-open", args: ["/art/new"] });
 });
 
 test("New board and New note attach to the focused agent", async () => {
@@ -997,13 +1009,13 @@ test("hws-new, hws-panel and hws-actions carry the same hws.js", () => {
   assert.equal(read("../hws-new/hws.js"), read("../hws-actions/hws.js"));
 });
 
-test("every element method used exists in gpui-kit.d.ts", () => {
+test("every element method used exists in gpui-kit.d.ts", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {
   const types = readFileSync(`${process.env.HOME}/.config/herdr-app/gpui-kit.d.ts`, "utf8");
   const unknown = usedMethods().filter((name) => !new RegExp(`\\b${name}\\s*[<(]`).test(types));
   assert.deepEqual(unknown, []);
 });
 
-test("every herdr import exists in herdr.d.ts", () => {
+test("every herdr import exists in herdr.d.ts", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {
   const types = readFileSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`, "utf8");
   for (const file of ["../hws-new/main.js", "../hws-new/hws.js", "../hws-panel/main.js", "../hws-panel/cites.js", "../hws-panel/sections.js", "../hws-panel/sidebar.js", "../hws-brief/main.js"]) {
     const names = /import \{([^}]*)\} from "herdr"/.exec(read(file))[1].split(",").map((s) => s.trim());
