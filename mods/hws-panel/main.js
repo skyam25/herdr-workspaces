@@ -309,10 +309,6 @@ export default class Panel extends View {
     }, cx);
   }
 
-  artifactTerminal(artifact) {
-    return hws(["artifact", "terminal", artifact.id]).then(() => null);
-  }
-
   copyLink(artifact, cx) {
     this.act(`link-${artifact.id}`, async () => {
       const { link } = await hws(["link", artifact.id]);

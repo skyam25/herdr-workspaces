@@ -494,10 +494,9 @@ test("a surface whose pane has gone is not clickable", async () => {
 });
 
 test("artifact actions call the right commands and copy through pbcopy", async () => {
-  const H = inWorkspace(APP, { hws: { list: [APP], "link new": { link: "@/art/new/prompt.md" }, "artifact terminal new": {} } });
+  const H = inWorkspace(APP, { hws: { list: [APP], "link new": { link: "@/art/new/prompt.md" } } });
   const m = await mount("hws-panel", {});
-  await m.click("terminal-new");
-  assert.deepEqual(args(H).at(-1), ["artifact", "terminal", "new", "--json"]);
+  assert.doesNotMatch(m.text(), /New Claude tab/);
   await m.click("link-new");
   assert.deepEqual(args(H).at(-1), ["link", "new", "--json"]);
   const copy = H.calls.at(-1);
@@ -963,6 +962,14 @@ test("an artifact's title reads it in the panel and Show in Finder reveals the f
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["-R", "/Users/me/Projects/checkout/docs/spec.md"] });
 });
 
+test("Open reads an artifact in the panel", async () => {
+  kept({ files: { [NOTE_PATH]: NOTE, "/Users/me/Projects/checkout/docs/spec.md": "# Spec" } });
+  const m = await mount("hws-panel", {});
+  await m.click("open-doc");
+  await m.settle();
+  assert.match(m.text(), /Back \| spec.*# Spec/s);
+});
+
 test("a board artifact reads its comments, then its prompt, and a missing file says so", async () => {
   kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
   const withComments = await mount("hws-panel", {});
@@ -1060,9 +1067,9 @@ test("artifact rows chip only a status worth noticing and fold superseded ones",
   const m = await mount("hws-panel", {});
   const text = m.text();
   assert.match(text, /newer \| draft.*spec \| file.*Show 1 superseded/);
-  assert.equal(m.has("terminal-old"), false);
+  assert.equal(m.has("open-old"), false);
   await m.click("superseded-toggle");
-  assert.equal(m.has("terminal-old"), true);
+  assert.equal(m.has("open-old"), true);
   assert.match(m.text(), /older \| superseded/);
 });
 

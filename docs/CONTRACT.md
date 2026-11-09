@@ -692,11 +692,10 @@ Reads, on each `hws list` refresh:
 | `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID` |
 | `[commit:SHA]` chip | Copies the sha with `pbcopy` |
 | `[artifact:ID]` and `[file:PATH]` chips | A `.md` or `.markdown` file reads in the panel, and so does a Done bundle, from its `comments.md` or else its `prompt.md`. A `.html` or `.htm` path opens with `hws surface open --type page` beside T. Anything else, or no T, goes to macOS `open`. A file path is relative to the workspace folder |
-| Artifact title | Runs the `[artifact:ID]` action |
+| Artifact title and Open | Run the `[artifact:ID]` action |
 | Show in Finder | `open -R` on the file, or `xdg-open` on its folder on Linux, where the label reads Show in folder. A bundle reveals its `prompt.md` |
 | Not in the note yet | The four `behind` counts, then `items`, eight at first. A row runs its item's cite. A live pass row focuses its terminal |
 | Artifact status chip | Shown for `draft` and `superseded`, and left off `current`. A missing status reads as `current`. Superseded ones fold under one row |
-| New Claude tab | `hws artifact terminal ARTIFACT` |
 | Copy for Claude | Copies the `@path` from `hws link ARTIFACT` |
 | Agents | The live agents in this space. Tab headings appear when more than one tab has an agent, and a tab nobody named reads `Tab N` |
 | Open now | Boards, notes and pages from `surfaces`, each with its type and the agent it is attached to |

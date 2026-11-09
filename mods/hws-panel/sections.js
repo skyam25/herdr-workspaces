@@ -279,7 +279,7 @@ function artifactRow(t, host, workspace, artifact, now) {
     .child(
       h_flex()
         .gap(4)
-        .child(smallButton(t, `terminal-${artifact.id}`, "New Claude tab", (_e, cx) => host.act(`terminal-${artifact.id}`, () => host.artifactTerminal(artifact), cx)))
+        .child(smallButton(t, `open-${artifact.id}`, "Open", (_e, cx) => host.citeAction({ kind: "artifact", value: artifact.id }, workspace, cx)))
         .child(smallButton(t, `link-${artifact.id}`, "Copy for Claude", (_e, cx) => host.copyLink(artifact, cx)))
         .child(smallButton(t, `folder-${artifact.id}`, revealLabel(), (_e, cx) => host.reveal(artifact.prompt ?? artifact.path, cx))),
     );
