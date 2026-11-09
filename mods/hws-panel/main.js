@@ -2,7 +2,7 @@
 // One copy runs per use. A pane shows the panel, a dialog copy shows the close
 // decision or Promote, a `mod.open` copy toggles the pane and closes itself, a
 // layout block with `view: "sidebar"` shows the Workspaces section, and a popup
-// copy shows a workspace row's right-click menu.
+// copy shows a workspace row's right-click menu or an artifact's menu.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -11,7 +11,8 @@ import { hws, message, submitDialog, openWorkspaceForm, checkFolder, fillParent,
 import { startSidebar, drawSidebar } from "./sidebar.js";
 import { initRename, renderConfirm, renderRename, renderRowMenu } from "./rowmenu.js";
 import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, noteLines, placeRows, resolvePath, validStatus } from "./context.js";
-import { citeReading, copy, openCite, openPath, revealPath } from "./cites.js";
+import { openCite, openExternally, revealPath } from "./cites.js";
+import { renderArtifactMenu } from "./artifactmenu.js";
 import { artifactsSection, currentSection, headerSection, historySection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
 
 const MOD = "hws-panel";
@@ -51,7 +52,7 @@ export default class Panel extends View {
       focusField(this, "instructions", cx);
     } else if (this.view === "rename") {
       initRename(this, cx);
-    } else if (this.view === "row-menu") {
+    } else if (this.view === "row-menu" || this.view === "artifact-menu") {
       // The menu draws from its props.
     } else if (this.view === "decide" || this.view === "confirm") {
       this.handle.focus();
@@ -239,11 +240,6 @@ export default class Panel extends View {
   }
 
   citeAction(cite, workspace, cx) {
-    const reading = citeReading(cite, workspace);
-    if (reading) {
-      this.openReader(reading, cx);
-      return;
-    }
     this.act(`cite-${cite.kind}-${cite.value}`, () => openCite(cite, { workspace, target: this.trackAgent(this.spaceId), space: this.spaceId }), cx);
   }
 
@@ -309,16 +305,8 @@ export default class Panel extends View {
     }, cx);
   }
 
-  copyLink(artifact, cx) {
-    this.act(`link-${artifact.id}`, async () => {
-      const { link } = await hws(["link", artifact.id]);
-      await copy(link);
-      return "Copied. Paste it into Claude.";
-    }, cx);
-  }
-
   openFolder(artifact, cx) {
-    this.act(`folder-${artifact.id}`, () => openPath(artifact.path, null), cx);
+    this.act(`folder-${artifact.id}`, () => openExternally(artifact.path), cx);
   }
 
   closeWorkspace(workspace, cx) {
@@ -707,6 +695,7 @@ export default class Panel extends View {
     if (this.view === "add-space") return this.renderAddSpace(t);
     if (this.view === "instructions") return this.renderInstructions(t);
     if (this.view === "row-menu") return renderRowMenu(t);
+    if (this.view === "artifact-menu") return renderArtifactMenu(t);
     if (this.view === "rename") return renderRename(t, this);
     if (this.view === "confirm") return renderConfirm(t, this);
     return this.renderPanel(t, cx);

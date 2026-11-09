@@ -667,7 +667,7 @@ Each section is a function in `mods/hws-panel/sections.js` that takes `{ t, host
 
 | Workspace | Sections, top to bottom |
 |---|---|
-| Reading a document | Back, its title, Show in Finder and the rendered text, in place of every other section |
+| Reading a document | Back, its title, Show in Finder and the rendered text, in place of every other section. History rows, and Open note with no agent, open here |
 | Kept | Header, Current note, Not in the note yet, History once a log exists, Artifacts, Agents, Open now, Where files go, Close |
 | Throwaway | Header, Record, Agents, Open now, Close |
 
@@ -691,12 +691,12 @@ Reads, on each `hws list` refresh:
 | `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |
 | `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID` |
 | `[commit:SHA]` chip | Copies the sha with `pbcopy` |
-| `[artifact:ID]` and `[file:PATH]` chips | A `.md` or `.markdown` file reads in the panel, and so does a Done bundle, from its `comments.md` or else its `prompt.md`. A `.html` or `.htm` path opens with `hws surface open --type page` beside T. Anything else, or no T, goes to macOS `open`. A file path is relative to the workspace folder |
+| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A Done bundle opens its `comments.md`, or else its `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
 | Artifact title and Open | Run the `[artifact:ID]` action |
-| Show in Finder | `open -R` on the file, or `xdg-open` on its folder on Linux, where the label reads Show in folder. A bundle reveals its `prompt.md` |
+| Artifact `···` menu | Open in browser for HTML, Open sketch for a board, otherwise Open in default app. Then Show in Finder and Copy for Claude, which copies the `@path` from `hws link ARTIFACT` |
+| Show in Finder, in the reader and the `···` menu | `open -R` on the file, or `xdg-open` on its folder on Linux, where the label reads Show in folder. A bundle reveals its `prompt.md` |
 | Not in the note yet | The four `behind` counts, then `items`, eight at first. A row runs its item's cite. A live pass row focuses its terminal |
 | Artifact status chip | Shown for `draft` and `superseded`, and left off `current`. A missing status reads as `current`. Superseded ones fold under one row |
-| Copy for Claude | Copies the `@path` from `hws link ARTIFACT` |
 | Agents | The live agents in this space. Tab headings appear when more than one tab has an agent, and a tab nobody named reads `Tab N` |
 | Open now | Boards, notes and pages from `surfaces`, each with its type and the agent it is attached to |
 | Where files go | Folded at first and on every space change. Holds the Place fields and Suggest from folder |

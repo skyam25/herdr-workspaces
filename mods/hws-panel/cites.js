@@ -1,9 +1,9 @@
 // Turns a cite from the current note or a backlog row into an action.
 // Each action resolves with a note to show, or null.
 
-import { agents, exec, openOverlay, panes, run, terminals, window } from "herdr";
+import { agents, exec, openOverlay, panes, readTextFile, run, terminals, window } from "herdr";
 import { hws } from "./hws.js";
-import { artifactReading, opensAsPage, readsHere, resolvePath } from "./context.js";
+import { opensAsPage, resolvePath } from "./context.js";
 
 // The Board's card dialog, at the size the Board itself prefers.
 const CARD_DIALOG = { width: 920, height: 760 };
@@ -17,22 +17,35 @@ export async function copy(text) {
 }
 
 // A flipped agent's surface opens beside its chat pane, as hws surface open requires.
-function pageArgs(file, target) {
-  const args = ["surface", "open", "--type", "page", "--file", file, "--terminal", target.address];
+// With no agent the page opens standalone, in a tab of its own.
+function pageArgs(file, target, title) {
+  const args = ["surface", "open", "--type", "page", "--file", file, ...(title ? ["--title", title] : [])];
+  if (!target) return [...args, "--standalone"];
+  const owned = [...args, "--terminal", target.address];
   const chat = terminals().find((x) => x.address === target.address)?.labels?.["herdr.chat"];
-  return chat && panes().some((p) => p.pane === chat) ? [...args, "--beside-pane", chat, "--space", target.space] : args;
+  return chat && panes().some((p) => p.pane === chat) ? [...owned, "--beside-pane", chat, "--space", target.space] : owned;
 }
 
-// HTML opens as a page beside the agent. Anything else, or no agent, opens in the desktop's default app.
-export async function openPath(path, target) {
-  if (opensAsPage(path) && target) {
-    await hws(pageArgs(path, target));
-    return null;
-  }
+export async function openExternally(path) {
   const r = await exec(onLinux() ? "xdg-open" : "open", [path]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `Could not open ${path}`);
   return null;
 }
+
+// Markdown and HTML open in the companion, where they take comments. A file
+// already open there gets the focus. Anything else opens in the desktop's default app.
+async function openPath(path, { target, workspace, title }) {
+  if (!opensAsPage(path)) return openExternally(path);
+  const open = (workspace?.surfaces ?? []).find((s) => s.file === path && panes().some((p) => p.pane === s.pane));
+  if (open) {
+    run("pane.focus", { pane: open.pane });
+    return null;
+  }
+  await hws(pageArgs(path, target, title));
+  return null;
+}
+
+export { openPath };
 
 export const revealLabel = () => (onLinux() ? "Show in folder" : "Show in Finder");
 
@@ -42,15 +55,18 @@ export async function revealPath(path) {
   return null;
 }
 
-// What the panel's reader shows for a cite, or null when the cite acts elsewhere.
-export function citeReading(cite, workspace) {
-  if (cite.kind === "artifact") {
-    const artifact = (workspace.artifacts ?? []).find((a) => a.id === cite.value);
-    return artifact?.path ? artifactReading(artifact) : null;
+// A Done bundle keeps its words in comments.md or prompt.md, so one of those opens.
+async function bundleFile(artifact) {
+  for (const path of [`${artifact.path}/comments.md`, artifact.prompt]) {
+    if (path && typeof (await readTextFile(path).catch(() => null)) === "string") return path;
   }
-  if (cite.kind !== "file") return null;
-  const path = resolvePath(cite.value, workspace.folder);
-  return readsHere(path) ? { title: cite.value.split("/").filter(Boolean).pop() ?? cite.value, candidates: [path], reveal: path } : null;
+  return null;
+}
+
+async function openArtifact(artifact, { target, workspace }) {
+  const file = artifact.type === "file" ? artifact.path : await bundleFile(artifact);
+  if (!file) return openExternally(artifact.path);
+  return openPath(file, { target, workspace, title: artifact.title || artifact.id });
 }
 
 function openCard(id, workspace, space) {
@@ -87,7 +103,7 @@ export async function openCite(cite, { workspace, target, space }) {
   if (cite.kind === "artifact") {
     const artifact = (workspace.artifacts ?? []).find((a) => a.id === cite.value);
     if (!artifact?.path) throw new Error(`No artifact ${cite.value} in this workspace.`);
-    return openPath(artifact.path, target);
+    return openArtifact(artifact, { target, workspace });
   }
-  return openPath(resolvePath(cite.value, workspace.folder), target);
+  return openPath(resolvePath(cite.value, workspace.folder), { target, workspace });
 }

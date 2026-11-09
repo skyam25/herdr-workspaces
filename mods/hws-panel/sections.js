@@ -8,6 +8,7 @@ import { v_flex, h_flex, Input, TextView } from "gpui-base";
 import { run } from "herdr";
 import { tilde } from "./hws.js";
 import { revealLabel } from "./cites.js";
+import { openArtifactMenu } from "./artifactmenu.js";
 import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, livePass, placeRows, recordedSessions } from "./context.js";
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
@@ -251,38 +252,32 @@ export function historySection({ t, host, workspace }) {
 
 // Artifacts
 
+// One line each. The title and Open go to the companion, and the menu holds the rest.
 function artifactRow(t, host, workspace, artifact, now) {
   const { status } = artifact;
-  return v_flex()
+  const open = (_e, cx) => host.citeAction({ kind: "artifact", value: artifact.id }, workspace, cx);
+  return h_flex()
     .flex_none()
+    .h(26)
     .px(8)
-    .gap(3)
+    .gap(8)
+    .items_center()
     .child(
-      h_flex()
-        .gap(8)
-        .items_center()
-        .child(
-          div()
-            .id(`artifact-open-${artifact.id}`)
-            .flex_1()
-            .min_w(0)
-            .truncate()
-            .cursor_pointer()
-            .text_color(status === "superseded" ? t.muted : t.foreground)
-            .hover((s) => s.text_color(t.accent))
-            .on_click((_e, cx) => host.citeAction({ kind: "artifact", value: artifact.id }, workspace, cx))
-            .child(artifact.title || artifact.id),
-        )
-        .when(Boolean(status) && status !== "current", (el) => el.child(pill(t, status, t[STATUS_COLOR[status]])))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(`${artifact.type} · ${ago(now - (artifact.createdAt ?? now))}`)),
+      div()
+        .id(`artifact-open-${artifact.id}`)
+        .flex_1()
+        .min_w(0)
+        .truncate()
+        .cursor_pointer()
+        .text_color(status === "superseded" ? t.muted : t.foreground)
+        .hover((s) => s.text_color(t.accent))
+        .on_click(open)
+        .child(artifact.title || artifact.id),
     )
-    .child(
-      h_flex()
-        .gap(4)
-        .child(smallButton(t, `open-${artifact.id}`, "Open", (_e, cx) => host.citeAction({ kind: "artifact", value: artifact.id }, workspace, cx)))
-        .child(smallButton(t, `link-${artifact.id}`, "Copy for Claude", (_e, cx) => host.copyLink(artifact, cx)))
-        .child(smallButton(t, `folder-${artifact.id}`, revealLabel(), (_e, cx) => host.reveal(artifact.prompt ?? artifact.path, cx))),
-    );
+    .when(Boolean(status) && status !== "current", (el) => el.child(pill(t, status, t[STATUS_COLOR[status]])))
+    .child(div().flex_none().text_size(11).text_color(t.dim).child(`${artifact.type} · ${ago(now - (artifact.createdAt ?? now))}`))
+    .child(smallButton(t, `open-${artifact.id}`, "Open", open))
+    .child(smallButton(t, `more-${artifact.id}`, "···", () => openArtifactMenu(artifact)).tooltip("More ways to open"));
 }
 
 // Current and draft artifacts, then one row that folds the superseded ones.
@@ -313,7 +308,7 @@ export function artifactsSection({ t, host, workspace, now }) {
   const rows = artifactRows(t, host, workspace, now);
   return v_flex()
     .flex_none()
-    .gap(8)
+    .gap(2)
     .child(sectionTitle(t, "Artifacts"))
     .when(rows.length === 0, (el) => el.child(dimLine(t, "None yet.")))
     .children(rows);

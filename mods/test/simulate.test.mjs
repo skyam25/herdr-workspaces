@@ -493,30 +493,54 @@ test("a surface whose pane has gone is not clickable", async () => {
   assert.equal(m.clickable("surface-s1"), false);
 });
 
-test("artifact actions call the right commands and copy through pbcopy", async () => {
-  const H = inWorkspace(APP, { hws: { list: [APP], "link new": { link: "@/art/new/prompt.md" } } });
-  const m = await mount("hws-panel", {});
-  assert.doesNotMatch(m.text(), /New Claude tab/);
-  await m.click("link-new");
-  assert.deepEqual(args(H).at(-1), ["link", "new", "--json"]);
-  const copy = H.calls.at(-1);
-  assert.equal(copy.command, "sh");
-  assert.deepEqual(copy.args.slice(2), ["sh", "@/art/new/prompt.md"]);
-  assert.match(copy.args[1], /pbcopy/);
-  assert.match(m.text(), /Copied\. Paste it into Claude\./);
-  await m.click("folder-new");
+const MENU = { view: "artifact-menu", overlay: "ov1" };
+const menuFor = (artifact) => ({ ...MENU, artifact });
+const BOARD_ARTIFACT = { id: "new", type: "board", path: "/art/new", prompt: "/art/new/prompt.md" };
+
+test("the artifact menu reveals, copies and opens a board's sketch", async () => {
+  const H = setup({});
+  const m = await mount("hws-panel", menuFor(BOARD_ARTIFACT), H);
+  assert.match(m.text(), /Open sketch.*Show in Finder.*Copy for Claude/);
+  await m.click("row-menu-external");
+  await m.settle();
+  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/art/new/sketch.png"] });
+  await m.click("row-menu-reveal");
+  await m.settle();
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["-R", "/art/new/prompt.md"] });
+  await m.click("row-menu-copy");
+  await m.settle();
+  const copied = H.calls.at(-1);
+  assert.deepEqual(copied.args.slice(2), ["sh", "@/art/new/prompt.md"]);
+  assert.match(copied.args[1], /pbcopy/);
 });
 
-test("on Linux, artifact actions copy through the desktop's clipboard tool and xdg-open", async () => {
-  const H = inWorkspace(APP, { hws: { list: [APP], "link new": { link: "@/art/new/prompt.md" } } });
+test("the artifact menu quotes a path with spaces, as hws link does", async () => {
+  const H = setup({});
+  const m = await mount("hws-panel", menuFor({ id: "a", type: "file", path: "/w/my spec.md", prompt: "/w/my spec.md" }), H);
+  await m.click("row-menu-copy");
+  await m.settle();
+  assert.deepEqual(H.calls.at(-1).args.slice(2), ["sh", '@"/w/my spec.md"']);
+});
+
+test("the artifact menu names the external tool for the file type", async () => {
+  const H = setup({});
+  const html = await mount("hws-panel", menuFor({ id: "a", type: "file", path: "/w/page.html", prompt: "/w/page.html" }), H);
+  assert.match(html.text(), /Open in browser/);
+  const md = await mount("hws-panel", menuFor({ id: "b", type: "file", path: "/w/spec.md", prompt: "/w/spec.md" }), H);
+  assert.match(md.text(), /Open in default app/);
+});
+
+test("on Linux, the artifact menu uses the desktop's clipboard tool and xdg-open", async () => {
+  const H = setup({});
   H.window = { platform: "linux" };
-  const m = await mount("hws-panel", {});
-  await m.click("link-new");
+  const m = await mount("hws-panel", menuFor(BOARD_ARTIFACT), H);
+  assert.match(m.text(), /Show in folder/);
+  await m.click("row-menu-copy");
+  await m.settle();
   assert.match(H.calls.at(-1).args[1], /wl-copy/);
-  assert.match(H.calls.at(-1).args[1], /xclip/);
   assert.doesNotMatch(H.calls.at(-1).args[1], /pbcopy/);
-  await m.click("folder-new");
+  await m.click("row-menu-reveal");
+  await m.settle();
   assert.deepEqual(H.calls.at(-1), { command: "xdg-open", args: ["/art/new"] });
 });
 
@@ -922,18 +946,33 @@ test("a commit cite copies the sha", async () => {
   assert.match(m.text(), /Copied ba7d965\./);
 });
 
-test("a markdown cite reads in the panel and other files open in macOS", async () => {
-  const H = kept({ files: { [NOTE_PATH]: NOTE, "/Users/me/Projects/checkout/docs/panel-options.md": "# Options\n\nBody" } });
+test("a markdown cite opens in the companion and other files open in macOS", async () => {
+  const H = kept();
   const m = await mount("hws-panel", {});
   await m.click("cite-6-0");
   await m.settle();
-  assert.equal(args(H).some((a) => a[0] === "surface"), false);
-  assert.match(m.text(), /Back \| panel-options\.md \| Show in Finder.*# Options/s);
-  assert.equal(m.has("hws-panel-body"), false);
-  await m.click("reader-back");
-  assert.equal(m.has("hws-panel-body"), true);
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), ["surface", "open", "--type", "page", "--file", "/Users/me/Projects/checkout/docs/panel-options.md", "--terminal", "t13", "--json"]);
   await m.click("cite-8-0");
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/Users/me/Projects/checkout/notes/raw.txt"] });
+});
+
+test("with no agent an artifact opens standalone in the companion", async () => {
+  const H = kept({ agents: [{ ...AGENT, focused: false }], focused: { space: "spc1", tab: "tb1", pane: "p2", terminal: null } });
+  const m = await mount("hws-panel", {});
+  await m.click("open-doc");
+  await m.settle();
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), ["surface", "open", "--type", "page", "--file", "/Users/me/Projects/checkout/docs/spec.md", "--title", "spec", "--standalone", "--json"]);
+});
+
+test("a file already open in the companion gets the focus", async () => {
+  const surfaces = [{ id: "s9", type: "page", title: "spec", file: "/Users/me/Projects/checkout/docs/spec.md", terminal: "t13", pane: "p9" }];
+  const H = kept({}, { list: [{ ...KEPT, surfaces }] });
+  H.panes.push({ pane: "p9", terminal: null, tab: "tb1" });
+  const m = await mount("hws-panel", {});
+  await m.click("artifact-open-doc");
+  await m.settle();
+  assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { pane: "p9" } });
+  assert.equal(args(H).some((a) => a[0] === "surface"), false);
 });
 
 test("an HTML cite opens as a page beside the agent", async () => {
@@ -951,41 +990,33 @@ test("a flipped agent's page opens beside its chat pane", async () => {
   assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1).slice(-5), ["--beside-pane", "p7", "--space", "spc1", "--json"]);
 });
 
-test("an artifact's title reads it in the panel and Show in Finder reveals the file", async () => {
-  const H = kept({ files: { [NOTE_PATH]: NOTE, "/Users/me/Projects/checkout/docs/spec.md": "# Spec" } });
+test("the artifact row has one line, with Open and a menu", async () => {
+  const H = kept();
   const m = await mount("hws-panel", {});
-  await m.click("artifact-open-doc");
-  await m.settle();
-  assert.match(m.text(), /spec.*# Spec/s);
-  await m.click("reader-reveal");
-  await m.settle();
-  assert.deepEqual(H.calls.at(-1), { command: "open", args: ["-R", "/Users/me/Projects/checkout/docs/spec.md"] });
+  assert.match(m.text(), /spec \| file · .* \| Open \| ···/);
+  assert.doesNotMatch(m.text(), /Copy for Claude/);
+  await m.click("more-new");
+  assert.equal(H.overlays.at(-1).props.view, "artifact-menu");
+  assert.equal(H.overlays.at(-1).kind, "popup");
 });
 
-test("Open reads an artifact in the panel", async () => {
-  kept({ files: { [NOTE_PATH]: NOTE, "/Users/me/Projects/checkout/docs/spec.md": "# Spec" } });
-  const m = await mount("hws-panel", {});
-  await m.click("open-doc");
-  await m.settle();
-  assert.match(m.text(), /Back \| spec.*# Spec/s);
-});
-
-test("a board artifact reads its comments, then its prompt, and a missing file says so", async () => {
-  kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
+test("a board artifact opens its comments, then its prompt, and a bare bundle opens its folder", async () => {
+  const boardCall = (H) => args(H).filter((a) => a[0] === "surface").at(-1);
+  const H1 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
   const withComments = await mount("hws-panel", {});
-  await withComments.click("artifact-open-new");
+  await withComments.click("open-new");
   await withComments.settle();
-  assert.match(withComments.text(), /# Comments/);
-  kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "the prompt" } });
+  assert.equal(boardCall(H1)[5], "/art/new/comments.md");
+  const H2 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "the prompt" } });
   const withPrompt = await mount("hws-panel", {});
-  await withPrompt.click("artifact-open-new");
+  await withPrompt.click("open-new");
   await withPrompt.settle();
-  assert.match(withPrompt.text(), /the prompt/);
-  kept();
-  const missing = await mount("hws-panel", {});
-  await missing.click("artifact-open-new");
-  await missing.settle();
-  assert.match(missing.text(), /This file is missing or can't be read\./);
+  assert.equal(boardCall(H2)[5], "/art/new/prompt.md");
+  const H3 = kept();
+  const bare = await mount("hws-panel", {});
+  await bare.click("open-new");
+  await bare.settle();
+  assert.deepEqual(H3.calls.at(-1), { command: "open", args: ["/art/new"] });
 });
 
 test("Tidy passes the panel's pane so the terminal opens below it", async () => {

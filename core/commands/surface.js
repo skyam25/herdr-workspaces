@@ -151,7 +151,7 @@ export function surfaceOpen(flags) {
   const pane = opened.pane ?? findTerminal(listLive() ?? { spaces: [] }, opened.terminal)?.pane ?? null;
   const pid = terminalInfo(opened.terminal)?.pid ?? null;
 
-  const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid };
+  const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...(file ? { file } : {}) };
   updateManifest(workspace.id, (draft) => draft.surfaces.push(surface));
   const data = { ...surface, workspace: workspace.id, hostTerminal: opened.terminal };
   return { data, text: `opened ${flags.type} ${surfaceId}` };

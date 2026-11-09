@@ -62,8 +62,8 @@ export function openRowMenu(target) {
   openOverlay({ mod: MOD, kind: "popup", width: MENU_WIDTH, height, props: { ...target, view: "row-menu" } });
 }
 
-export function renderRowMenu(t) {
-  const { view: _view, overlay, ...target } = props();
+// `items` are `{ id, label, open }`. Each closes the menu and then acts.
+export function popupMenu(t, items, overlay) {
   return v_flex()
     .id("hws-row-menu")
     .size_full()
@@ -72,7 +72,7 @@ export function renderRowMenu(t) {
     .text_color(t.foreground)
     .text_size(13)
     .children(
-      menuItems(target).map((item) =>
+      items.map((item) =>
         h_flex()
           .id(`row-menu-${item.id}`)
           .h(MENU_ROW_PX)
@@ -89,6 +89,15 @@ export function renderRowMenu(t) {
           .child(item.label),
       ),
     );
+}
+
+export function renderRowMenu(t) {
+  const { view: _view, overlay, ...target } = props();
+  return popupMenu(t, menuItems(target), overlay);
+}
+
+export function popupHeight(count) {
+  return count * MENU_ROW_PX + MENU_PADDING_PX * 2;
 }
 
 export function initRename(view, cx) {

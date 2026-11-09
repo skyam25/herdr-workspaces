@@ -128,18 +128,7 @@ export function placeRows(workspace, status = null) {
   });
 }
 
-export const readsHere = (path) => /\.(md|markdown)$/i.test(path);
-
-// What the panel's reader shows for an artifact, or null when it opens elsewhere.
-// A Done bundle keeps its words in comments.md or prompt.md.
-export function artifactReading(artifact) {
-  const { title, id, type, path, prompt } = artifact;
-  const name = title || id;
-  if (type === "file") return readsHere(path) ? { title: name, candidates: [path], reveal: path } : null;
-  return { title: name, candidates: [`${path}/comments.md`, prompt], reveal: prompt };
-}
-
-export const opensAsPage = (path) => /\.(html?|md)$/i.test(path);
+export const opensAsPage = (path) => /\.(html?|md|markdown)$/i.test(path);
 
 export const resolvePath = (path, folder) => (path.startsWith("/") ? path : `${(folder ?? "").replace(/\/+$/, "")}/${path}`);
 

@@ -116,6 +116,7 @@ const VARIANTS = [
   { mod: "hws-panel", name: "promote-problem", props: { view: "promote" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "Choose a folder.";') },
   { mod: "hws-panel", name: "panel", props: {}, header: LIVE_HEADER, patch: live },
   { mod: "hws-panel", name: "panel-confirm", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.isConfirmingClose = false;", "this.isConfirmingClose = true;").replace("this.note = null;", 'this.note = { text: "Link copied.", isError: false };') },
+  { mod: "hws-panel", name: "artifact-menu", props: { view: "artifact-menu", artifact: { id: "a1", type: "board", path: "/a", prompt: "/a/prompt.md" } } },
   { mod: "hws-panel", name: "panel-reader", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.reading = null;", 'this.reading = { title: "Spec", text: "# Hello", isLoading: false, reveal: "/a/spec.md" };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-problem", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.problem = null;", 'this.problem = "hws failed";') },
@@ -148,7 +149,7 @@ for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  for (const file of ["hws.js", "sidebar.js", "rowmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
+  for (const file of ["hws.js", "sidebar.js", "rowmenu.js", "artifactmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
     if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
   }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");
