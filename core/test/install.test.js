@@ -15,8 +15,10 @@ function tool(bin, name, script) {
   chmodSync(join(bin, name), 0o755);
 }
 
+const ranPnpm = (calls, args) => calls.some((call) => call.startsWith('npm exec') && call.endsWith(`-- pnpm ${args}`));
+
 // Copies the installer into a temporary checkout with fake tools on PATH.
-function setup(t, { pnpm = true, claude = true } = {}) {
+function setup(t, { claude = true } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hws-install-')));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const root = join(dir, 'checkout');
@@ -35,8 +37,8 @@ function setup(t, { pnpm = true, claude = true } = {}) {
   tool(bin, 'herdr-app', `echo "herdr-app $*" >> "${log}"`);
   tool(bin, 'hc', 'exit 0');
   tool(bin, 'npm', `echo "npm $*" >> "${log}"
-${process.platform === 'darwin' ? `mkdir -p "${pixel}/Electron.app/Contents/MacOS" && : > "${pixel}/Electron.app/Contents/MacOS/pixel" && chmod +x "${pixel}/Electron.app/Contents/MacOS/pixel"` : `mkdir -p "${pixel}" && : > "${pixel}/pixel" && chmod +x "${pixel}/pixel"`}`);
-  if (pnpm) tool(bin, 'pnpm', `echo "pnpm $*" >> "${log}"; [ "$1" != build ] || { mkdir -p out/main; : > out/main/index.cjs; }`);
+${process.platform === 'darwin' ? `mkdir -p "${pixel}/Electron.app/Contents/MacOS" && : > "${pixel}/Electron.app/Contents/MacOS/pixel" && chmod +x "${pixel}/Electron.app/Contents/MacOS/pixel"` : `mkdir -p "${pixel}" && : > "${pixel}/pixel" && chmod +x "${pixel}/pixel"`}
+case "$*" in *"-- pnpm build") mkdir -p out/main; : > out/main/index.cjs ;; esac`);
   if (claude) {
     tool(bin, 'claude', `echo "claude $*" >> "${log}"
 case "$*" in
@@ -62,9 +64,10 @@ test('a fresh install sets up every part and passes doctor', (t) => {
   assert.ok(existsSync(join(box.home, '.config/herdr-app/mods/hws-new/mod.json')));
   assert.ok(existsSync(join(box.home, '.config/herdr-app/layouts/hws.json')));
   assert.ok(box.calls().includes('npm ci'));
-  assert.ok(box.calls().includes('pnpm install --frozen-lockfile'));
+  assert.ok(ranPnpm(box.calls(), 'install --frozen-lockfile'));
   assert.ok(box.calls().includes(`claude plugin marketplace add ${box.root}`));
   assert.ok(box.calls().includes('claude plugin install herdr-workspaces@herdr-workspaces'));
+  assert.match(output, /== Next\n.*\/reload-plugins/);
 });
 
 test('a second run skips finished parts and still passes', (t) => {
@@ -75,7 +78,7 @@ test('a second run skips finished parts and still passes', (t) => {
   const again = box.calls().slice(before);
   assert.equal(code, 0, output);
   assert.equal(again.filter((call) => call === 'npm ci').length, 0);
-  assert.equal(again.filter((call) => call.startsWith('pnpm')).length, 0);
+  assert.equal(again.filter((call) => call.includes('-- pnpm')).length, 0);
   assert.equal(again.filter((call) => call.startsWith('claude plugin marketplace add')).length, 0);
 });
 
@@ -85,7 +88,7 @@ test('--force reinstalls the surface', (t) => {
   const before = box.calls().length;
   assert.equal(box.install('--force').code, 0);
   assert.ok(box.calls().slice(before).includes('npm ci'));
-  assert.ok(box.calls().slice(before).includes('pnpm build'));
+  assert.ok(ranPnpm(box.calls().slice(before), 'build'));
 });
 
 test('a failed Pixel download still installs the rest and reports it', (t) => {
@@ -97,6 +100,7 @@ test('a failed Pixel download still installs the rest and reports it', (t) => {
   assert.match(output, /FAIL {2}Pixel/);
   assert.match(output, /ok {4,}Mods/);
   assert.match(output, /ok {4,}Claude plugin/);
+  assert.doesNotMatch(output, /== Next/);
 });
 
 test('a Pixel download that fails twice is retried and succeeds', (t) => {
@@ -104,7 +108,7 @@ test('a Pixel download that fails twice is retried and succeeds', (t) => {
   renameSync(join(box.bin, 'npm'), join(box.bin, 'npm-real'));
   const count = join(box.dir, 'count');
   writeFileSync(count, '0');
-  tool(box.bin, 'npm', `n=$(($(cat "${count}") + 1)); echo $n > "${count}"; [ $n -ge 3 ] || exit 1; exec npm-real "$@"`);
+  tool(box.bin, 'npm', `[ "$1" = ci ] || exec npm-real "$@"; n=$(($(cat "${count}") + 1)); echo $n > "${count}"; [ $n -ge 3 ] || exit 1; exec npm-real "$@"`);
 
   const { code, output } = box.install();
 
@@ -113,11 +117,18 @@ test('a Pixel download that fails twice is retried and succeeds', (t) => {
   assert.match(output, /attempt 2 of 4/);
 });
 
-test('no pnpm on an untagged checkout warns and finishes', (t) => {
-  const box = setup(t, { pnpm: false });
+test('npm may run the install script of the pinned Pixel', () => {
+  const { dependencies, allowScripts } = JSON.parse(readFileSync(join(REPO, 'surface/package.json'), 'utf8'));
+  assert.equal(allowScripts[`@zenbu-labs/pixel@${dependencies['@zenbu-labs/pixel']}`], true);
+});
+
+test('a surface build that fails warns and finishes', (t) => {
+  const box = setup(t);
+  renameSync(join(box.bin, 'npm'), join(box.bin, 'npm-real'));
+  tool(box.bin, 'npm', '[ "$1" != exec ] || exit 1; exec npm-real "$@"');
   const { code, output } = box.install();
   assert.equal(code, 1);
-  assert.match(output, /warning: pnpm is required/);
+  assert.match(output, /warning: the surface did not build/);
   assert.match(output, /FAIL {2}Surface app/);
   assert.match(output, /ok {4,}Mods/);
 });
@@ -188,30 +199,46 @@ test('unknown flags stop with usage', (t) => {
   assert.equal(box.install('--nope').code, 2);
 });
 
-// Tags the checkout and serves a surface archive for that tag from a local folder.
+// Commits the checkout and serves a surface archive for its surface/app tree from a local folder.
 function release(box, checksum) {
   const git = (...args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-C', box.root, ...args], { encoding: 'utf8' });
+  writeFileSync(join(box.root, 'surface/app/package.json'), '{}');
   git('init', '-q');
-  git('commit', '-q', '--allow-empty', '-m', 'x');
-  git('tag', 'v9.9.9');
-  const assets = join(box.dir, 'releases/v9.9.9');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'x');
+  const archive = `surface-${git('rev-parse', 'HEAD:surface/app').stdout.trim()}.tar.gz`;
+  const assets = join(box.dir, 'releases/surface-prebuilt');
   const content = join(box.dir, 'content');
   mkdirSync(assets, { recursive: true });
   mkdirSync(join(content, 'out/main'), { recursive: true });
+  mkdirSync(join(content, 'bin'));
   writeFileSync(join(content, 'out/main/index.cjs'), 'prebuilt');
-  spawnSync('tar', ['-czf', join(assets, 'surface-app.tar.gz'), '-C', content, 'out']);
-  const digest = createHash('sha256').update(readFileSync(join(assets, 'surface-app.tar.gz'))).digest('hex');
-  writeFileSync(join(assets, 'surface-app.tar.gz.sha256'), `${checksum ?? digest}  surface-app.tar.gz\n`);
+  writeFileSync(join(content, 'bin/agent-brief.mjs'), 'cli');
+  spawnSync('tar', ['-czf', join(assets, archive), '-C', content, 'out', 'bin']);
+  const digest = createHash('sha256').update(readFileSync(join(assets, archive))).digest('hex');
+  writeFileSync(join(assets, `${archive}.sha256`), `${checksum ?? digest}  ${archive}\n`);
   box.env.HWS_RELEASE_URL = `file://${join(box.dir, 'releases')}`;
 }
 
-test('a tagged checkout installs the prebuilt surface without pnpm', (t) => {
-  const box = setup(t, { pnpm: false });
+test('a clean checkout installs the prebuilt surface without building', (t) => {
+  const box = setup(t);
   release(box);
   const { code, output } = box.install();
   assert.equal(code, 0, output);
-  assert.match(output, /downloaded the prebuilt surface for v9\.9\.9/);
+  assert.match(output, /downloaded the prebuilt surface/);
   assert.equal(readFileSync(join(box.root, 'surface/app/out/main/index.cjs'), 'utf8'), 'prebuilt');
+  assert.equal(readFileSync(join(box.root, 'surface/app/bin/agent-brief.mjs'), 'utf8'), 'cli');
+  assert.equal(box.calls().filter((call) => call.includes('-- pnpm')).length, 0);
+});
+
+test('local edits to the surface build instead of downloading', (t) => {
+  const box = setup(t);
+  release(box);
+  writeFileSync(join(box.root, 'surface/app/package.json'), '{"edited":true}');
+  const { code, output } = box.install();
+  assert.equal(code, 0, output);
+  assert.doesNotMatch(output, /downloaded the prebuilt surface/);
+  assert.ok(ranPnpm(box.calls(), 'build'));
 });
 
 test('an archive with the wrong checksum is rejected and the surface builds instead', (t) => {
@@ -219,7 +246,7 @@ test('an archive with the wrong checksum is rejected and the surface builds inst
   release(box, '0'.repeat(64));
   const { code, output } = box.install();
   assert.equal(code, 0, output);
-  assert.match(output, /could not download the prebuilt surface/);
+  assert.match(output, /no prebuilt surface for this commit/);
   assert.equal(readFileSync(join(box.root, 'surface/app/out/main/index.cjs'), 'utf8'), '');
-  assert.ok(box.calls().includes('pnpm build'));
+  assert.ok(ranPnpm(box.calls(), 'build'));
 });

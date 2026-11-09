@@ -15,17 +15,18 @@ Interfaces are in `docs/CONTRACT.md`.
 
 ## Install
 
-You need [Herdr](https://herdr.dev), Node 20 or newer, and Claude Code. macOS is tested end to end. Linux installs and passes its tests, but nobody has confirmed yet that surfaces draw correctly in a real Herdr window there.
+You need [Herdr](https://herdr.dev), Node 20 or newer with npm, and Claude Code. macOS is tested end to end. Linux installs and passes its tests, but nobody has confirmed yet that surfaces draw correctly in a real Herdr window there.
 
 ```sh
-git clone https://github.com/skyam25/herdr-workspaces.git
-cd herdr-workspaces
-sh install.sh
+git clone https://github.com/skyam25/herdr-workspaces.git ~/.local/share/herdr-workspaces
+sh ~/.local/share/herdr-workspaces/install.sh
 ```
+
+Keep the folder where you cloned it, because `hws` and the plugin run from it.
 
 The installer links `hws`, copies the mods, installs Pixel, prepares the surface, adds the Claude plugin, and finishes with `hws doctor`. It can run again safely. If one part fails, the others still install and the report names the fix.
 
-A checkout of a release tag downloads a prebuilt surface. Any other checkout builds the surface, and that needs [pnpm](https://pnpm.io).
+The installer downloads a prebuilt surface when CI has published one for that commit. Otherwise it builds the surface with a pinned pnpm that npm fetches, so you do not install pnpm yourself.
 
 Update with `hws update`, which pulls `main`, reinstalls every part and runs the checks. `hws doctor` checks the install and says when GitHub has newer commits.
 

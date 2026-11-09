@@ -74,12 +74,12 @@ function checkLayout() {
 function checkPixel() {
   const found = probe('sh', [join(checkout(), 'surface/pixel-path.sh')]);
   const path = found.stdout?.trim() ?? '';
-  return { name: 'Pixel', ok: path !== '' && existsSync(path), detail: path, fix: install(' --force') };
+  return { name: 'Pixel', ok: path !== '' && existsSync(path), detail: path, fix: install() };
 }
 
 function checkApp() {
   const bundle = join(checkout(), 'surface/app/out/main/index.cjs');
-  return { name: 'Surface app', ok: existsSync(bundle), detail: bundle, fix: install(' --force') };
+  return { name: 'Surface app', ok: existsSync(bundle), detail: bundle, fix: install() };
 }
 
 function checkPlugin() {

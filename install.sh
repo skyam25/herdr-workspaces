@@ -7,6 +7,8 @@ set -u
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 RELEASES="${HWS_RELEASE_URL:-https://github.com/skyam25/herdr-workspaces/releases/download}"
 BUNDLE="$ROOT/surface/app/out/main/index.cjs"
+APP_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
+PNPM_VERSION=12.15.0
 FORCE=0
 
 for arg in "$@"; do
@@ -80,26 +82,40 @@ install_pixel() {
   fi
 }
 
-# A tagged checkout can use that release's prebuilt surface, which needs no pnpm.
+# CI publishes a prebuilt surface for each version of surface/app, named by its git tree.
+# Local edits to surface/app have no prebuilt version, so they build.
 download_app() {
-  tag="$(git -C "$ROOT" describe --exact-match --tags 2>/dev/null)" || return 1
+  [ -z "$(git -C "$ROOT" status --porcelain -- surface/app 2>/dev/null)" ] || return 1
+  tree="$(git -C "$ROOT" rev-parse HEAD:surface/app 2>/dev/null)" || return 1
   command -v curl >/dev/null || return 1
   tmp="$(mktemp -d)" || return 1
-  if curl -fsSL "$RELEASES/$tag/surface-app.tar.gz" -o "$tmp/app.tgz" \
-    && curl -fsSL "$RELEASES/$tag/surface-app.tar.gz.sha256" -o "$tmp/app.sha256" \
+  url="$RELEASES/surface-prebuilt/surface-$tree.tar.gz"
+  if curl -fsSL "$url" -o "$tmp/app.tgz" \
+    && curl -fsSL "$url.sha256" -o "$tmp/app.sha256" \
     && node -e 'const c=require("crypto"),f=require("fs"),[a,s]=process.argv.slice(1);process.exit(c.createHash("sha256").update(f.readFileSync(a)).digest("hex")===f.readFileSync(s,"utf8").trim().split(/\s+/)[0]?0:1)' "$tmp/app.tgz" "$tmp/app.sha256" \
     && mkdir "$tmp/unpacked" \
     && tar -xzf "$tmp/app.tgz" -C "$tmp/unpacked" \
     && [ -f "$tmp/unpacked/out/main/index.cjs" ]; then
     rm -rf "$ROOT/surface/app/out"
     mv "$tmp/unpacked/out" "$ROOT/surface/app/out"
+
+    # The dictation helper is a macOS binary.
+    [ "$(uname -s)" = Darwin ] || rm -f "$tmp/unpacked/bin/agent-brief-dictate"
+    mkdir -p "$ROOT/surface/app/bin"
+    cp -f "$tmp/unpacked/bin/"* "$ROOT/surface/app/bin/"
+
     rm -rf "$tmp"
-    echo "downloaded the prebuilt surface for $tag"
+    echo "downloaded the prebuilt surface"
     return 0
   fi
   rm -rf "$tmp"
-  warn "could not download the prebuilt surface for $tag"
+  echo "no prebuilt surface for this commit, so building it"
   return 1
+}
+
+# npm supplies the pnpm that the lockfile and allowBuilds expect, so nobody installs it.
+pnpm_run() {
+  npm exec --yes --package="pnpm@$PNPM_VERSION" -- pnpm "$@"
 }
 
 build_app() {
@@ -109,11 +125,8 @@ build_app() {
     return
   fi
   download_app && return
-  if ! command -v pnpm >/dev/null; then
-    warn "pnpm is required to build the surface on this checkout. Install pnpm and run this script again"
-    return
-  fi
-  (cd "$ROOT/surface/app" && pnpm install --frozen-lockfile && pnpm build) || warn "the surface did not build"
+  (cd "$ROOT/surface/app" && pnpm_run install --frozen-lockfile && pnpm_run build) \
+    || warn "the surface did not build, so boards, notes and page review won't open. Run this script again to retry"
 }
 
 install_plugin() {
@@ -138,4 +151,14 @@ build_app
 install_plugin
 
 say "Check"
-exec "$ROOT/bin/hws" doctor
+"$ROOT/bin/hws" doctor
+status=$?
+
+if [ "$status" -eq 0 ]; then
+  say "Next"
+  echo "Run /reload-plugins in open Claude Code sessions, or start new ones, to load the plugin."
+  echo "Keep this folder at $ROOT, because hws and the plugin run from it."
+  echo "Optional key bindings are in $ROOT/mods/keys.example.json. Copy the ones you want to $APP_HOME/keys.json."
+fi
+
+exit "$status"

@@ -1,15 +1,24 @@
-name: Release
+name: Surface prebuilt
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'surface/app/**'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: surface-prebuilt
+
 jobs:
   surface:
     runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,14 +27,28 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 12
+
       - name: Build the surface
         working-directory: surface/app
         run: pnpm install --frozen-lockfile && pnpm build
+
+      # install.sh finds the archive by the git tree of surface/app.
       - name: Package the surface
         run: |
-          tar -czf surface-app.tar.gz -C surface/app out
-          shasum -a 256 surface-app.tar.gz > surface-app.tar.gz.sha256
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" surface-app.tar.gz surface-app.tar.gz.sha256 --generate-notes
+          archive="surface-$(git rev-parse HEAD:surface/app).tar.gz"
+          tar -czf "$archive" -C surface/app out bin
+          shasum -a 256 "$archive" > "$archive.sha256"
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - name: Publish the archive
+        run: |
+          gh release view surface-prebuilt >/dev/null 2>&1 \
+            || gh release create surface-prebuilt --prerelease --title "Surface prebuilt" --notes "Built surface/app archives that install.sh downloads."
+          gh release upload surface-prebuilt "$ARCHIVE" "$ARCHIVE.sha256" --clobber
+
+      # Older commits fall back to building, so only recent archives stay.
+      - name: Keep the newest 30 archives
+        run: |
+          gh release view surface-prebuilt --json assets \
+            --jq '.assets | sort_by(.createdAt) | reverse | .[60:] | .[].name' \
+            | while read -r name; do gh release delete-asset surface-prebuilt "$name" --yes; done
