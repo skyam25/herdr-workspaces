@@ -39,6 +39,41 @@ guardCellZoom(require(path.join(__dirname, 'node_modules/@zenbu-labs/pixel/dist/
 
 const audioOnly = (kinds) => kinds.every((kind) => kind === 'audio');
 
+/*
+ * Pixel emulates focus on the top page only. A review page runs in a cross-process frame, which
+ * Chromium then treats as inactive and paints no caret, so each focus change is repeated to those frames.
+ */
+function emulateFocusInFrames(contents) {
+  const FOCUS = 'Emulation.setFocusEmulationEnabled';
+  const cdp = contents.debugger;
+  const send = cdp.sendCommand.bind(cdp);
+  const frames = new Set();
+  let focused = false;
+  let watching = false;
+  const apply = (session) => send(FOCUS, { enabled: focused }, session).catch(() => {});
+
+  cdp.on('message', (_event, method, params) => {
+    if (method === 'Target.attachedToTarget' && params.targetInfo.type === 'iframe') {
+      frames.add(params.sessionId);
+      apply(params.sessionId);
+    } else if (method === 'Target.detachedFromTarget') {
+      frames.delete(params.sessionId);
+    }
+  });
+  cdp.sendCommand = (method, params, session) => {
+    const sent = send(method, params, session);
+    if (method === FOCUS && !session) {
+      focused = params.enabled;
+      frames.forEach(apply);
+      if (!watching) {
+        watching = true;
+        send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }).catch(() => {});
+      }
+    }
+    return sent;
+  };
+}
+
 function adoptPanelWindow(options) {
   const { createRoot } = require('@zenbu-labs/pixel');
   const root = createRoot({
@@ -74,6 +109,7 @@ function adoptPanelWindow(options) {
     onPermissionRequest: async (request) => request.permission === 'media' && request.origin === request.embedder && request.mediaTypes.length > 0 && audioOnly(request.mediaTypes),
   });
   startAtActualSize(handle.webContents);
+  emulateFocusInFrames(handle.webContents);
   const win = realElectron.BrowserWindow.fromWebContents(handle.webContents);
 
   // The pane is the window, so show, hide and placement have nothing to do.
