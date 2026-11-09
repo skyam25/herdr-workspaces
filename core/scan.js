@@ -122,7 +122,7 @@ function linkedFrom(docs, home) {
 }
 
 function trackedOf(manifest) {
-  return manifest.artifacts.map(({ id, type, title, path, status }) => ({ id, type, title: title ?? null, path, status: status ?? 'current' }));
+  return manifest.artifacts.filter((item) => item.role !== 'tidy').map(({ id, type, title, path, status }) => ({ id, type, title: title ?? null, path, status: status ?? 'current' }));
 }
 
 function candidatesOf(manifest, tracked) {

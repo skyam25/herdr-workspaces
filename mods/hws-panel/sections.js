@@ -331,7 +331,7 @@ export function notesSection({ t, host, workspace, now }) {
 }
 
 export function artifactsSection({ t, host, workspace, now }) {
-  const rows = artifactRows(t, host, workspace, now, (workspace.artifacts ?? []).filter((a) => !isNote(a)));
+  const rows = artifactRows(t, host, workspace, now, (workspace.artifacts ?? []).filter((a) => !isNote(a) && a.role !== "tidy"));
   return v_flex()
     .flex_none()
     .gap(2)

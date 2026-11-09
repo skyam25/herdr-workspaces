@@ -214,6 +214,45 @@ test('tidy start --here refuses while another terminal runs a pass', (t) => {
   assert.match(result.stdout + result.stderr, new RegExp(`running in ${live.terminal}`));
 });
 
+test('a review of the pass proposal does not count as behind when an agent ran the pass in its own session', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const terminal = manifest.terminals[0].terminal;
+  const { packet } = box.json(['tidy', 'start', '--here'], { HC_TERMINAL_ID: terminal });
+  const proposal = join(packet, '..', 'proposal.md');
+  writeFileSync(proposal, '# Proposal\n');
+
+  const surface = box.json(['surface', 'open', '--type', 'page', '--in-pane', '--file', proposal, '--terminal', terminal]);
+  box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('review')]);
+
+  assert.equal(box.manifest(manifest.id).artifacts.at(-1).role, 'tidy');
+  assert.equal(status(box, manifest).behind.artifacts, 0);
+  assert.deepEqual(box.json(['artifact', 'scan', '--workspace', manifest.id]).tracked, []);
+});
+
+test('commits that only touch drafts or the note records do not count', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  git(manifest.folder, 'init', '-q');
+  const save = (path, subject) => {
+    mkdirSync(join(manifest.folder, path, '..'), { recursive: true });
+    writeFileSync(join(manifest.folder, path), subject);
+    git(manifest.folder, 'add', '-f', path);
+    git(manifest.folder, 'commit', '-q', '-m', subject);
+  };
+  const scratch = status(box, manifest).places.scratch.slice(manifest.folder.length + 1);
+
+  save(`${scratch}/draft.json`, 'Auto-commit draft');
+  save('CURRENT.md', 'Auto-commit note');
+  assert.equal(status(box, manifest).behind.commits, 0);
+
+  save('plan.md', 'Real work');
+  const result = status(box, manifest);
+  assert.equal(result.behind.commits, 1);
+  assert.equal(result.items.find((item) => item.kind === 'commit').title, 'Real work');
+  assert.equal(result.items.find((item) => item.kind === 'commit').files, undefined);
+});
+
 test('status carries the resolved places and the line, and creates no folder', (t) => {
   const box = sandbox(t);
   const manifest = box.app();

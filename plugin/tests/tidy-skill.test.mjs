@@ -80,7 +80,7 @@ describe("tidy skill", () => {
   });
 
   it("opens the page, ends the turn and applies on Done", () => {
-    assert.ok(skill.includes("hws surface open --type page --file <packet folder>/proposal.md --terminal $HC_TERMINAL_ID"));
+    assert.ok(skill.includes("hws surface open --type page --file <packet folder>/proposal.md --title \"Current note proposal, press Done to apply\" --terminal $HC_TERMINAL_ID"));
     assert.ok(skill.includes("hws tidy apply --file <packet folder>/proposal.json"));
     assert.ok(skill.includes("I reviewed proposal.md in Agent Brief and changed nothing"));
     assert.ok(skill.includes("My edited copy of proposal.md"));

@@ -111,7 +111,7 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `current.covers` | The newest stream item each source had absorbed at that pass. Any key may be null |
 | `tidy` | The tidy pass `hws tidy start` opened. Absent when none was started |
 | `terminals[].role` | `tidy` on the terminal `hws tidy start` opened. Freshness leaves its session out |
-| `artifacts[].role` | `tidy` on a review saved from the tidy terminal. Freshness leaves it out. Absent on other artifacts |
+| `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. Freshness, the panel's Artifacts section and `hws artifact scan` leave it out. Absent on other artifacts |
 | `artifacts[].status` | `draft`, `current` or `superseded`. Done writes `current`. A record without it reads as `current` |
 | `artifacts[].supersedes` | The id of the artifact this one replaces, or null. Absent reads as null |
 | `artifacts[].type` | `board`, `note` or `page` from Done, `file` or `link` from `hws artifact add` |
@@ -331,7 +331,7 @@ Counted on read against `current.covers`.
 |---|---|
 | Sessions | A session recorded in `terminals` has a transcript modified after `sessionsThrough`. The tidy terminal's session and sessions with no transcript are left out |
 | Artifacts | `createdAt` is after `artifactsThrough`, or the file changed after it, which sets `editedAt`. A review saved from the tidy terminal is left out |
-| Commits | In `git log covers.commit..HEAD` in the workspace folder, limited to `home` when the workspace has one of its own. With no `covers.commit`, every commit since the workspace's `createdAt` |
+| Commits | In `git log covers.commit..HEAD` in the workspace folder, limited to `home` when the workspace has one of its own. With no `covers.commit`, every commit since the workspace's `createdAt`. A commit whose files all sit under the `scratch`, `current`, `decisions` or `history` place is left out |
 | Cards | A Done card on the workspace's task list that is not archived |
 
 - With no `current`, every item is behind and `tidiedAt` is null.

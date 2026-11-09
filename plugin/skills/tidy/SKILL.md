@@ -229,10 +229,10 @@ Use empty arrays when nothing changes. The summary stays in the workspace's upda
 Open the proposal and end the turn.
 
 ```bash
-hws surface open --type page --file <packet folder>/proposal.md --terminal $HC_TERMINAL_ID
+hws surface open --type page --file <packet folder>/proposal.md --title "Current note proposal, press Done to apply" --terminal $HC_TERMINAL_ID
 ```
 
-Do not poll. The person reads the page and presses Done, and their feedback arrives as your next prompt.
+Tell the person that the note stays as it is until they press Done. Do not poll. The person reads the page and presses Done, and their feedback arrives as your next prompt.
 
 | Feedback | Do |
 |---|---|

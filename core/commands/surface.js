@@ -20,7 +20,7 @@ import {
   windowStatus,
 } from '../herdr.js';
 import { TIDY_ROLE, ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
-import { HOST_SCRIPT, slug, socketPath, stateRoot, surfaceDataDir } from '../paths.js';
+import { HOST_SCRIPT, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
 import { isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { callingTerminal, requireCallingTerminal, requireFlag } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
@@ -239,6 +239,13 @@ export function promptToSend(promptPath) {
   return Buffer.byteLength(text) > MAX_SEND_BYTES ? linkFor(promptPath) : text;
 }
 
+// A review belongs to a pass when a tidy terminal opened it or it shows a file
+// from the pass's folder, which covers a pass run in the person's own session.
+function isTidyReview(manifest, { terminal, file }) {
+  if (manifest.terminals.some((item) => item.terminal === terminal && item.role === TIDY_ROLE)) return true;
+  return Boolean(file) && dirname(resolve(file)) === join(workspaceDir(manifest.id), 'tidy');
+}
+
 // Kept bundles land under the workspace's artifacts place.
 export function archiveBundle({ manifest, surface }, bundle) {
   const artifactId = newId('a');
@@ -247,7 +254,7 @@ export function archiveBundle({ manifest, surface }, bundle) {
   const place = surface.type === 'note' && isKept(manifest) ? 'notes' : 'artifacts';
   const artifactDir = join(writablePlace(manifest, place), isKept(manifest) ? `${slug(surface.title)}-${artifactId}` : artifactId);
   const prompt = moveBundle(bundle, artifactDir);
-  const fromTidy = manifest.terminals.some((item) => item.terminal === surface.terminal && item.role === TIDY_ROLE);
+  const fromTidy = isTidyReview(manifest, surface);
   const artifact = {
     id: artifactId,
     type: surface.type,

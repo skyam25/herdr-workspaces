@@ -163,7 +163,7 @@ export function leavesRow(dir: -1 | 1, tops: { caret: number; first: number; las
 export function sourceLine(path: string, outline?: string, action = 'Send'): string {
   return outline
     ? `From ${path}. ${action} folds your comments into ${outline} first, and Claude proposes a direction there.`
-    : `From ${path}. ${action} asks Claude to apply your changes to the file.`;
+    : `From ${path}. ${action} sends this back to Claude, with any changes you made.`;
 }
 
 /** The direction banner's change lines shown before Show more. */

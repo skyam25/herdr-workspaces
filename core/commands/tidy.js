@@ -110,12 +110,26 @@ function git(folder, args) {
 
 function parseLog(text) {
   return text
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [sha, at, ...subject] = line.split('\x1f');
-      return { sha, subject: subject.join('\x1f'), at: Number(at) * 1000 };
+    .split('\x1e')
+    .filter((record) => record.trim())
+    .map((record) => {
+      const [header, ...files] = record.split('\n').filter(Boolean);
+      const [sha, at, ...subject] = header.split('\x1f');
+      return { sha, subject: subject.join('\x1f'), at: Number(at) * 1000, files };
     });
+}
+
+// Autosaved drafts and the note's own records are not work the note should catch up on.
+function isBookkeeping(manifest, top, files) {
+  const places = ['scratch', 'current', 'decisions', 'history'].map((role) => placeOf(manifest, role).path).filter(Boolean).map(realOf);
+  return files.length > 0 && files.every((file) => places.some((place) => isInside(place, join(top, file))));
+}
+
+function workCommits(manifest, folder, text) {
+  const top = git(folder, ['rev-parse', '--show-toplevel'])?.trim();
+  return parseLog(text)
+    .filter(({ files }) => !top || !isBookkeeping(manifest, top, files))
+    .map(({ files: _files, ...commit }) => commit);
 }
 
 // With no recorded commit, everything committed since the workspace began counts.
@@ -124,17 +138,17 @@ function commitsSince(manifest, base) {
   const head = git(manifest.folder, ['rev-parse', 'HEAD'])?.trim() || null;
   const info = { repo: Boolean(head), head, base: base ?? null, baseFound: false };
   if (!head) return { commits: [], git: info };
-  const format = '--format=%H%x1f%ct%x1f%s';
+  const format = ['--format=%x1e%H%x1f%ct%x1f%s', '--name-only'];
 
   // A workspace inside a larger repo counts only the commits that touch its folder.
   const scope = hasOwnHome(manifest) ? ['--', manifest.home] : [];
   if (!base) {
     const since = `--since=${Math.floor(manifest.createdAt / 1000)}`;
-    return { commits: parseLog(git(manifest.folder, ['log', format, since, 'HEAD', ...scope]) ?? ''), git: info };
+    return { commits: workCommits(manifest, manifest.folder, git(manifest.folder, ['log', ...format, since, 'HEAD', ...scope]) ?? ''), git: info };
   }
   info.baseFound = git(manifest.folder, ['cat-file', '-e', `${base}^{commit}`]) !== null;
   if (!info.baseFound) return { commits: [], git: info };
-  return { commits: parseLog(git(manifest.folder, ['log', format, `${base}..HEAD`, ...scope]) ?? ''), git: info };
+  return { commits: workCommits(manifest, manifest.folder, git(manifest.folder, ['log', ...format, `${base}..HEAD`, ...scope]) ?? ''), git: info };
 }
 
 // Every Done card waits for a pass until it is archived. A workspace with no
