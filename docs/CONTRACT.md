@@ -142,7 +142,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 
 | Command | Result |
 |---|---|
-| `hws doctor` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, Pixel, the surface build and the Claude plugin. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
+| `hws doctor` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. Being behind prints a `note` and never fails. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
+| `hws update` | Pulls `main` with `--ff-only`, then runs `install.sh --force` with its output on stderr, and prints `{updated,from,commit}`. Prints `{updated:false,commit}` and installs nothing when there is nothing new. Fails with no change on another branch or with uncommitted changes to tracked files |
 | `hws new terminal [--folder F]` | Opens a normal tab. No manifest |
 | `hws new workspace --name N --folder F [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
 | `hws board add [--workspace W]` | Adds W's one Board space, or finds it, and prints `{workspace,space,tab}`. W defaults to the current workspace |

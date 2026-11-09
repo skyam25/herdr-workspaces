@@ -2,15 +2,14 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { checkout, commitsBehind } from '../checkout.js';
 import { home } from '../paths.js';
 
 const PLUGIN_ID = 'herdr-workspaces@herdr-workspaces';
 const SHIPPED = /\.(js|json|svg|py)$/;
 const PROBE_MS = 30_000;
 
-const checkout = () => process.env.HWS_CHECKOUT || fileURLToPath(new URL('../../', import.meta.url));
 const appHome = () => process.env.HERDR_APP_HOME || join(home(), '.config/herdr-app');
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const install = (args = '') => `Run sh ${join(checkout(), 'install.sh')}${args}`;
@@ -99,12 +98,22 @@ function checkPlugin() {
   return { name, ok: plugin.version === version, detail: `installed ${plugin.version}, checkout ${version}`, fix: install(' --force') };
 }
 
+// Being behind is news, not a broken install, so it never fails the report.
+function checkUpdates() {
+  const name = 'Updates';
+  const behind = commitsBehind();
+  if (behind === null) return { name, ok: true, detail: 'not checked, because GitHub did not answer' };
+  if (behind === 0) return { name, ok: true, detail: 'up to date with GitHub' };
+  return { name, ok: true, note: true, detail: `${behind} ${behind === 1 ? 'commit' : 'commits'} behind GitHub`, fix: 'Run hws update' };
+}
+
 function report(checks) {
   const width = Math.max(...checks.map(({ name }) => name.length));
   return checks
     .flatMap((check) => {
-      const line = `${check.ok ? 'ok  ' : 'FAIL'}  ${check.name.padEnd(width)}  ${check.detail}`;
-      return check.ok ? [line] : [line, `      ${check.fix}`];
+      const status = check.note ? 'note' : check.ok ? 'ok  ' : 'FAIL';
+      const line = `${status}  ${check.name.padEnd(width)}  ${check.detail}`;
+      return check.fix && (check.note || !check.ok) ? [line, `      ${check.fix}`] : [line];
     })
     .join('\n');
 }
@@ -120,6 +129,7 @@ export function doctor() {
     checkPixel(),
     checkApp(),
     checkPlugin(),
+    checkUpdates(),
   ];
   const ok = checks.every((check) => check.ok);
   if (!ok) process.exitCode = 1;

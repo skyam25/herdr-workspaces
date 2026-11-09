@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -131,4 +132,60 @@ test('install.sh and doctor agree on which files a mod ships', (t) => {
   assert.deepEqual(failed(run(box, env)), ['Mods']);
   write(join(appHome, 'mods/hws-one/icon.svg'), 'shipped');
   assert.deepEqual(failed(run(box, env)), []);
+});
+
+function git(cwd, ...args) {
+  const result = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-C', cwd, ...args], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+}
+
+// Publishes the checkout to a bare repo, and returns a function that adds a commit there.
+function published(box, checkout) {
+  const origin = join(box.dir, 'origin.git');
+  git(box.dir, 'init', '-q', '--bare', '-b', 'main', origin);
+  git(checkout, 'init', '-q', '-b', 'main');
+  git(checkout, 'add', '.');
+  git(checkout, 'commit', '-q', '-m', 'first');
+  git(checkout, 'remote', 'add', 'origin', origin);
+  git(checkout, 'push', '-q', 'origin', 'main');
+  const other = join(box.dir, 'other');
+  git(box.dir, 'clone', '-q', origin, other);
+  let commits = 0;
+  return () => {
+    commits += 1;
+    git(other, 'commit', '-q', '--allow-empty', '-m', `new ${commits}`);
+    git(other, 'push', '-q', 'origin', 'main');
+  };
+}
+
+const updates = (report) => report.checks.find((check) => check.name === 'Updates');
+
+test('a checkout level with GitHub says so', (t) => {
+  const box = sandbox(t);
+  const { checkout, env } = installed(box);
+  published(box, checkout);
+  assert.match(updates(run(box, env)).detail, /up to date/);
+});
+
+test('a checkout behind GitHub gets a note, not a failure', (t) => {
+  const box = sandbox(t);
+  const { checkout, env } = installed(box);
+  const commit = published(box, checkout);
+  commit();
+  commit();
+
+  const report = run(box, env);
+
+  assert.equal(report.code, 0);
+  assert.equal(report.ok, true);
+  assert.equal(updates(report).note, true);
+  assert.match(updates(report).detail, /2 commits behind/);
+  assert.match(box.hws(['doctor'], env).stdout, /note\s+Updates\s+2 commits behind GitHub\n\s+Run hws update/);
+});
+
+test('no answer from GitHub skips the update check and passes', (t) => {
+  const box = sandbox(t);
+  const report = run(box, installed(box).env);
+  assert.equal(report.code, 0);
+  assert.match(updates(report).detail, /not checked/);
 });

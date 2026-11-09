@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -46,7 +46,7 @@ case "$*" in
 esac`);
   }
 
-  const env = { PATH: `${bin}:${SYSTEM_PATH}`, HOME: home, HWS_RELEASE_URL: 'http://127.0.0.1:9/none' };
+  const env = { PATH: `${bin}:${SYSTEM_PATH}`, HOME: home, HWS_RELEASE_URL: 'http://127.0.0.1:9/none', HWS_RETRY_SECONDS: '0' };
   const install = (...args) => {
     const result = spawnSync('sh', [join(root, 'install.sh'), ...args], { env, encoding: 'utf8' });
     return { code: result.status, output: `${result.stdout}${result.stderr}` };
@@ -97,6 +97,20 @@ test('a failed Pixel download still installs the rest and reports it', (t) => {
   assert.match(output, /FAIL {2}Pixel/);
   assert.match(output, /ok {4,}Mods/);
   assert.match(output, /ok {4,}Claude plugin/);
+});
+
+test('a Pixel download that fails twice is retried and succeeds', (t) => {
+  const box = setup(t);
+  renameSync(join(box.bin, 'npm'), join(box.bin, 'npm-real'));
+  const count = join(box.dir, 'count');
+  writeFileSync(count, '0');
+  tool(box.bin, 'npm', `n=$(($(cat "${count}") + 1)); echo $n > "${count}"; [ $n -ge 3 ] || exit 1; exec npm-real "$@"`);
+
+  const { code, output } = box.install();
+
+  assert.equal(code, 0, output);
+  assert.equal(readFileSync(count, 'utf8').trim(), '3');
+  assert.match(output, /attempt 2 of 4/);
 });
 
 test('no pnpm on an untagged checkout warns and finishes', (t) => {

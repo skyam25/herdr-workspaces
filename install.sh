@@ -59,13 +59,24 @@ install_mods() {
   fi
 }
 
+# Pixel downloads its Electron build from GitHub, which can answer 504 for a minute at a time.
+install_pixel_packages() {
+  for attempt in 1 2 3 4; do
+    (cd "$ROOT/surface" && npm ci) && return 0
+    [ "$attempt" -eq 4 ] && break
+    warn "Pixel did not download on attempt $attempt of 4, so trying again"
+    sleep $((attempt * ${HWS_RETRY_SECONDS:-15}))
+  done
+  return 1
+}
+
 install_pixel() {
   say "Pixel"
   pixel="$(sh "$ROOT/surface/pixel-path.sh")"
   if [ -x "$pixel" ] && [ "$FORCE" -eq 0 ]; then
     echo "already installed"
   else
-    (cd "$ROOT/surface" && npm ci) || warn "Pixel did not install, so boards, notes and page review won't open. Run this script again to retry"
+    install_pixel_packages || warn "Pixel did not install, so boards, notes and page review won't open. Run this script again to retry"
   fi
 }
 

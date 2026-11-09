@@ -27,7 +27,7 @@ The installer links `hws`, copies the mods, installs Pixel, prepares the surface
 
 A checkout of a release tag downloads a prebuilt surface. Any other checkout builds the surface, and that needs [pnpm](https://pnpm.io).
 
-Update with `git pull && sh install.sh --force`. `hws doctor` shows what is out of date at any time.
+Update with `hws update`, which pulls `main`, reinstalls every part and runs the checks. `hws doctor` checks the install and says when GitHub has newer commits.
 
 `mods/keys.example.json` lists suggested key bindings for `~/.config/herdr-app/keys.json`.
 
