@@ -10,6 +10,7 @@ const Module = require('node:module');
 const path = require('node:path');
 
 const realElectron = require('electron');
+const { guardCellZoom, startAtActualSize } = require('./zoom-guard.cjs');
 const { app } = realElectron;
 
 // An uncaught error must not raise Electron's dialog in a headless pane.
@@ -33,6 +34,8 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-features', 'FedCm');
+
+guardCellZoom(require(path.join(__dirname, 'node_modules/@zenbu-labs/pixel/dist/scale.js')).CellZoomFollower);
 
 const audioOnly = (kinds) => kinds.every((kind) => kind === 'audio');
 
@@ -70,6 +73,7 @@ function adoptPanelWindow(options) {
     onPermissionCheck: (check) => check.permission === 'media' && check.origin === check.embedder && audioOnly(check.mediaTypes),
     onPermissionRequest: async (request) => request.permission === 'media' && request.origin === request.embedder && request.mediaTypes.length > 0 && audioOnly(request.mediaTypes),
   });
+  startAtActualSize(handle.webContents);
   const win = realElectron.BrowserWindow.fromWebContents(handle.webContents);
 
   // The pane is the window, so show, hide and placement have nothing to do.

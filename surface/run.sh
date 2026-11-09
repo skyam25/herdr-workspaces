@@ -27,4 +27,7 @@ export XDG_STATE_HOME="$COMPANION_DATA_DIR/state"
 export PIXEL_TTY="$(tty)"
 unset ELECTRON_RUN_AS_NODE COMPANION_TEST
 
+# The pane header shows the terminal's title, which is its address until something sets it.
+printf '\033]2;%s\007' "${HWS_SURFACE_TITLE:-$HWS_SURFACE_TYPE}"
+
 exec "$(sh "$here/pixel-path.sh")" "$here/host.cjs" 2>>"$COMPANION_DATA_DIR/host.stderr.log"
