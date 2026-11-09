@@ -6,10 +6,11 @@ import { moveDir, relocateArtifact } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isIdleShell, killTerminal, listLive, requireLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
-import { STANDALONE, captureDir, terminalSessionDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
+import { STANDALONE, captureDir, expandFolder, terminalSessionDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
 import { applyPlaces, assertRole, assertStage, ensurePlace, isKept, parseAssignment, placeOf, writablePlace } from '../places.js';
 import { resolveWorkspace } from '../resolve.js';
 import { containsFile, isStored, lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
+import { requireFolder } from '../settings.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
 import { archive, archiveClosed } from './archive.js';
@@ -203,8 +204,8 @@ export function setWorkspace(flags) {
   const paths = (flags.place ?? []).map((text) => parseAssignment(text, 'place'));
   const writers = (flags.writer ?? []).map((text) => parseAssignment(text, 'writer'));
   const changesPlaces = paths.length > 0 || writers.length > 0;
-  if (flags.name === undefined && flags.kind === undefined && flags.instructions === undefined && flags.stage === undefined && !changesPlaces) {
-    throw new UsageError('pass --name, --kind, --instructions, --stage, --place or --writer');
+  if (flags.name === undefined && flags.kind === undefined && flags.instructions === undefined && flags.stage === undefined && flags.home === undefined && !changesPlaces) {
+    throw new UsageError('pass --name, --kind, --instructions, --stage, --home, --place or --writer');
   }
   const name = flags.name?.trim();
   if (flags.name !== undefined && !name) throw new UsageError('--name cannot be empty');
@@ -213,7 +214,8 @@ export function setWorkspace(flags) {
   const manifest = resolveWorkspace(flags);
   if (name && manifest.id === STANDALONE) throw new HwsError('the standalone store has a fixed name');
   if (kind && !KEPT_KINDS.includes(manifest.kind)) throw new HwsError(`${manifest.name} is a ${manifest.kind}, which has a fixed kind`);
-  if (changesPlaces && !KEPT_KINDS.includes(manifest.kind)) throw new HwsError(`${manifest.name} is a ${manifest.kind}, which has fixed places`);
+  if ((changesPlaces || flags.home !== undefined) && !KEPT_KINDS.includes(manifest.kind)) throw new HwsError(`${manifest.name} is a ${manifest.kind}, which has fixed places`);
+  const home = flags.home ? requireFolder(expandFolder(flags.home)) : null;
   const isRename = Boolean(name) && name !== manifest.name;
   const updated = updateManifest(manifest.id, (draft) => {
     if (isRename) {
@@ -224,6 +226,10 @@ export function setWorkspace(flags) {
     if (flags.instructions !== undefined) draft.instructions = flags.instructions;
     if (flags.stage !== undefined) draft.stage = flags.stage;
     if (changesPlaces) applyPlaces(draft, paths, writers);
+    if (flags.home !== undefined) {
+      if (home && home !== draft.folder) draft.home = home;
+      else delete draft.home;
+    }
   });
   if (isRename) renameMatchingSpaces(manifest, name);
   return { data: updated, text: `updated ${updated.name}` };

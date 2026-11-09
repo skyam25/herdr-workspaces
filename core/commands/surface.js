@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { linkFor, moveBundle } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
@@ -20,8 +20,8 @@ import {
   windowStatus,
 } from '../herdr.js';
 import { TIDY_ROLE, ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
-import { HOST_SCRIPT, socketPath, stateRoot, surfaceDataDir } from '../paths.js';
-import { writablePlace } from '../places.js';
+import { HOST_SCRIPT, slug, socketPath, stateRoot, surfaceDataDir } from '../paths.js';
+import { isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { callingTerminal, requireCallingTerminal, requireFlag } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
@@ -100,6 +100,60 @@ function ownerTerminal(flags) {
   return terminal;
 }
 
+// One file opens as one surface per workspace, so its draft is there when it reopens.
+function surfaceIdFor(workspace, file) {
+  if (!file || /^[a-z][a-z0-9+.-]*:\/\//i.test(file)) return newId('s');
+  return `s${createHash('sha256').update(`${workspace.id}\n${file}`).digest('hex').slice(0, 8)}`;
+}
+
+const DRAFT_ENTRIES = ['drafts', 'boards'];
+
+function draftsPlace(workspace) {
+  if (!isKept(workspace)) return null;
+  const { path, writer } = placeOf(workspace, 'scratch');
+  return path && !isForeign(writer) ? join(path, 'drafts') : null;
+}
+
+// Clears folders left empty by delivered drafts. A surface still recorded keeps its own.
+function sweepEmptyDrafts(place, workspace) {
+  if (!existsSync(place)) return;
+  for (const name of readdirSync(place)) {
+    if (workspace.surfaces.some((surface) => name.endsWith(`-${surface.id}`))) continue;
+    const folder = join(place, name);
+    try {
+      for (const entry of DRAFT_ENTRIES) if (existsSync(join(folder, entry))) rmdirSync(join(folder, entry));
+      rmdirSync(folder);
+    } catch {
+      // Something is still in there, so it stays.
+    }
+  }
+}
+
+// The renderer writes unsent work to its data folder, beside its browser cache.
+// Those two folders are links into the workspace, so the work is kept with it.
+function linkDrafts(workspace, surfaceId, dataDir, name) {
+  const place = draftsPlace(workspace);
+  if (!place) return;
+  sweepEmptyDrafts(place, workspace);
+  const home = join(place, `${slug(name)}-${surfaceId}`);
+  for (const entry of DRAFT_ENTRIES) {
+    const link = join(dataDir, entry);
+    const found = lstatSync(link, { throwIfNoEntry: false });
+    if (found && !found.isSymbolicLink()) continue;
+    if (found) unlinkSync(link);
+    mkdirSync(join(home, entry), { recursive: true });
+    symlinkSync(join(home, entry), link);
+  }
+}
+
+// The workspace folder that holds a surface's linked drafts, or null.
+function linkedDraftHome(dataDir) {
+  const link = join(dataDir, DRAFT_ENTRIES[0]);
+  return lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink() && existsSync(link) ? dirname(realpathSync(link)) : null;
+}
+
+const paneIsOpen = (live, pane) => live.spaces.some((space) => (space.tabs ?? []).some((tab) => (tab.terminals ?? []).some((record) => record.pane === pane)));
+
 // `owner` is set only for a surface in its own window.
 function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
   const environment = {
@@ -128,12 +182,18 @@ export function surfaceOpen(flags) {
   const placement = placementFor(live, terminal, flags);
   const workspace = placement.workspace ?? ensureStandaloneManifest();
   const windowed = flags.type === 'board' && !flags['in-pane'];
-  const surfaceId = newId('s');
   const file = flags.type === 'board' ? '' : resolveFile(flags.file);
+  const surfaceId = surfaceIdFor(workspace, file);
+  const already = workspace.surfaces.find((surface) => surface.id === surfaceId);
+  if (already?.pane && paneIsOpen(live, already.pane)) {
+    act('pane.focus', { pane: already.pane });
+    return { data: { ...already, workspace: workspace.id, focused: true }, text: `showed ${surfaceId}` };
+  }
   const title = flags.title ?? (file ? basename(file) : flags.type);
   const socket = socketPath(surfaceId);
   const dataDir = surfaceDataDir(workspace.id, surfaceId);
   mkdirSync(dataDir, { recursive: true });
+  linkDrafts(workspace, surfaceId, dataDir, file ? basename(file) : title);
 
   const owner = windowed ? (terminal ? windowOwnerLabel(live, terminal, placement) : '') : undefined;
   const argv = hostArgv({ workspace, id: surfaceId, type: flags.type, title, terminal, file, owner });
@@ -152,7 +212,10 @@ export function surfaceOpen(flags) {
   const pid = terminalInfo(opened.terminal)?.pid ?? null;
 
   const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...(file ? { file } : {}) };
-  updateManifest(workspace.id, (draft) => draft.surfaces.push(surface));
+  updateManifest(workspace.id, (draft) => {
+    draft.surfaces = draft.surfaces.filter((item) => item.id !== surfaceId);
+    draft.surfaces.push(surface);
+  });
   const data = { ...surface, workspace: workspace.id, hostTerminal: opened.terminal };
   return { data, text: `opened ${flags.type} ${surfaceId}` };
 }
@@ -179,7 +242,10 @@ export function promptToSend(promptPath) {
 // Kept bundles land under the workspace's artifacts place.
 export function archiveBundle({ manifest, surface }, bundle) {
   const artifactId = newId('a');
-  const artifactDir = join(writablePlace(manifest, 'artifacts'), artifactId);
+
+  // A kept workspace's folders are for people to read, so its bundles carry their titles.
+  const place = surface.type === 'note' && isKept(manifest) ? 'notes' : 'artifacts';
+  const artifactDir = join(writablePlace(manifest, place), isKept(manifest) ? `${slug(surface.title)}-${artifactId}` : artifactId);
   const prompt = moveBundle(bundle, artifactDir);
   const fromTidy = manifest.terminals.some((item) => item.terminal === surface.terminal && item.role === TIDY_ROLE);
   const artifact = {
@@ -281,7 +347,8 @@ export function surfaceDiscard(flags) {
   const { manifest, surface } = findWindow(requireFlag(flags, 'id'));
   if (isWindowOpen(surface)) throw new HwsError('close that window before discarding it');
   const data = surfaceDataDir(manifest.id, surface.id);
-  if (existsSync(data)) moveToTrash([data]);
+  const drafts = linkedDraftHome(data);
+  if (existsSync(data)) moveToTrash([data, ...(drafts ? [drafts] : [])]);
   updateManifest(manifest.id, (draft) => {
     draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
   });

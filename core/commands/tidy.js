@@ -9,7 +9,7 @@ import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, lis
 import { withLock } from '../lock.js';
 import { TIDY_ROLE, updateManifest, writeJsonAtomic, writeTextAtomic } from '../manifest.js';
 import { STANDALONE, transcriptPath, workspaceDir } from '../paths.js';
-import { ROLES, allPlaces, isForeign, isKept, placeOf, writablePlace } from '../places.js';
+import { ROLES, allPlaces, hasOwnHome, homeOf, isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { locateTerminal, requireFlag, resolveWorkspace, splitList, workspaceByRef } from '../resolve.js';
 import { agentArgv } from '../agent-tools.js';
 import { agentModels } from '../settings.js';
@@ -84,13 +84,13 @@ function sessionsSince(manifest, through) {
 // An artifact counts once when it is created and again each time its file changes.
 function artifactsSince(manifest, through) {
   const found = [];
-  for (const { id, title, path, status, createdAt, role } of manifest.artifacts) {
+  for (const { id, type, title, path, status, createdAt, role } of manifest.artifacts) {
     if (role === TIDY_ROLE) continue;
     const isNew = through == null || (createdAt ?? 0) > through;
     const changed = isNew ? null : modifiedAt(path);
     const isEdited = changed !== null && changed > through;
     if (!isNew && !isEdited) continue;
-    found.push({ id, title: title ?? null, path, status, createdAt: createdAt ?? null, ...(isEdited ? { editedAt: changed } : {}) });
+    found.push({ id, title: title ?? null, path, status, createdAt: createdAt ?? null, ...(type === 'note' ? { type } : {}), ...(isEdited ? { editedAt: changed } : {}) });
   }
   return found;
 }
@@ -99,7 +99,7 @@ function artifactsSince(manifest, through) {
 function liveArtifacts(manifest) {
   return manifest.artifacts
     .filter((item) => item.role !== TIDY_ROLE && item.status !== 'superseded')
-    .map(({ id, title, path, status, createdAt }) => ({ id, title: title ?? null, path, status: status ?? 'current', createdAt: createdAt ?? null, modifiedAt: modifiedAt(path) }));
+    .map(({ id, type, title, path, status, createdAt }) => ({ id, type: type ?? null, title: title ?? null, path, status: status ?? 'current', createdAt: createdAt ?? null, modifiedAt: modifiedAt(path) }));
 }
 
 function git(folder, args) {
@@ -124,13 +124,16 @@ function commitsSince(manifest, base) {
   const info = { repo: Boolean(head), head, base: base ?? null, baseFound: false };
   if (!head) return { commits: [], git: info };
   const format = '--format=%H%x1f%ct%x1f%s';
+
+  // A workspace inside a larger repo counts only the commits that touch its folder.
+  const scope = hasOwnHome(manifest) ? ['--', manifest.home] : [];
   if (!base) {
     const since = `--since=${Math.floor(manifest.createdAt / 1000)}`;
-    return { commits: parseLog(git(manifest.folder, ['log', format, since, 'HEAD']) ?? ''), git: info };
+    return { commits: parseLog(git(manifest.folder, ['log', format, since, 'HEAD', ...scope]) ?? ''), git: info };
   }
   info.baseFound = git(manifest.folder, ['cat-file', '-e', `${base}^{commit}`]) !== null;
   if (!info.baseFound) return { commits: [], git: info };
-  return { commits: parseLog(git(manifest.folder, ['log', format, `${base}..HEAD`]) ?? ''), git: info };
+  return { commits: parseLog(git(manifest.folder, ['log', format, `${base}..HEAD`, ...scope]) ?? ''), git: info };
 }
 
 // Every Done card waits for a pass until it is archived. A workspace with no
@@ -173,7 +176,7 @@ const newestFirst = (a, b) => (b.at ?? 0) - (a.at ?? 0);
 function itemsOf(since) {
   return [
     since.sessions.map((item) => ({ kind: 'session', id: item.id, title: item.title, at: item.modifiedAt, path: item.transcript })).sort(newestFirst),
-    since.artifacts.map((item) => ({ kind: 'artifact', id: item.id, title: item.title, at: item.editedAt ?? item.createdAt, path: item.path, ...(item.editedAt ? { edited: true } : {}) })).sort(newestFirst),
+    since.artifacts.map((item) => ({ kind: 'artifact', id: item.id, title: item.title, at: item.editedAt ?? item.createdAt, path: item.path, ...(item.type ? { type: item.type } : {}), ...(item.editedAt ? { edited: true } : {}) })).sort(newestFirst),
     since.commits.map((item) => ({ kind: 'commit', id: item.sha, title: item.subject, at: item.at, path: null })),
     since.cards.map((item) => ({ kind: 'card', id: item.id, title: item.title, at: item.updatedAt, path: null })).sort(newestFirst),
   ].flat();
@@ -220,6 +223,7 @@ function statusOf(manifest) {
   return {
     tidiedAt: manifest.current?.tidiedAt ?? null,
     stage: manifest.stage ?? null,
+    home: homeOf(manifest),
     behind: Object.fromEntries(SOURCES.map(({ key }) => [key, since[key].length])),
     landed: landedOf(since),
     record: isKept(manifest) ? recordOf(manifest) : null,
@@ -295,6 +299,7 @@ function writePacket(manifest) {
     version: 1,
     workspace: manifest.id,
     folder: manifest.folder,
+    home: homeOf(manifest),
     stage: manifest.stage ?? null,
     places,
     writers: placesOf(manifest).writers,
@@ -481,7 +486,8 @@ function planDemotions(manifest, demotions, notePath) {
     const path = resolve(manifest.folder, item.path);
     if (!existsSync(path)) throw new HwsError(`cannot demote ${path}, which does not exist`);
     if (isInside(path, notePath)) throw new HwsError(`cannot demote ${path}, which is or holds the current note`);
-    if (!isInside(manifest.folder, path) || realOf(path) === realOf(manifest.folder)) throw new HwsError(`cannot demote ${path}, which is outside the workspace folder`);
+    const roots = [manifest.folder, homeOf(manifest)];
+    if (!roots.some((root) => isInside(root, path)) || roots.some((root) => realOf(path) === realOf(root))) throw new HwsError(`cannot demote ${path}, which is outside the workspace folder`);
     const owner = foreign.find((place) => isInside(place.path, path));
     if (owner) throw new HwsError(`cannot demote ${path}, which is under the ${owner.role} place that ${owner.writer} writes`);
     const holds = places.find((place) => isInside(path, place.path));

@@ -46,7 +46,7 @@ export function phoneSocket(root = stateRoot()) {
   return `/tmp/hws-phone-${createHash('sha256').update(root).digest('hex').slice(0, 8)}.sock`;
 }
 
-const slug = (name) => name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+export const slug = (name) => name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
 
 // One folder per workspace, because workspaces can share a parent folder.
 // `storeName` keeps the folder in place after a rename.

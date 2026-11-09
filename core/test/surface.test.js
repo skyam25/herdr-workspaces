@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -261,7 +261,7 @@ test('done on a glued surface moves the bundle, sends, closes and focuses', (t) 
 
   const after = box.manifest(manifest.id);
   const [artifact] = after.artifacts;
-  const expectedDir = join(manifest.folder, '.herdr-workspace', `${manifest.name}-${manifest.id.slice(-6)}`, 'artifacts', artifact.id);
+  const expectedDir = join(manifest.folder, '.herdr-workspace', `${manifest.name}-${manifest.id.slice(-6)}`, 'artifacts', `flow-${artifact.id}`);
   const expectedText = `Look at @${expectedDir}/images/shot.png now.\n`;
   assert.deepEqual(box.actions(), [
     ['hc', 'send', owner, expectedText],
@@ -569,7 +569,9 @@ test('discard moves a draft to the Trash and drops its record', (t) => {
   assert.deepEqual(box.json(['surface', 'discard', '--id', surface.id]), { id: surface.id, discarded: true });
   assert.deepEqual(box.manifest(manifest.id).surfaces, []);
   assert.equal(existsSync(surfaceData(box, manifest, surface)), false);
-  assert.ok(existsSync(join(box.trashDir, `0-${surface.id}`, 'boards', 'Sketch.excalidraw')));
+  assert.ok(existsSync(join(box.trashDir, `0-${surface.id}`)));
+  const kept = readdirSync(box.trashDir).find((name) => name.startsWith('1-') && name.endsWith(surface.id));
+  assert.ok(existsSync(join(box.trashDir, kept, 'boards', 'Sketch.excalidraw')));
 });
 
 test('discard refuses an open window', (t) => {

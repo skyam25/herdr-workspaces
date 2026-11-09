@@ -129,9 +129,9 @@ test('set records the stage and rejects unknown roles, stages and fixed kinds', 
 
   assert.equal(box.json(['set', '--workspace', manifest.id, '--stage', 'building']).stage, 'building');
   assert.equal(box.hws(['set', '--workspace', manifest.id, '--stage', 'shipping']).code, 2);
-  assert.equal(box.hws(['set', '--workspace', manifest.id, '--place', 'notes=docs']).code, 2);
+  assert.equal(box.hws(['set', '--workspace', manifest.id, '--place', 'memos=docs']).code, 2);
   assert.equal(box.hws(['set', '--workspace', manifest.id, '--place', 'artifacts']).code, 2);
-  assert.equal(box.hws(['place', 'notes', '--workspace', manifest.id]).code, 2);
+  assert.equal(box.hws(['place', 'memos', '--workspace', manifest.id]).code, 2);
   assert.equal(box.hws(['place', '--workspace', manifest.id]).code, 2);
   assert.equal(box.manifest(manifest.id).stage, 'building');
 
@@ -146,7 +146,7 @@ test('done lands a kept bundle in a custom artifacts place with status current',
 
   const { artifact, done } = box.finishGlued(manifest);
 
-  const expected = join(manifest.folder, 'docs', 'outputs', artifact.id);
+  const expected = join(manifest.folder, 'docs', 'outputs', `flow-${artifact.id}`);
   assert.equal(done.artifact, artifact.id);
   assert.equal(artifact.path, expected);
   assert.equal(artifact.prompt, join(expected, 'prompt.md'));
@@ -170,6 +170,6 @@ test('done still lands a default kept bundle under the workspace folder', (t) =>
   const manifest = box.app();
   mkdirSync(join(manifest.folder, 'docs'));
   const { artifact } = box.finishGlued(manifest);
-  assert.equal(artifact.path, join(ownDir(manifest), 'artifacts', artifact.id));
+  assert.equal(artifact.path, join(ownDir(manifest), 'artifacts', `flow-${artifact.id}`));
   assert.equal(artifact.status, 'current');
 });

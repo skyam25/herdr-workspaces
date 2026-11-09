@@ -13,7 +13,7 @@ import { initRename, renderConfirm, renderRename, renderRowMenu } from "./rowmen
 import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, noteLines, placeRows, resolvePath, validStatus } from "./context.js";
 import { openCite, openExternally, revealPath } from "./cites.js";
 import { renderArtifactMenu } from "./artifactmenu.js";
-import { artifactsSection, currentSection, headerSection, historySection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
+import { artifactsSection, currentSection, headerSection, historySection, notesSection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
 
 const MOD = "hws-panel";
 const REFRESH_MS = 20000;
@@ -498,7 +498,7 @@ export default class Panel extends View {
     if (this.reading) return readerView(view);
     const isThrowaway = workspace.kind === "throwaway";
     const sections = [
-      ...(isThrowaway ? [recordSection(view)] : [currentSection(view), sinceSection(view), historySection(view), artifactsSection(view)]),
+      ...(isThrowaway ? [recordSection(view)] : [currentSection(view), sinceSection(view), historySection(view), notesSection(view), artifactsSection(view)]),
       this.agentsSection(t, workspace, space),
       this.surfacesSection(t, workspace),
       ...(isThrowaway ? [] : [placesSection(view)]),

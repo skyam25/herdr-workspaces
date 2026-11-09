@@ -57,7 +57,10 @@ export async function revealPath(path) {
 
 // A Done bundle keeps its words in comments.md or prompt.md, so one of those opens.
 async function bundleFile(artifact) {
-  for (const path of [`${artifact.path}/comments.md`, artifact.prompt]) {
+
+  // A board's prompt is only file references, so a board with no comments shows its sketch.
+  const candidates = [`${artifact.path}/comments.md`, ...(artifact.type === "board" ? [] : [artifact.prompt])];
+  for (const path of candidates) {
     if (path && typeof (await readTextFile(path).catch(() => null)) === "string") return path;
   }
   return null;
@@ -65,7 +68,7 @@ async function bundleFile(artifact) {
 
 async function openArtifact(artifact, { target, workspace }) {
   const file = artifact.type === "file" ? artifact.path : await bundleFile(artifact);
-  if (!file) return openExternally(artifact.path);
+  if (!file) return openExternally(artifact.type === "board" ? `${artifact.path}/sketch.png` : artifact.path);
   return openPath(file, { target, workspace, title: artifact.title || artifact.id });
 }
 

@@ -441,7 +441,8 @@ test("panel shows the workspace, live status, surfaces and artifacts newest firs
   assert.match(text, /Agents.*Claude Code · planner.*Working/);
   assert.match(text, /Open now.*flow.*board · Claude Code/);
   assert.doesNotMatch(text, /t13/);
-  assert.ok(text.indexOf("newer") < text.indexOf("older"));
+  assert.ok(text.indexOf("Notes") < text.indexOf("older"));
+  assert.ok(text.indexOf("older") < text.indexOf("Artifacts"));
   await m.click("agent-t13");
   assert.deepEqual(H.runs.at(-1), { name: "agent.focus", args: { terminal: "t13" } });
   await m.click("surface-s1");
@@ -1000,23 +1001,38 @@ test("the artifact row has one line, with Open and a menu", async () => {
   assert.equal(H.overlays.at(-1).kind, "popup");
 });
 
-test("a board artifact opens its comments, then its prompt, and a bare bundle opens its folder", async () => {
-  const boardCall = (H) => args(H).filter((a) => a[0] === "surface").at(-1);
+test("a board opens its comments in the companion, or else its sketch", async () => {
   const H1 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
   const withComments = await mount("hws-panel", {});
   await withComments.click("open-new");
   await withComments.settle();
-  assert.equal(boardCall(H1)[5], "/art/new/comments.md");
-  const H2 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "the prompt" } });
-  const withPrompt = await mount("hws-panel", {});
-  await withPrompt.click("open-new");
-  await withPrompt.settle();
-  assert.equal(boardCall(H2)[5], "/art/new/prompt.md");
-  const H3 = kept();
-  const bare = await mount("hws-panel", {});
-  await bare.click("open-new");
-  await bare.settle();
-  assert.deepEqual(H3.calls.at(-1), { command: "open", args: ["/art/new"] });
+  assert.equal(args(H1).filter((a) => a[0] === "surface").at(-1)[5], "/art/new/comments.md");
+  const H2 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "@/art/new/sketch.png" } });
+  const noComments = await mount("hws-panel", {});
+  await noComments.click("open-new");
+  await noComments.settle();
+  assert.equal(args(H2).some((a) => a[0] === "surface"), false);
+  assert.deepEqual(H2.calls.at(-1), { command: "open", args: ["/art/new/sketch.png"] });
+});
+
+test("a note bundle opens its prompt in the companion", async () => {
+  const H = kept({ files: { [NOTE_PATH]: NOTE, "/art/old/prompt.md": "my note" } });
+  const m = await mount("hws-panel", {});
+  await m.click("superseded-toggle-notes");
+  await m.click("open-old");
+  await m.settle();
+  assert.equal(args(H).filter((a) => a[0] === "surface").at(-1)[5], "/art/old/prompt.md");
+});
+
+test("the header says where a workspace runs and keeps its files, when they differ", async () => {
+  kept({}, { list: [{ ...KEPT, home: "/Users/me/Projects/checkout/05/p1" }] });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /Runs in ~\/Projects\/checkout · files in ~\/Projects\/checkout\/05\/p1/);
+});
+
+test("a written note shows as a note in the backlog", async () => {
+  assert.equal(ctx.backlogRow({ kind: "artifact", type: "note", id: "a1", title: "T" }).source, "note");
+  assert.deepEqual(ctx.backlogRow({ kind: "artifact", type: "note", id: "a1", title: "T" }).cite, { kind: "artifact", value: "a1" });
 });
 
 test("Tidy passes the panel's pane so the terminal opens below it", async () => {
@@ -1097,9 +1113,9 @@ test("artifact rows chip only a status worth noticing and fold superseded ones",
   kept();
   const m = await mount("hws-panel", {});
   const text = m.text();
-  assert.match(text, /newer \| draft.*spec \| file.*Show 1 superseded/);
+  assert.match(text, /Notes.*Show 1 superseded.*Artifacts.*newer \| draft.*spec \| file/);
   assert.equal(m.has("open-old"), false);
-  await m.click("superseded-toggle");
+  await m.click("superseded-toggle-notes");
   assert.equal(m.has("open-old"), true);
   assert.match(m.text(), /older \| superseded/);
 });

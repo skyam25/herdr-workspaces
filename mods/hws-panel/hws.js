@@ -69,7 +69,7 @@ export const KINDS = [
 
 // The new-workspace form, opened by the launcher and by the panel outside a workspace.
 export function openWorkspaceForm() {
-  openOverlay({ mod: "hws-new", kind: "dialog", modal: true, width: 500, height: 470, props: { step: "workspace" } });
+  openOverlay({ mod: "hws-new", kind: "dialog", modal: true, width: 500, height: 540, props: { step: "workspace" } });
 }
 
 function expandFolder(text) {

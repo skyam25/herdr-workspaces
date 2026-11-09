@@ -47,13 +47,14 @@ function show(path, folder, trailing = "") {
 
 // Builds "Artifacts land in X, drafts in Y, the current note is Z." from the roles that are set.
 function placesSentence(places, folder) {
-  const [current, artifacts, scratch] = ["current", "artifacts", "scratch"].map((role) =>
+  const [current, artifacts, notes, scratch] = ["current", "artifacts", "notes", "scratch"].map((role) =>
     typeof places[role] === "string" && places[role] ? places[role] : null,
   );
 
   const clauses = [];
   if (artifacts) clauses.push(`artifacts land in ${show(artifacts, folder, "/")}`);
-  if (scratch) clauses.push(`${artifacts ? "drafts" : "drafts land"} in ${show(scratch, folder, "/")}`);
+  if (notes) clauses.push(`${artifacts ? "notes" : "notes land"} in ${show(notes, folder, "/")}`);
+  if (scratch) clauses.push(`${artifacts || notes ? "drafts" : "drafts land"} in ${show(scratch, folder, "/")}`);
   if (current) clauses.push(`the current note is ${show(current, folder)}`);
   if (clauses.length === 0) return "";
 

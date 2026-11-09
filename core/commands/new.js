@@ -18,7 +18,8 @@ export function keptKind(value = 'general') {
 export function keptFields(flags) {
   const name = requireFlag(flags, 'name');
   const folder = requireFolder(expandFolder(requireFlag(flags, 'folder')));
-  return { name, folder, kind: keptKind(flags.kind) };
+  const home = flags.home ? requireFolder(expandFolder(flags.home)) : null;
+  return { name, folder, home, kind: keptKind(flags.kind) };
 }
 
 function manifestFor({ name, kind, folder, instructions }, space, opened) {
@@ -71,7 +72,7 @@ export function newTerminal(flags) {
 const FIRST_STAGE = 'discovery';
 
 export function newWorkspace(flags) {
-  const { name, folder, kind } = keptFields(flags);
+  const { name, folder, home, kind } = keptFields(flags);
   const manifest = createWorkspace({
     name,
     kind,
@@ -81,6 +82,7 @@ export function newWorkspace(flags) {
   });
   const started = updateManifest(manifest.id, (draft) => {
     draft.stage = FIRST_STAGE;
+    if (home && home !== folder) draft.home = home;
   });
   rememberParent(folder);
   return { data: started, text: `created ${kind} workspace ${name} (${manifest.id})` };

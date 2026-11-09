@@ -34,7 +34,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Manifest | `<root>/workspaces/<spaceId>/workspace.json` |
 | Surface data | `<root>/workspaces/<spaceId>/surfaces/<surfaceId>/` |
 | Surface socket | `/tmp/hws-<surfaceId>.sock`, kept short for the Unix limit |
-| Kept artifacts | `<artifacts place>/<artifactId>/` for Done bundles and `<artifacts place>/<file name>` for `hws artifact add`, default place `<folder>/.herdr-workspace/<name>-<id tail>/artifacts/` |
+| Kept artifacts | `<notes place>/<title>-<artifactId>/` for a note's Done bundle, `<artifacts place>/<title>-<artifactId>/` for other Done bundles and `<artifacts place>/<file name>` for `hws artifact add`, default place `<folder>/.herdr-workspace/<name>-<id tail>/artifacts/` |
 | Kept scratch | `<scratch place>`, default `<folder>/.herdr-workspace/<name>-<id tail>/scratch/` |
 | Throwaway scratch | `<root>/workspaces/<spaceId>/scratch/`, which is also the throwaway's `folder` |
 | Throwaway artifacts | `<root>/workspaces/<spaceId>/artifacts/<artifactId>/` |
@@ -120,11 +120,25 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 
 `hws` speaks in roles. Folder names belong to the user.
 
+A kept workspace has two folders. `folder` is where its agents run, which sets where tabs start, which transcripts belong to it and which `CLAUDE.md` applies. `home` is where its files live, and is absent when it matches `folder`. Relative place paths resolve against `home`. With a `home` of its own the defaults are plain names inside it, so a workspace at `/product/05-projects/project1` holds:
+
+| Path | Holds |
+|---|---|
+| `CURRENT.md` | The latest state, rewritten by each tidy pass |
+| `notes/` | Written notes, one folder each, named `<title>-<id>` |
+| `artifacts/` | Boards, reviews and registered files, named the same way |
+| `decisions/decisions.md` | Each decision and what replaced it |
+| `history/` | Earlier notes, `updates.md` and archived docs |
+| `scratch/` | Working files, and unsent drafts under `drafts/` |
+
+Notes and artifacts reach the note through a tidy pass. Each new or edited one appears under Not in the note yet until a pass folds it in. A throwaway and a surface with no workspace keep everything in the state root.
+
 | Role | Holds | Default for a kept workspace |
 |---|---|---|
 | `current` | The current note | `CURRENT.md` |
-| `artifacts` | Done bundles | `.herdr-workspace/<name>-<id tail>/artifacts/` |
-| `scratch` | Drafts and working files | `.herdr-workspace/<name>-<id tail>/scratch/` |
+| `notes` | Done bundles from a note surface | `.herdr-workspace/<name>-<id tail>/notes/` |
+| `artifacts` | Done bundles from boards and pages, and registered files | `.herdr-workspace/<name>-<id tail>/artifacts/` |
+| `scratch` | Working files, and unsent drafts under `drafts/` | `.herdr-workspace/<name>-<id tail>/scratch/` |
 | `decisions` | Decision log, `decisions.md` inside the folder. A path ending in `.md` names the file itself | `.herdr-workspace/<name>-<id tail>/decisions/` |
 | `history` | Earlier notes, `updates.md` and demoted docs | `.herdr-workspace/<name>-<id tail>/history/` |
 | `meetings` | Transcribed meeting notes | Unset |
@@ -147,13 +161,13 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws doctor` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. Being behind prints a `note` and never fails. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
 | `hws update` | Pulls `main` with `--ff-only`, then runs `install.sh --force` with its output on stderr, and prints `{updated,from,commit}`. Prints `{updated:false,commit}` and installs nothing when there is nothing new. Fails with no change on another branch or with uncommitted changes to tracked files |
 | `hws new terminal [--folder F]` | Opens a normal tab. No manifest |
-| `hws new workspace --name N --folder F [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
+| `hws new workspace --name N --folder F [--home H] [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
 | `hws board add [--workspace W]` | Adds W's one Board space, or finds it, and prints `{workspace,space,tab}`. W defaults to the current workspace |
 | `hws board open --space S` | Finds the Board of S's workspace and prints `{workspace,space,tab}`, with null `space` and `tab` when it has none. Prints `{"workspace":null}` for a plain space. Never creates a Board |
 | `hws space add --workspace W [--name N] [--folder F]` | Opens a new space in W. F defaults to W's folder |
 | `hws space move --space S --workspace W` | Moves an open local space into W. A plain space's cards join W's Board. A space leaving another workspace leaves its cards there. Fails when S is that workspace's last space or its Board space |
 | `hws space remove --space S` | Takes S out of its workspace and leaves it open as a plain space. Its cards stay on the Board. Fails on the workspace's last space or its Board space |
-| `hws set [--workspace W] [--name N] [--kind K] [--instructions X] [--stage S] [--place ROLE=PATH ...] [--writer ROLE=NAME ...]` | Changes a workspace's name, instructions and stage, or a kept workspace's kind and places. `--name` also renames any space that carries the old name, moves no files and keeps the default place folders where they were. An empty name exits 2. An unknown role or stage exits 2. `--place ROLE=` drops the role from the manifest. A new path keeps the role's writer. `--writer` needs the role to have a manifest path, and `--writer ROLE=hws` clears it |
+| `hws set [--workspace W] [--name N] [--kind K] [--instructions X] [--stage S] [--home H] [--place ROLE=PATH ...] [--writer ROLE=NAME ...]` | Changes a workspace's name, instructions and stage, or a kept workspace's kind and places. `--name` also renames any space that carries the old name, moves no files and keeps the default place folders where they were. An empty name exits 2. An unknown role or stage exits 2. `--place ROLE=` drops the role from the manifest. A new path keeps the role's writer. `--writer` needs the role to have a manifest path, and `--writer ROLE=hws` clears it |
 | `hws tidy status [--workspace W] [--line]` | Prints how far the current note is behind the stream. See [Tidy](#tidy) |
 | `hws tidy start [--workspace W] [--pane P]` | Writes the packet and opens the pass in a terminal pane, or asks the live pass to read the packet again. See [Tidy](#tidy) |
 | `hws decision add --title X --why Y [--decided-at YYYY-MM-DD] [--cites A,B] [--replaces D-001,D-002] [--workspace W]` | Appends a decision to the log and marks what it replaces. Prints `{ id, decidedAt, title, replaces }`. Fails when another tool writes the `decisions` place, or when `--replaces` names a decision that is gone or already replaced |
@@ -311,7 +325,7 @@ Counted on read against `current.covers`.
 |---|---|
 | Sessions | A session recorded in `terminals` has a transcript modified after `sessionsThrough`. The tidy terminal's session and sessions with no transcript are left out |
 | Artifacts | `createdAt` is after `artifactsThrough`, or the file changed after it, which sets `editedAt`. A review saved from the tidy terminal is left out |
-| Commits | In `git log covers.commit..HEAD` in the workspace folder. With no `covers.commit`, every commit since the workspace's `createdAt` |
+| Commits | In `git log covers.commit..HEAD` in the workspace folder, limited to `home` when the workspace has one of its own. With no `covers.commit`, every commit since the workspace's `createdAt` |
 | Cards | A Done card on the workspace's task list that is not archived |
 
 - With no `current`, every item is behind and `tidiedAt` is null.
@@ -668,7 +682,7 @@ Each section is a function in `mods/hws-panel/sections.js` that takes `{ t, host
 | Workspace | Sections, top to bottom |
 |---|---|
 | Reading a document | Back, its title, Show in Finder and the rendered text, in place of every other section. History rows, and Open note with no agent, open here |
-| Kept | Header, Current note, Not in the note yet, History once a log exists, Artifacts, Agents, Open now, Where files go, Close |
+| Kept | Header, Current note, Not in the note yet, History once a log exists, Notes once there are any, Artifacts, Agents, Open now, Where files go, Close |
 | Throwaway | Header, Record, Agents, Open now, Close |
 
 Reads, on each `hws list` refresh:
@@ -691,7 +705,7 @@ Reads, on each `hws list` refresh:
 | `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |
 | `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID` |
 | `[commit:SHA]` chip | Copies the sha with `pbcopy` |
-| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A Done bundle opens its `comments.md`, or else its `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
+| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board opens its `comments.md`, or its sketch in the default app when it has none. Another Done bundle opens its `comments.md`, or else its `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
 | Artifact title and Open | Run the `[artifact:ID]` action |
 | Artifact `···` menu | Open in browser for HTML, Open sketch for a board, otherwise Open in default app. Then Show in Finder and Copy for Claude, which copies the `@path` from `hws link ARTIFACT` |
 | Show in Finder, in the reader and the `···` menu | `open -R` on the file, or `xdg-open` on its folder on Linux, where the label reads Show in folder. A bundle reveals its `prompt.md` |

@@ -27,7 +27,8 @@ The first prompt names the packet. Otherwise read `tidy.packet` from `hws curren
 
 | Field | Use |
 |---|---|
-| `folder` | The workspace folder. `[file:PATH]` cites are relative to it |
+| `folder` | Where agents run. `[file:PATH]` cites are relative to it |
+| `home` | Where the workspace's files live, the same as `folder` unless it has its own |
 | `stage` | How to treat options and contradictions, below |
 | `places` | Absolute path per role. `null` means the role is unset |
 | `writers` | The tool that owns a place, or `null` when `hws` writes it |
@@ -52,7 +53,7 @@ The first prompt names the packet. Otherwise read `tidy.packet` from `hws curren
 | Source | Read |
 |---|---|
 | `since.sessions` | The JSONL at `transcript`. Read the user and assistant text, and skip tool calls and results. For a long file, start from the end, where decisions land, then read back far enough to learn what they replaced |
-| `since.artifacts` | The file at `path`. A bundle folder holds `prompt.md`, and `comments.md` when someone commented |
+| `since.artifacts` | The file at `path`. A bundle folder holds `prompt.md`, and `comments.md` when someone commented. An item with `type` `note` is a written note, so weigh it like one of the person's own documents |
 | `since.commits` | `subject` first. Run `git -C <folder> show --stat <sha>` when the subject is not enough |
 | `since.cards` | `notes`, `note`, `report` and `replies` are inline. A Done card's `report` says what happened |
 
@@ -159,7 +160,7 @@ When `writers.decisions` names another tool, leave `decisions` empty and keep th
 
 Demote a file when the new note absorbs it or a decision replaces it, and nobody needs to read it by default. Set `to` to `history`, which is the default place for anything outdated. Use `trash` only for a file with no record value, such as a stray copy.
 
-Never demote the current note, source code, files outside `folder`, any folder a place names, or a file already under the history place. Change an artifact's `status` instead of demoting its file.
+Never demote the current note, source code, files outside `folder` and `home`, any folder a place names, or a file already under the history place. Change an artifact's `status` instead of demoting its file.
 
 | Proposal field | Holds |
 |---|---|

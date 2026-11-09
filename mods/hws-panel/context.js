@@ -1,15 +1,16 @@
 // Pure helpers for the panel's context sections. They read `hws tidy status`,
 // the current note and the manifest, and touch no Herdr API, so tests call them directly.
 
-export const ROLES = ["current", "artifacts", "scratch", "decisions", "history", "meetings"];
+export const ROLES = ["current", "notes", "artifacts", "scratch", "decisions", "history", "meetings"];
 
 // What a role means when the manifest leaves it out. See docs/CONTRACT.md, Places.
 export const ROLE_DEFAULTS = {
   current: "CURRENT.md",
-  artifacts: "Boards and notes, in .herdr-workspace/",
-  scratch: "Working files, in .herdr-workspace/",
-  decisions: "Decision log, in .herdr-workspace/",
-  history: "Earlier notes and archived docs, in .herdr-workspace/",
+  notes: "Written notes, in the workspace files",
+  artifacts: "Boards and reviews, in the workspace files",
+  scratch: "Working files and unsent drafts",
+  decisions: "Decision log, in the workspace files",
+  history: "Earlier notes and archived docs",
   meetings: "Meeting notes, not set",
 };
 
@@ -98,7 +99,7 @@ export function backlogRow(item) {
   const id = item?.id ?? null;
   const title = oneLine(item?.title) || (source === "session" && id ? `Session ${String(id).slice(0, 8)}` : String(id ?? source));
   const cite = CITE_KINDS.has(source) && id ? { kind: source, value: String(id) } : null;
-  return { source, title: item?.edited ? `${title} (edited)` : title, at: item?.at ?? null, cite };
+  return { source: item?.type === "note" ? "note" : source, title: item?.edited ? `${title} (edited)` : title, at: item?.at ?? null, cite };
 }
 
 export function backlog(status) {
@@ -110,6 +111,8 @@ export function backlog(status) {
 export const livePass = (status) => (status?.live?.terminal ? status.live : null);
 
 // Newest first, with superseded ones held apart so the section can fold them.
+export const isNote = (artifact) => artifact.type === "note";
+
 export function artifactGroups(artifacts) {
   const sorted = [...(artifacts ?? [])].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   return { shown: sorted.filter((a) => a.status !== "superseded"), superseded: sorted.filter((a) => a.status === "superseded") };
@@ -135,4 +138,4 @@ export const resolvePath = (path, folder) => (path.startsWith("/") ? path : `${(
 // The sessions a throwaway's record lists, one per terminal that recorded one.
 export const recordedSessions = (workspace) => (workspace?.terminals ?? []).filter((x) => x.sessionId);
 
-export const SUGGEST_PROMPT = "Look at this workspace's folder and propose a place map for Herdr Workspaces. The roles are current, artifacts, scratch, decisions, history and meetings. Show me the map first. Once I confirm, record it with `hws set --place ROLE=PATH`, one --place per role.";
+export const SUGGEST_PROMPT = "Look at this workspace's folder and propose a place map for Herdr Workspaces. The roles are current, notes, artifacts, scratch, decisions, history and meetings. Show me the map first. Once I confirm, record it with `hws set --place ROLE=PATH`, one --place per role.";

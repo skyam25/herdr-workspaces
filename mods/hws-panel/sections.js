@@ -9,7 +9,7 @@ import { run } from "herdr";
 import { tilde } from "./hws.js";
 import { revealLabel } from "./cites.js";
 import { openArtifactMenu } from "./artifactmenu.js";
-import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, livePass, placeRows, recordedSessions } from "./context.js";
+import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, isNote, livePass, placeRows, recordedSessions } from "./context.js";
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
 
@@ -101,7 +101,7 @@ export function headerSection(view) {
         .when(isThrowaway, (el) => el.child(pill(t, "Throwaway"))),
     )
     .when(Boolean(workspace.instructions), (el) => el.child(div().truncate().text_size(12).text_color(t.muted).child(workspace.instructions.split("\n")[0])))
-    .when(!isThrowaway, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(tilde(workspace.folder))).child(freshnessRow(view)))
+    .when(!isThrowaway, (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(workspace.home ? `Runs in ${tilde(workspace.folder)} · files in ${tilde(workspace.home)}` : tilde(workspace.folder))).child(freshnessRow(view)))
     .child(
       h_flex()
         .pt(6)
@@ -280,13 +280,13 @@ function artifactRow(t, host, workspace, artifact, now) {
     .child(smallButton(t, `more-${artifact.id}`, "···", () => openArtifactMenu(artifact)).tooltip("More ways to open"));
 }
 
-// Current and draft artifacts, then one row that folds the superseded ones.
-function artifactRows(t, host, workspace, now) {
-  const { shown, superseded } = artifactGroups(workspace.artifacts);
+// Current and draft items, then one row that folds the superseded ones.
+function artifactRows(t, host, workspace, now, items, suffix = "") {
+  const { shown, superseded } = artifactGroups(items);
   const rows = shown.map((a) => artifactRow(t, host, workspace, a, now));
   if (superseded.length === 0) return rows;
   const fold = h_flex()
-    .id("superseded-toggle")
+    .id(`superseded-toggle${suffix}`)
     .h(22)
     .px(8)
     .gap(6)
@@ -304,8 +304,15 @@ function artifactRows(t, host, workspace, now) {
   return [...rows, fold, ...(host.showSuperseded ? superseded.map((a) => artifactRow(t, host, workspace, a, now)) : [])];
 }
 
+// Notes have their own folder, so they get their own list when there are any.
+export function notesSection({ t, host, workspace, now }) {
+  const notes = (workspace.artifacts ?? []).filter(isNote);
+  if (notes.length === 0) return null;
+  return v_flex().flex_none().gap(2).child(sectionTitle(t, "Notes")).children(artifactRows(t, host, workspace, now, notes, "-notes"));
+}
+
 export function artifactsSection({ t, host, workspace, now }) {
-  const rows = artifactRows(t, host, workspace, now);
+  const rows = artifactRows(t, host, workspace, now, (workspace.artifacts ?? []).filter((a) => !isNote(a)));
   return v_flex()
     .flex_none()
     .gap(2)
@@ -451,7 +458,7 @@ export function recordSection({ t, host, workspace, now }) {
   const context = isCurrentFor(host, workspace);
   const sessions = recordedSessions(workspace);
   const scratch = context?.scratch ?? null;
-  const artifacts = artifactRows(t, host, workspace, now);
+  const artifacts = artifactRows(t, host, workspace, now, workspace.artifacts ?? []);
   return v_flex()
     .flex_none()
     .gap(4)

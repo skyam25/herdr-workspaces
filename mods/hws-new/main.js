@@ -46,6 +46,7 @@ export default class Launcher extends View {
     const submit = (cx) => this.create(cx);
     makeInput(this, "name", { placeholder: "Untitled workspace", submit });
     makeInput(this, "folder", { submit });
+    makeInput(this, "home", { placeholder: "Optional. A folder inside it for this workspace's files", submit });
     makeInput(this, "instructions", { rows: 4, placeholder: "Optional. How agents should work and organize context here." });
     fillParent(this, cx);
     focusField(this, "name", cx);
@@ -133,10 +134,12 @@ export default class Launcher extends View {
     submitDialog(this, "create", async () => {
       const path = await checkFolder(this.values.folder);
       const instructions = this.values.instructions.trim();
+      const home = this.values.home.trim() ? await checkFolder(this.values.home) : null;
       await hws([
         "new", "workspace",
         "--name", this.values.name.trim() || "Untitled workspace",
         "--folder", path,
+        ...(home ? ["--home", home] : []),
         ...(instructions ? ["--instructions", instructions] : []),
       ]);
     }, cx);
@@ -210,7 +213,8 @@ export default class Launcher extends View {
           .gap(12)
           .child(div().text_size(15).font_semibold().child("New workspace"))
           .child(labeled(t, "Name", field(t, this, "name")))
-          .child(labeled(t, "Folder", folderRow(t, this)))
+          .child(labeled(t, "Claude runs in", folderRow(t, this)))
+          .child(labeled(t, "Workspace files in", field(t, this, "home")))
           .child(labeled(t, "Instructions", areaField(t, this, "instructions")))
           .when(Boolean(this.problem), (el) => el.child(problemLine(t, this.problem))),
       )

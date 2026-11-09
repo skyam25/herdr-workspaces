@@ -192,13 +192,14 @@ test('status carries the resolved places and the line, and creates no folder', (
   const own = join(manifest.folder, '.herdr-workspace', `demo-${manifest.id.slice(-6)}`);
   assert.deepEqual(result.places, {
     current: join(manifest.folder, 'docs/NOW.md'),
+    notes: join(own, 'notes'),
     artifacts: join(own, 'artifacts'),
     scratch: join(own, 'scratch'),
     decisions: join(manifest.folder, 'decisions'),
     history: join(own, 'history'),
     meetings: null,
   });
-  assert.deepEqual(result.writers, { current: null, artifacts: null, scratch: null, decisions: 'pmos', history: null, meetings: null });
+  assert.deepEqual(result.writers, { current: null, notes: null, artifacts: null, scratch: null, decisions: 'pmos', history: null, meetings: null });
   assert.equal(result.line, `Current is up to date, last tidied ${shortDate(tidiedAt)}`);
   assert.equal(existsSync(own), false);
 });
@@ -553,7 +554,7 @@ test('apply refuses demotions of the note, outside the folder, under another wri
     [folder, /is or holds the current note/],
     [outside, /outside the workspace folder/],
     [join(folder, 'decisions', 'd1.md'), /decisions place that pmos writes/],
-    [join(folder, '.herdr-workspace'), /holds the artifacts place|holds the scratch place/],
+    [join(folder, '.herdr-workspace'), /holds the (notes|artifacts|scratch) place/],
     [join(folder, 'docs', 'missing.md'), /does not exist/],
   ];
   mkdirSync(join(folder, '.herdr-workspace'), { recursive: true });
@@ -762,4 +763,113 @@ test('from the panel the pass opens in a terminal below it, in the workspace fol
 test('a new kept workspace starts in discovery', (t) => {
   const box = sandbox(t);
   assert.equal(box.app().stage, 'discovery');
+});
+
+// Workspace files in their own folder
+
+function homeWorkspace(box) {
+  const folder = box.folder('product');
+  const home = join(folder, '05-projects', 'project1');
+  mkdirSync(home, { recursive: true });
+  const manifest = box.json(['new', 'workspace', '--name', 'Project one', '--folder', folder, '--home', home, '--kind', 'general']);
+  box.clearCalls();
+  return { manifest, folder, home };
+}
+
+test('a workspace with its own folder keeps plain, readable places there', (t) => {
+  const box = sandbox(t);
+  const { manifest, home } = homeWorkspace(box);
+
+  const { places } = status(box, manifest);
+
+  assert.equal(places.current, join(home, 'CURRENT.md'));
+  for (const role of ['notes', 'artifacts', 'scratch', 'decisions', 'history']) assert.equal(places[role], join(home, role));
+  assert.equal(status(box, manifest).home, home);
+});
+
+test('tidy counts only commits that touch the workspace folder', (t) => {
+  const box = sandbox(t);
+  const { manifest, folder, home } = homeWorkspace(box);
+  git(folder, 'init', '-q');
+  commit(folder, 'other project');
+  writeFileSync(join(home, 'spec.md'), 'spec');
+  git(folder, 'add', join(home, 'spec.md'));
+  git(folder, 'commit', '-q', '-m', 'this project');
+
+  assert.deepEqual(status(box, manifest).items.filter((item) => item.kind === 'commit').map((item) => item.title), ['this project']);
+});
+
+test('set --home moves the places and an empty value clears it', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const home = box.folder('elsewhere');
+
+  box.json(['set', '--workspace', manifest.id, '--home', home]);
+  assert.equal(status(box, manifest).places.artifacts, join(home, 'artifacts'));
+
+  box.json(['set', '--workspace', manifest.id, '--home', '']);
+  assert.equal(box.manifest(manifest.id).home, undefined);
+  assert.equal(status(box, manifest).home, manifest.folder);
+});
+
+test('a note lands in notes and a board in artifacts, each named by its title', (t) => {
+  const box = sandbox(t);
+  const { manifest, home } = homeWorkspace(box);
+  const terminal = manifest.terminals[0].terminal;
+  const finish = (type, title) => {
+    const surface = box.json(['surface', 'open', '--type', type, '--in-pane', '--title', title, '--terminal', terminal]);
+    box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle(`bundle-${surface.id}`)]);
+    return box.manifest(manifest.id).artifacts.at(-1);
+  };
+
+  const note = finish('note', 'Launch plan');
+  const board = finish('board', 'User flow');
+
+  assert.match(note.path, new RegExp(`^${join(home, 'notes')}/launch-plan-a`));
+  assert.match(board.path, new RegExp(`^${join(home, 'artifacts')}/user-flow-a`));
+});
+
+test('unsent drafts live in the workspace and reopening a file keeps them', (t) => {
+  const box = sandbox(t);
+  const { manifest, home } = homeWorkspace(box);
+  const terminal = manifest.terminals[0].terminal;
+  const file = join(home, 'spec.md');
+  writeFileSync(file, '# Spec');
+
+  const first = box.json(['surface', 'open', '--type', 'page', '--file', file, '--terminal', terminal]);
+  const data = join(box.root, 'workspaces', manifest.id, 'surfaces', first.id);
+  writeFileSync(join(data, 'drafts', 'd1.json'), '{}');
+
+  assert.ok(existsSync(join(home, 'scratch', 'drafts', `spec.md-${first.id}`, 'drafts', 'd1.json')));
+
+  box.setState({ spaces: box.state().spaces.map((space) => ({ ...space, tabs: space.tabs.map((tab) => ({ ...tab, terminals: tab.terminals.filter((item) => item.pane !== first.pane) })) })) });
+  const second = box.json(['surface', 'open', '--type', 'page', '--file', file, '--terminal', terminal]);
+
+  assert.equal(second.id, first.id);
+  assert.ok(existsSync(join(data, 'drafts', 'd1.json')));
+  assert.equal(box.manifest(manifest.id).surfaces.length, 1);
+});
+
+test('opening a file already open focuses its pane', (t) => {
+  const box = sandbox(t);
+  const { manifest, home } = homeWorkspace(box);
+  const terminal = manifest.terminals[0].terminal;
+  const file = join(home, 'spec.md');
+  writeFileSync(file, '# Spec');
+  const first = box.json(['surface', 'open', '--type', 'page', '--file', file, '--terminal', terminal]);
+  box.clearCalls();
+
+  const again = box.json(['surface', 'open', '--type', 'page', '--file', file, '--terminal', terminal]);
+
+  assert.equal(again.focused, true);
+  assert.deepEqual(box.actions(), [['herdr-app', 'do', 'pane.focus', '--pane', first.pane]]);
+});
+
+test('a throwaway keeps its drafts in its own state folder', (t) => {
+  const box = sandbox(t);
+  const manifest = box.throwaway();
+  const surface = box.json(['surface', 'open', '--type', 'note', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
+
+  const link = join(box.root, 'workspaces', manifest.id, 'surfaces', surface.id, 'drafts');
+  assert.equal(existsSync(link), false);
 });

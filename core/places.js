@@ -5,11 +5,11 @@ import { HwsError, UsageError } from './errors.js';
 import { STANDALONE, expandFolder, keptWorkspaceDir, stateRoot, workspaceDir } from './paths.js';
 import { defaultPlaces } from './settings.js';
 
-export const ROLES = ['current', 'artifacts', 'scratch', 'decisions', 'history', 'meetings'];
+export const ROLES = ['current', 'notes', 'artifacts', 'scratch', 'decisions', 'history', 'meetings'];
 const STAGES = ['discovery', 'deciding', 'building', 'settled'];
 
 // `hws place` creates these folders on first use. The others belong to the user.
-const CREATED_ON_USE = ['scratch', 'artifacts'];
+const CREATED_ON_USE = ['scratch', 'artifacts', 'notes'];
 const HWS = 'hws';
 
 export function assertRole(role) {
@@ -36,6 +36,13 @@ function entryOf(value) {
   return null;
 }
 
+// Where the workspace's own files live. `folder` is where its agents run.
+export const homeOf = (manifest) => manifest.home || manifest.folder;
+
+// A workspace with a folder to itself uses plain names. One sharing its folder
+// keeps its files under `.herdr-workspace` so they stay out of the way.
+export const hasOwnHome = (manifest) => Boolean(manifest.home) && manifest.home !== manifest.folder;
+
 export const isKept = (manifest) => manifest.id !== STANDALONE && manifest.kind !== 'throwaway';
 
 function builtInDefaults(manifest) {
@@ -43,8 +50,9 @@ function builtInDefaults(manifest) {
   if (manifest.kind === 'throwaway') {
     return { artifacts: join(workspaceDir(manifest.id), 'artifacts'), scratch: join(workspaceDir(manifest.id), 'scratch') };
   }
+  if (hasOwnHome(manifest)) return { current: 'CURRENT.md', notes: 'notes', artifacts: 'artifacts', scratch: 'scratch', decisions: 'decisions', history: 'history' };
   const own = keptWorkspaceDir(manifest.folder, manifest);
-  return { current: 'CURRENT.md', artifacts: join(own, 'artifacts'), scratch: join(own, 'scratch'), decisions: join(own, 'decisions'), history: join(own, 'history') };
+  return { current: 'CURRENT.md', notes: join(own, 'notes'), artifacts: join(own, 'artifacts'), scratch: join(own, 'scratch'), decisions: join(own, 'decisions'), history: join(own, 'history') };
 }
 
 // The manifest decides first, then settings.json for a kept workspace, then the built-in default.
@@ -58,7 +66,7 @@ function entryFor(manifest, role) {
 
 function absolute(manifest, path) {
   if (path === '~' || path.startsWith('~/')) return expandFolder(path);
-  return isAbsolute(path) ? resolve(path) : resolve(manifest.folder, path);
+  return isAbsolute(path) ? resolve(path) : resolve(homeOf(manifest), path);
 }
 
 export const isForeign = (writer) => Boolean(writer) && writer !== HWS;

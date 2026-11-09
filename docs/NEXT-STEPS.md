@@ -156,6 +156,7 @@ Built 2026-11-09 by six Opus workers against fakes. Nothing has run in the real 
 - [ ] Press Open note. The note should open in a pane. The default place is `CURRENT.md`. Decide whether this file should become the current note instead, knowing a tidy pass rewrites the whole note.
 - [ ] Press Tidy. A terminal should open below the panel, ask anything unclear, write a proposal and open it in a page. Press Done and check the note, the Trash and the archived cards.
 - [ ] Read the Not in the note yet rows after a commit and after a card moves to Done.
+- [ ] Create a workspace with Workspace files in set to a subfolder, then finish a note and a board and check they land in `notes/` and `artifacts/`.
 - [ ] Close a kept workspace, then open Find past work in the launcher and restore it.
 - [ ] Press Workspace in the top bar, then right-click another workspace in the sidebar and press Open panel. The panel should open beside a terminal in each case.
 - [ ] Edit a Places row, clear one, and press Suggest from folder.

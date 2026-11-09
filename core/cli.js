@@ -43,7 +43,7 @@ const ROUTES = [
     path: ['new', 'workspace'],
     run: newWorkspace,
     prunes: true,
-    options: { name: text, folder: text, kind: text, tabs: text, instructions: text },
+    options: { name: text, folder: text, home: text, kind: text, tabs: text, instructions: text },
   },
   { path: ['new', 'throwaway'], run: newThrowaway, prunes: true, options: { name: text } },
   { path: ['board', 'add'], run: boardAdd, options: { workspace: text } },
@@ -120,7 +120,7 @@ const ROUTES = [
   {
     path: ['set'],
     run: setWorkspace,
-    options: { workspace: text, name: text, kind: text, instructions: text, stage: text, place: repeated, writer: repeated },
+    options: { workspace: text, name: text, kind: text, instructions: text, stage: text, home: text, place: repeated, writer: repeated },
   },
   { path: ['place'], run: place, options: { workspace: text }, positionals: 1 },
   { path: ['tidy', 'status'], run: tidyStatus, options: { workspace: text, line: flag } },
