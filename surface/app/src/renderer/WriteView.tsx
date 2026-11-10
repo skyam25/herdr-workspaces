@@ -4,6 +4,7 @@ import { draftTitle, inWrite } from '../shared/drafts';
 import type { BoardEntry, CompanionApi, Draft, OutlineCreate, Template } from '../shared/ipc';
 import { plainSlots } from '../shared/slots';
 import { ContextMenu, type MenuPoint } from './ContextMenu';
+import type { Delivery } from './delivery';
 import { DraftEditor } from './DraftEditor';
 import { DraftRow, ReadyQueue, SectionHeader } from './DraftList';
 import type { SendFeedback } from './FeedbackPanel';
@@ -64,6 +65,8 @@ export function WriteView(props: {
   onError: (message: string) => void;
   /** A surface shows the one open note, with no list beside it. */
   surface?: boolean;
+  /** The buttons that hand the note over. */
+  delivery?: Delivery;
 }) {
   const book = useStore(props.book);
   const shelf = useStore(props.shelf);
@@ -342,6 +345,7 @@ export function WriteView(props: {
           talking={props.talking}
           outlineHost={props.outlineHost}
           surface={props.surface}
+          delivery={props.delivery}
         />
       ) : (
         <div className="editor empty-editor">

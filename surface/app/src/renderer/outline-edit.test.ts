@@ -160,10 +160,22 @@ describe('wrapped fields', () => {
 describe('source line', () => {
   it('names the outline when the file has one', () => {
     expect(sourceLine('docs/memo.md')).toBe('From docs/memo.md. Send sends this back to Claude, with any changes you made.');
-    expect(sourceLine('docs/memo.md', undefined, 'Done')).toBe('From docs/memo.md. Done sends this back to Claude, with any changes you made.');
+    expect(sourceLine('docs/memo.md', undefined, 'done')).toBe('From docs/memo.md. Done sends this back to Claude, with any changes you made.');
     expect(sourceLine('docs/memo.md', 'docs/memo.outline.md')).toBe(
       'From docs/memo.md. Send folds your comments into docs/memo.outline.md first, and Claude proposes a direction there.',
     );
+  });
+
+  it('names Open terminal and Copy link on a standalone surface', () => {
+    expect(sourceLine('docs/memo.md', undefined, 'standalone')).toBe(
+      'From docs/memo.md. Open terminal starts Claude on your changes, and Copy link copies a line to paste into Claude.',
+    );
+    expect(sourceLine('docs/memo.md', 'docs/memo.outline.md', 'standalone')).toBe(
+      'From docs/memo.md. Open terminal starts Claude on your changes, and Copy link copies a line to paste into Claude. Claude folds them into docs/memo.outline.md first.',
+    );
+    for (const outline of [undefined, 'docs/memo.outline.md']) {
+      expect(sourceLine('docs/memo.md', outline, 'standalone')).not.toMatch(/\b(Done|Send)\b/);
+    }
   });
 });
 

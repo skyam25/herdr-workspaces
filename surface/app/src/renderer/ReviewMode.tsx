@@ -9,6 +9,7 @@ import { awaitsUser } from '../shared/items';
 import { isLocalUrl, outputLabel, reviewStart } from '../shared/outputs';
 import { hasReviewContent } from '../shared/review';
 import { ContextMenu, type MenuPoint } from './ContextMenu';
+import type { Delivery } from './delivery';
 import { DraftRow, SectionHeader } from './DraftList';
 import type { DraftBook } from './drafts';
 import { FeedbackView, useFeedbackFiles, type SendFeedback } from './FeedbackPanel';
@@ -43,6 +44,8 @@ export function ReviewMode(props: {
   onCopyReference: (ref: ItemReference) => void;
   /** A surface shows the one open page, with no list beside it. */
   surface?: boolean;
+  /** The buttons that hand the page's comments over. */
+  delivery?: Delivery;
 }) {
   const book = useStore(props.book);
   const items = useStore(props.items);
@@ -232,6 +235,7 @@ export function ReviewMode(props: {
           onError={props.review.onError}
           onOpenFeedbackItem={openFeedback}
           onCopyReference={() => open.sessionId && props.onCopyReference(outputReference(open.sessionId, open.review!.path))}
+          delivery={props.delivery}
         />
       ) : feedbackFor && sessionId ? (
         <div className="review-side">

@@ -153,7 +153,7 @@ test('Review mode lists a session\'s outputs, opens them, and sends an edited co
   await expect(page.getByTestId('outputs')).toHaveCount(0);
   await expect(page.getByTestId('draft-body').locator('h1')).toHaveText('Pricing strategy');
   await expect(page.getByTestId('draft-source')).toHaveText(
-    'From docs/pricing.md. Send asks Claude to apply your changes to the file.',
+    'From docs/pricing.md. Send sends this back to Claude, with any changes you made.',
   );
 
   // Send hands Claude the edited copy and asks it to apply the changes to the file.

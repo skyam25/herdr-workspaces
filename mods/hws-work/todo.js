@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, TextView } from "gpui-base";
 import { agents, closeOverlay, panes, props, setShared, shared, spaces, terminals, theme } from "herdr";
-import { COLUMNS, FORM, OWNER_NAMES, SOME_AGENT, cardSessions, cardStory, cardTimes, describeSession, sendTargets, todoItems, todoLayout } from "./data.js";
+import { COLUMNS, FORM, NO_SESSION, OWNER_NAMES, REPLY_ENDED, SOME_AGENT, cardSessions, cardStory, cardTimes, describeSession, replyEnded, sendTargets, todoItems, todoLayout } from "./data.js";
 import { hws, openSession } from "./open.js";
 
 export const TODOS_CHANGED = "hws.todos.changed";
@@ -221,11 +221,18 @@ export class TodoForm extends DialogForm {
     return this.item?.column === "waiting";
   }
 
+  // True when the card's reply has nowhere to go, so the dialog offers Move to To do instead.
+  replyEnded() {
+    if (!this.item) return false;
+    const live = terminals().some((x) => x.address === this.item.terminal && x.state === "live");
+    return replyEnded(this.item, live);
+  }
+
   // A finished card takes feedback too, which reopens its session when that has closed.
   canReply() {
-    if (this.item?.archived) return false;
+    if (!this.item || this.item.archived || this.replyEnded()) return false;
     if (this.waiting()) return true;
-    return this.item?.column === "done" && Boolean(this.item.session || this.item.terminal);
+    return this.item.column === "done" && Boolean(this.item.session || this.item.terminal);
   }
 
   // The fields Tab moves through. A card that waits on you starts at its reply.
@@ -338,6 +345,10 @@ export class TodoForm extends DialogForm {
     this.saveThen("reply", () => hws(["todo", "reply", "--id", this.id, textFlag("text", text), ...this.spaceFlag()]), cx);
   }
 
+  moveToTodo(cx) {
+    this.saveThen("move", () => hws(["todo", "move", "--id", this.id, "--column", "todo", ...this.spaceFlag()]), cx);
+  }
+
   archive(cx) {
     this.submit("archive", () => hws(["todo", "archive", "--id", this.id, ...this.spaceFlag()]), cx);
   }
@@ -431,6 +442,7 @@ export class TodoForm extends DialogForm {
   updateFields(t, enabled, story, height) {
     const shown = story && div().id("todo-note").max_h(height).overflow_y_scrollbar().text_size(12.5).child(TextView.markdown("todo-story", story.text).selectable(true));
     const update = story ? [this.labeled(t, story.label, shown)] : [];
+    if (this.replyEnded()) return [...update, this.labeled(t, this.waiting() ? "Reply" : "Feedback", this.endedRow(t, enabled))];
     if (!this.canReply()) return update;
     const row = h_flex()
       .gap(8)
@@ -440,11 +452,23 @@ export class TodoForm extends DialogForm {
     return [...update, this.labeled(t, this.waiting() ? "Reply" : "Feedback", row)];
   }
 
+  // Takes the reply row's place, with the one action that still moves the card.
+  endedRow(t, enabled) {
+    const text = this.item.terminal ? REPLY_ENDED : NO_SESSION;
+    return h_flex()
+      .id("reply-ended")
+      .min_h(FORM.input)
+      .gap(8)
+      .items_center()
+      .child(div().flex_1().min_w(0).whitespace_normal().text_size(12).text_color(t.muted).child(text))
+      .child(this.button(t, "move-todo", this.busy === "move" ? "Moving…" : "Move to To do", false, (_e, cx) => this.moveToTodo(cx), enabled));
+  }
+
   render() {
     const t = theme();
     const enabled = this.ready();
     const story = this.item ? cardStory(this.item) : null;
-    const sizes = todoLayout({ height: props().height, waiting: this.canReply(), story });
+    const sizes = todoLayout({ height: props().height, waiting: this.canReply() || this.replyEnded(), story });
     const targets = this.targets();
     const reading = v_flex().flex_1().min_w(0).gap(FORM.gap).children([
       ...this.updateFields(t, enabled, story, sizes.story),

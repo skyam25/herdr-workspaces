@@ -10,6 +10,7 @@
     "host_exited_on_hangup": true
   },
   "note_new": {
+    "pane_title": true,
     "cmd_enter_done": true,
     "text_in_prompt": true,
     "ctrl_q": true
@@ -35,6 +36,7 @@
     "second_round_has_only_new_comment": true
   },
   "page_standalone": {
+    "pane_title": true,
     "copy_makes_artifact": true,
     "copy_runs_link": true,
     "delivered_comment_gone": true,

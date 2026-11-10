@@ -36,7 +36,7 @@ function inWorkspace(manifest = APP, extra = {}) {
 test("launcher menu runs the right commands and closes after success", async () => {
   const H = setup();
   const m = await mount("hws-new", { overlay: "ov0" });
-  assert.match(m.text(), /New terminal.*New workspace.*Throwaway.*New sketch.*New note.*Run Tasks with an agent/);
+  assert.match(m.text(), /New terminal.*New workspace.*Throwaway.*New sketch.*New note/);
   assert.doesNotMatch(m.text(), /New board|the Board/);
   await m.click("new-terminal");
   assert.deepEqual(args(H), [["new", "terminal", "--folder", "/Users/me/work", "--json"]]);
@@ -55,9 +55,30 @@ test("launcher menu runs the right commands and closes after success", async () 
 });
 
 const ACTIVE = { id: "spc1", active: true, machine: null, folder: "/space/dir", tabs: [] };
+const IN_WORKSPACE = { "hws.workspace.spaces": ["spc1"] };
+
+test("the launcher offers Orchestrate this space only when the active space is in a workspace", async () => {
+  for (const sharedValues of [{}, { "hws.workspace.spaces": ["spc9"] }, { "hws.workspace.spaces": "spc1" }]) {
+    setup({ spaces: [ACTIVE], sharedValues });
+    const m = await mount("hws-new", { overlay: "ov0" });
+    assert.equal(m.has("orchestrate"), false, JSON.stringify(sharedValues));
+    assert.doesNotMatch(m.text(), /Orchestrate/);
+  }
+  for (const spaces of [[], [{ ...ACTIVE, active: false }]]) {
+    setup({ spaces, sharedValues: IN_WORKSPACE });
+    assert.equal((await mount("hws-new", { overlay: "ov0" })).has("orchestrate"), false);
+  }
+});
+
+test("the launcher dialog fits its rows, because the row count changes", () => {
+  const overlay = JSON.parse(read("../hws-new/mod.json")).overlay;
+  assert.equal(overlay.kind, "dialog");
+  assert.equal("height" in overlay, false);
+  assert.match(read("../hws-new/main.js"), /\.id\("hws-new"\)[\s\S]{0,200}\.w_full\(\)/);
+});
 
 test("Orchestrate this space starts in the focused terminal's folder", async () => {
-  const H = setup({ spaces: [ACTIVE] });
+  const H = setup({ spaces: [ACTIVE], sharedValues: IN_WORKSPACE });
   const m = await mount("hws-new", { overlay: "ov0" });
   assert.match(m.text(), /Orchestrate this space \| Run Tasks with an agent that assigns the work\./);
   await m.click("orchestrate");
@@ -66,28 +87,26 @@ test("Orchestrate this space starts in the focused terminal's folder", async () 
 });
 
 test("Orchestrate this space falls back to the space's folder", async () => {
-  const H = setup({ spaces: [ACTIVE], focused: { space: "spc1", tab: "tb1", pane: "p9", terminal: null, cwd: null } });
+  const H = setup({ spaces: [ACTIVE], sharedValues: IN_WORKSPACE, focused: { space: "spc1", tab: "tb1", pane: "p9", terminal: null, cwd: null } });
   const m = await mount("hws-new", { overlay: "ov0" });
   await m.click("orchestrate");
   assert.deepEqual(args(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/space/dir", "--json"]]);
 });
 
 test("Orchestrate this space ignores focus in another space", async () => {
-  const H = setup({ spaces: [ACTIVE], focused: { space: "spc2", tab: "tb9", pane: "p9", terminal: "t9", cwd: "/elsewhere" } });
+  const H = setup({ spaces: [ACTIVE], sharedValues: IN_WORKSPACE, focused: { space: "spc2", tab: "tb9", pane: "p9", terminal: "t9", cwd: "/elsewhere" } });
   const m = await mount("hws-new", { overlay: "ov0" });
   await m.click("orchestrate");
   assert.deepEqual(args(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/space/dir", "--json"]]);
 });
 
-test("Orchestrate this space is disabled with no space, no folder or a remote space", async () => {
+test("Orchestrate this space is disabled with no folder or a remote space", async () => {
   const unavailable = [
-    { spaces: [] },
-    { spaces: [{ ...ACTIVE, active: false }] },
     { spaces: [{ ...ACTIVE, folder: "" }], focused: null },
     { spaces: [{ ...ACTIVE, machine: "vps" }] },
   ];
   for (const world of unavailable) {
-    const H = setup(world);
+    const H = setup({ ...world, sharedValues: IN_WORKSPACE });
     const m = await mount("hws-new", { overlay: "ov0" });
     assert.equal(m.has("orchestrate"), true);
     assert.equal(m.clickable("orchestrate"), false);
@@ -99,7 +118,7 @@ test("Orchestrate this space is disabled with no space, no folder or a remote sp
 });
 
 test("Enter runs Orchestrate this space when it is selected", async () => {
-  const H = setup({ spaces: [ACTIVE] });
+  const H = setup({ spaces: [ACTIVE], sharedValues: IN_WORKSPACE });
   const m = await mount("hws-new", { overlay: "ov0" });
   m.view.at = 6;
   await m.key("enter");
@@ -107,7 +126,7 @@ test("Enter runs Orchestrate this space when it is selected", async () => {
 });
 
 test("the launcher shows why an orchestrator did not start and stays open", async () => {
-  const H = setup({ spaces: [ACTIVE] });
+  const H = setup({ spaces: [ACTIVE], sharedValues: IN_WORKSPACE });
   H.hws["orchestrator start"] = { fail: "claude is not installed" };
   const m = await mount("hws-new", { overlay: "ov0" });
   await m.click("orchestrate");
@@ -439,7 +458,7 @@ test("closing a throwaway with work opens the Keep or Trash dialog", async () =>
 test("panel outside a workspace says so and offers to make this space a workspace", async () => {
   const H = setup({ hws: { list: [] }, spaces: [{ id: "spc1", name: "api", machine: null, folder: "/made/here", tabs: [{ id: "tb1" }] }], panes: [{ pane: "p1", terminal: "t1", tab: "tb1", cwd: "/Users/me/now" }] });
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /not a workspace.*Make this space a workspace…/);
+  assert.match(m.text(), /Not in a workspace \| No workspace holds its folder\..*Make this space a workspace…/);
   assert.deepEqual(args(H).find((a) => a[0] === "space"), ["space", "match", "--space", "spc1", "--json"]);
   await m.click("new-workspace");
   assert.equal(H.overlays[0].mod, "hws-new");
@@ -451,7 +470,7 @@ const MATCH = (count) => ({ space: "spc1", folder: "/w/app", candidates: Array.f
 test("a plain space whose folder sits in a workspace offers to join it, then reloads", async () => {
   const H = setup({ hws: { list: [], "space match": MATCH(1), "space move": { space: "spc1", workspace: "w0" } } });
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /This space is not in a workspace\. Its folder belongs to work 0\..*Add this space to work 0.*Make this space a workspace…/);
+  assert.match(m.text(), /Not in a workspace \| Its folder belongs to work 0\..*Add this space to work 0.*Make this space a workspace…/);
   const lists = args(H).filter((a) => a[0] === "list").length;
   await m.click("join-w0");
   assert.deepEqual(args(H).find((a) => a[1] === "move"), ["space", "move", "--space", "spc1", "--workspace", "w0", "--json"]);
@@ -471,7 +490,7 @@ test("a plain space offers at most three workspaces and shows a failed move", as
 test("a failed space match offers only New workspace", async () => {
   setup({ hws: { list: [], "space match": { fail: "unknown command" } } });
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /This space is not a workspace\./);
+  assert.match(m.text(), /No workspace holds its folder\./);
   assert.equal(m.has("new-workspace"), true);
 });
 
@@ -499,7 +518,7 @@ test("panel shows the workspace, surfaces and artifacts newest first, and no Age
   H.panes.push({ pane: "p9", terminal: null, tab: "tb1" });
   const m = await mount("hws-panel", {});
   const text = m.text();
-  assert.match(text, /checkout demo.*Ship the demo.*~\/Projects\/checkout/);
+  assert.match(text, /checkout demo.*~\/Projects\/checkout.*Ship the demo/);
   assert.match(text, /Open now.*flow.*sketch · Claude Code/);
   assert.doesNotMatch(text, /Agents|planner|t13/);
   assert.equal(m.has("agent-t13"), false);
@@ -786,7 +805,7 @@ test("a space change refreshes and clears the panel's note", async () => {
   const m = await mount("hws-panel", {});
   m.view.note = { text: "Copied.", isError: false };
   H.focused = { ...H.focused, space: "spc2" };
-  assert.match(m.text(), /not a workspace/);
+  assert.match(m.text(), /Not in a workspace/);
   await settle();
   assert.equal(m.view.note, null);
   assert.equal(args(H).filter((a) => a[0] === "list").length, 2);
@@ -875,8 +894,11 @@ test("freshness is fresh at zero, behind up to five and stale above", () => {
   assert.equal(ctx.freshness(null), null);
 });
 
-test("the counts line names every source", () => {
-  assert.equal(ctx.countsLine(STATUS.behind), "3 sessions · 2 artifacts · 0 commits · 0 cards");
+test("the counts line drops zero counts and keeps every zero when nothing is behind", () => {
+  assert.equal(ctx.countsLine(STATUS.behind), "3 sessions · 2 artifacts");
+  assert.equal(ctx.countsLine({ sessions: 0, artifacts: 1, commits: 1, cards: 2 }), "1 artifact · 1 commit · 2 cards");
+  assert.equal(ctx.countsLine({ sessions: 0, artifacts: 0, commits: 0, cards: 0 }), "0 sessions · 0 artifacts · 0 commits · 0 cards");
+  assert.equal(ctx.countsLine(undefined), "0 sessions · 0 artifacts · 0 commits · 0 cards");
 });
 
 test("note lines keep headings and bullets, pull out cites and stop at the first screen", () => {
@@ -1111,10 +1133,71 @@ test("a note bundle opens its prompt in the companion", async () => {
   assert.equal(args(H).filter((a) => a[0] === "surface").at(-1)[5], "/art/old/prompt.md");
 });
 
-test("the header says where a workspace runs and keeps its files, when they differ", async () => {
+// Panel layout helpers. They read the rendered tree, which the harness keeps as nodes.
+const panelNode = (el, match) => {
+  const n = el?.node ?? el;
+  if (typeof n !== "object" || n === null) return null;
+  if (match(n)) return n;
+  for (const c of n.children ?? []) {
+    const hit = panelNode(c, match);
+    if (hit) return hit;
+  }
+  return null;
+};
+const panelById = (m, id) => panelNode(m.render(), (n) => n.id === id);
+const panelLabel = (m, text) => panelNode(m.render(), (n) => n.children?.length === 1 && n.children[0] === text);
+const panelText = (n) => (typeof n === "string" ? n : (n?.children ?? []).map((c) => panelText(c?.node ?? c)).filter(Boolean).join(" | "));
+
+test("the header says where a workspace runs and keeps its files on two lines, when they differ", async () => {
   kept({}, { list: [{ ...KEPT, home: "/Users/me/Projects/checkout/05/p1" }] });
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /Runs in \| ~\/Projects\/checkout \| · files in \| ~\/Projects\/checkout\/05\/p1/);
+  assert.equal(panelText(panelById(m, "header-runs-in")), "Runs in | ~/Projects/checkout");
+  assert.equal(panelText(panelById(m, "header-files-in")), "Files in | ~/Projects/checkout/05/p1");
+});
+
+test("the header groups what the workspace is apart from how its context stands", async () => {
+  kept();
+  const m = await mount("hws-panel", {});
+  const identity = panelText(panelById(m, "header-identity"));
+  const state = panelText(panelById(m, "header-state"));
+  assert.match(identity, /^checkout demo \| deciding \| ··· \| ~\/Projects\/checkout \| Ship the demo \| Instructions…$/);
+  assert.match(state, /Tidy.*Open note.*Tasks/);
+  assert.doesNotMatch(state, /Instructions|deciding/);
+});
+
+test("the stage control is a small button, and Tidy is the header's one filled button", async () => {
+  kept({}, { list: [{ ...KEPT, stage: null }] });
+  const m = await mount("hws-panel", {});
+  assert.match(panelText(panelById(m, "stage")), /^Set stage$/);
+  for (const id of ["stage", "workspace-menu", "edit-instructions", "open-current"]) assert.equal(panelById(m, id).bg, undefined, id);
+  assert.equal(panelById(m, "tidy").bg, "color:solid");
+});
+
+test("a throwaway's header shows a plain Throwaway label in place of the stage", async () => {
+  inWorkspace(THROWAWAY);
+  const m = await mount("hws-panel", {});
+  assert.equal(m.has("stage"), false);
+  assert.equal(panelLabel(m, "Throwaway").text_color, "color:dim");
+  assert.equal(m.has("header-state"), false);
+});
+
+test("section titles are dim labels, apart from the note's own headings", async () => {
+  kept();
+  const m = await mount("hws-panel", {});
+  for (const title of ["Current note", "Not in the note yet", "Artifacts"]) assert.equal(panelLabel(m, title).text_color, "color:dim", title);
+  assert.equal(panelLabel(m, "Now").text_color, "color:foreground");
+});
+
+test("a plain space fills Add this space only when it has one candidate", async () => {
+  setup({ hws: { list: [], "space match": MATCH(1) } });
+  const one = await mount("hws-panel", {});
+  assert.equal(panelById(one, "join-w0").bg, "color:solid");
+  assert.equal(panelById(one, "new-workspace").bg, "color:raised");
+  assert.equal(panelText(panelById(one, "outside-title")), "Not in a workspace");
+  setup({ hws: { list: [], "space match": MATCH(2) } });
+  const two = await mount("hws-panel", {});
+  assert.equal(panelById(two, "join-w0").bg, "color:raised");
+  assert.equal(panelById(two, "join-w1").bg, "color:raised");
 });
 
 test("the stage pill opens the stage menu, which runs hws set --stage", async () => {
@@ -1264,7 +1347,7 @@ test("an unknown artifact cite shows the problem", async () => {
 test("Not in the note yet shows the counts and rows, and a row opens its cite", async () => {
   const H = kept();
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /Not in the note yet.*3 sessions · 2 artifacts · 0 commits · 0 cards.*session \| Fix login \| 2m ago.*artifact \| newer \| 1h ago.*card \| Remove Studio/);
+  assert.match(m.text(), /Not in the note yet \| 3 sessions · 2 artifacts \| .*session \| Fix login \| 2m ago.*artifact \| newer \| 1h ago.*card \| Remove Studio/);
   await m.click("since-2");
   assert.equal(H.overlays.at(-1).props.id, "17");
 });
@@ -1561,18 +1644,58 @@ test("right-clicking a sidebar row opens its menu beside the pointer", async () 
   const m = await mount("hws-panel", { view: "sidebar" });
   await m.rightClick("sidebar-workspace-spc1");
   const spec = H.overlays.at(-1);
-  assert.deepEqual([spec.kind, spec.props], ["popup", { workspace: "spc1", name: "checkout demo", kind: "app", archived: false, space: "spc1", view: "row-menu" }]);
+  assert.deepEqual([spec.kind, spec.props], ["popup", { workspace: "spc1", name: "checkout demo", kind: "app", archived: false, space: "spc1", spaces: ["spc1"], board: false, view: "row-menu" }]);
+});
+
+const ROW_MENU = { workspace: "spc1", name: "checkout demo", kind: "app", archived: false, space: "spc1", spaces: ["spc1", "spc3"], view: "row-menu", overlay: "ov4" };
+
+test("an open workspace's menu offers Add space and, without a Board, Add tasks", async () => {
+  setup({ spaces: SPACED });
+  const m = await mount("hws-panel", { ...ROW_MENU, board: false });
+  assert.match(m.text(), /Open panel \| Add space… \| Add tasks \| Rename… \| Archive…/);
+
+  setup({ spaces: SPACED });
+  const withBoard = await mount("hws-panel", { ...ROW_MENU, board: true });
+  assert.match(withBoard.text(), /Open panel \| Add space… \| Rename… \| Archive…/);
+
+  setup({ spaces: SPACED });
+  const fromPanel = await mount("hws-panel", { workspace: "spc1", name: "checkout demo", kind: "app", archived: false, space: null, view: "row-menu", overlay: "ov4" });
+  assert.doesNotMatch(fromPanel.text(), /Add/);
+});
+
+test("the menu's Add space opens the dialog for that workspace", async () => {
+  const H = setup({ spaces: SPACED });
+  const m = await mount("hws-panel", { ...ROW_MENU, board: false });
+  await m.click("row-menu-add-space");
+  assert.deepEqual(H.closed, ["ov4"]);
+  assert.deepEqual(H.overlays.at(-1).props, { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1", "spc3"] });
+});
+
+test("the menu's Add tasks adds a Board and shows Tasks", async () => {
+  const H = setup({ hws: { "board add": { workspace: "spc1", space: "spb", tab: "tbb" } }, spaces: SPACED });
+  const m = await mount("hws-panel", { ...ROW_MENU, board: false });
+  await m.click("row-menu-add-tasks");
+  assert.deepEqual(args(H), [["board", "add", "--workspace", "spc1", "--json"]]);
+  assert.deepEqual(H.runs.slice(-2), [{ name: "space.select", args: { id: "spb" } }, { name: "tab.select", args: { id: "tbb" } }]);
+});
+
+test("the menu of a workspace that is not current offers the same adds", async () => {
+  const other = { ...APP, id: "spc2", name: "other", spaces: ["spc2"] };
+  const H = setup({ hws: { list: [GROUP, other] }, spaces: SPACED });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  await m.rightClick("sidebar-workspace-spc2");
+  assert.deepEqual(H.overlays.at(-1).props, { workspace: "spc2", name: "other", kind: "app", archived: false, space: "spc2", spaces: ["spc2"], board: false, view: "row-menu" });
 });
 
 test("the sidebar folds archived workspaces under one row and restores on click", async () => {
   const archived = { ...APP, id: "spa", name: "old work", spaces: [], archived: { at: 1, spaces: [] } };
   const H = setup({ hws: { list: [APP], "list --archived": [archived] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 173 } });
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 95 } });
   assert.equal(m.has("sidebar-archived-spa"), false);
-  H.layout.children[0].children[0].size.px = 173;
+  H.layout.children[0].children[0].size.px = 95;
   await m.click("sidebar-archived-toggle");
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 199 } });
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 121 } });
   await m.click("sidebar-archived-spa");
   assert.deepEqual([H.overlays.at(-1).props.view, H.overlays.at(-1).props.action, H.overlays.at(-1).props.workspace], ["confirm", "restore", "spa"]);
   await m.rightClick("sidebar-archived-spa");
@@ -1582,8 +1705,8 @@ test("the sidebar folds archived workspaces under one row and restores on click"
 test("the sidebar section sizes its block to its rows and hides them when narrow", async () => {
   const H = setup({ hws: { list: [APP, THROWAWAY] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 255 } });
-  H.layout.children[0].children[0].size.px = 255;
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 99 } });
+  H.layout.children[0].children[0].size.px = 99;
   H.runs.length = 0;
   await m.fireTimer(1000);
   assert.deepEqual(H.runs, []);
@@ -1603,50 +1726,178 @@ const GROUP = { ...APP, spaces: ["spc1", "spc3"] };
 test("sidebar lists a workspace's spaces and shows its most urgent status", async () => {
   const H = setup({ hws: { list: [GROUP] }, spaces: SPACED });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.match(m.text(), /checkout demo.*api.*web.*Add space/);
+  assert.match(m.text(), /checkout demo.*api.*web/);
+  assert.doesNotMatch(m.text(), /Add space|Add tasks/);
   assert.equal(m.has("sidebar-space-spc2"), false);
   await m.click("sidebar-space-spc3");
   assert.deepEqual(H.runs.at(-1), { name: "space.select", args: { id: "spc3" } });
 });
 
-test("a workspace with one space shows it, with no fold or minus, and offers Add space", async () => {
-  const H = setup({ hws: { list: [APP] }, spaces: SPACED });
+// Sidebar test helpers
+
+function findNode(el, id) {
+  const node = el?.node ?? el;
+  if (typeof node !== "object" || node === null) return null;
+  if (node.id === id) return node;
+  for (const c of node.children ?? []) {
+    const hit = findNode(c, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function hover(m, id, isHovered) {
+  findNode(m.render(), id).handlers.on_hover(isHovered, m.cx);
+  await settle();
+}
+
+const BOARDED = { ...GROUP, spaces: ["spc1", "spb"], board: { space: "spb", tab: "tbb" } };
+const WITH_BOARD = [...SPACED, { id: "spb", name: "Board", active: false, status: null, tabs: [{ id: "tbb", name: "Tasks", active: true }] }];
+
+test("a workspace with one space shows no child row, and its row takes the selection", async () => {
+  setup({ hws: { list: [APP] }, spaces: SPACED });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.equal(m.has("sidebar-space-spc1"), true);
+  assert.equal(m.has("sidebar-space-spc1"), false);
   assert.equal(m.has("sidebar-fold-spc1"), false);
-  assert.equal(m.has("sidebar-remove-spc1"), false);
-  await m.click("sidebar-add-space-spc1");
-  assert.deepEqual(H.overlays.at(-1).props, { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1"] });
+  assert.equal(findNode(m.render(), "sidebar-workspace-spc1").bg, "color:selected");
 });
 
-test("Add board shows only under the current workspace until it has a Board", async () => {
-  const H = setup({ hws: { list: [GROUP], "board add": { workspace: "spc1", space: "spb", tab: "tbb" } }, spaces: SPACED });
+test("a workspace with one space and a Board lists only Tasks under it", async () => {
+  setup({ hws: { list: [BOARDED] }, spaces: WITH_BOARD });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.match(m.text(), /Add space \| Add tasks/);
-  assert.doesNotMatch(m.text(), /Add board/);
-  await m.click("sidebar-add-board-spc1");
-  assert.deepEqual(args(H).find((a) => a[0] === "board"), ["board", "add", "--workspace", "spc1", "--json"]);
-  assert.deepEqual(H.runs.filter((r) => r.name !== "layout.resize").slice(-2), [{ name: "space.select", args: { id: "spb" } }, { name: "tab.select", args: { id: "tbb" } }]);
+  assert.match(m.text(), /C \| checkout demo \| Tasks/);
+  assert.equal(m.has("sidebar-space-spc1"), false);
+  assert.equal(m.has("sidebar-space-spb"), true);
+  assert.equal(m.has("sidebar-fold-spc1"), true);
+  assert.equal(findNode(m.render(), "sidebar-workspace-spc1").bg, "color:selected");
+});
 
-  setup({ hws: { list: [{ ...GROUP, board: { space: "spc3", tab: "tb3" } }] }, spaces: SPACED });
-  const added = await mount("hws-panel", { view: "sidebar" });
-  assert.equal(added.has("sidebar-add-board-spc1"), false);
+test("the active space row holds the selection and its workspace row stays quiet", async () => {
+  setup({ hws: { list: [GROUP] }, spaces: SPACED });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  const tree = m.render();
+  assert.equal(findNode(tree, "sidebar-space-spc1").bg, "color:selected");
+  assert.equal(findNode(tree, "sidebar-space-spc3").bg, undefined);
+  assert.equal(findNode(tree, "sidebar-workspace-spc1").bg, undefined);
+  assert.equal(findNode(tree, "sidebar-workspace-spc1").children[2].node.text_color, "color:foreground");
+});
 
-  setup({ hws: { list: [GROUP] }, spaces: SPACED.map((s) => ({ ...s, active: false })) });
-  const elsewhere = await mount("hws-panel", { view: "sidebar" });
-  assert.equal(elsewhere.has("sidebar-add-board-spc1"), false);
+test("every workspace row draws a letter tile in a stable color and reserves the chevron slot", async () => {
+  const other = { ...APP, id: "spc2", name: "billing", spaces: ["spc2"] };
+  setup({ hws: { list: [GROUP, other] }, spaces: SPACED, sharedValues: { "space.colors": { spc1: "ansi4" } } });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  const tree = m.render();
+  const tile = findNode(tree, "sidebar-tile-spc1");
+  assert.equal(tile.bg, "#5b8def");
+  assert.equal(tile.opacity, undefined);
+  assert.deepEqual(tile.children, ["C"]);
+  const quiet = findNode(tree, "sidebar-tile-spc2");
+  assert.deepEqual(quiet.children, ["B"]);
+  assert.equal(quiet.opacity, 0.7);
+  assert.equal(findNode(tree, "sidebar-workspace-spc2").children[2].node.text_color, "color:muted");
+
+  setup({ hws: { list: [other] }, spaces: SPACED, sharedValues: {} });
+  const again = await mount("hws-panel", { view: "sidebar" });
+  assert.equal(findNode(again.render(), "sidebar-tile-spc2").bg, quiet.bg);
+
+  const row = findNode(tree, "sidebar-workspace-spc2");
+  assert.equal(m.has("sidebar-fold-spc2"), false);
+  assert.equal(row.children[1].node.id, "sidebar-tile-spc2");
 });
 
 test("the Board is listed once and first as Tasks, opens its tab and has no minus", async () => {
-  const withBoard = { ...GROUP, board: { space: "spc3", tab: "tb3" } };
-  const H = setup({ hws: { list: [withBoard] }, spaces: SPACED.map((s) => (s.id === "spc3" ? { ...s, name: "Board" } : s)) });
+  const withBoard = { ...GROUP, spaces: ["spc1", "spc3", "spb"], board: { space: "spb", tab: "tbb" } };
+  const H = setup({ hws: { list: [withBoard] }, spaces: WITH_BOARD });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.match(m.text(), /checkout demo \| Tasks \| api \| Add space/);
+  assert.match(m.text(), /checkout demo \| Tasks \| api \| web/);
   assert.doesNotMatch(m.text(), /Board/);
+  await hover(m, "sidebar-space-spb", true);
+  assert.equal(m.has("sidebar-remove-spb"), false);
+  await m.click("sidebar-space-spb");
+  assert.deepEqual(H.runs.slice(-2), [{ name: "space.select", args: { id: "spb" } }, { name: "tab.select", args: { id: "tbb" } }]);
+});
+
+test("the minus shows only on a hovered row with two or more working spaces", async () => {
+  setup({ hws: { list: [GROUP] }, spaces: SPACED });
+  const m = await mount("hws-panel", { view: "sidebar" });
   assert.equal(m.has("sidebar-remove-spc3"), false);
-  assert.equal(m.has("sidebar-remove-spc1"), true);
-  await m.click("sidebar-space-spc3");
-  assert.deepEqual(H.runs.slice(-2), [{ name: "space.select", args: { id: "spc3" } }, { name: "tab.select", args: { id: "tb3" } }]);
+  await hover(m, "sidebar-space-spc3", true);
+  assert.equal(m.has("sidebar-remove-spc3"), true);
+  assert.equal(m.has("sidebar-remove-spc1"), false);
+  await hover(m, "sidebar-space-spc3", false);
+  assert.equal(m.has("sidebar-remove-spc3"), false);
+
+  setup({ hws: { list: [BOARDED] }, spaces: WITH_BOARD });
+  const lone = await mount("hws-panel", { view: "sidebar" });
+  await hover(lone, "sidebar-space-spb", true);
+  assert.equal(lone.has("sidebar-remove-spb"), false);
+  assert.equal(lone.has("sidebar-remove-spc1"), false);
+});
+
+test("the sidebar counts Waiting on you per Board and shares the map by space", async () => {
+  const items = [{ id: "a", column: "waiting", archived: false }, { id: "b", column: "waiting", archived: true }, { id: "c", column: "todo", archived: false }, { id: "d", column: "waiting" }];
+  const quiet = { ...APP, id: "spc2", name: "billing", spaces: ["spc2", "spq"], board: { space: "spq", tab: "tbq" } };
+  const H = setup({
+    hws: { list: [BOARDED, quiet, { ...APP, id: "spc9", spaces: ["spc9"] }], "todo list": (a) => (a.includes("spb") ? { items } : { items: [] }) },
+    spaces: WITH_BOARD,
+    sharedSets: [],
+    sharedValues: { "hws.tasks.waiting": 3 },
+  });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.deepEqual(args(H).filter((a) => a[0] === "todo"), [["todo", "list", "--space", "spb", "--json"], ["todo", "list", "--space", "spq", "--json"]]);
+  const sets = () => H.sharedSets.filter((x) => x.key === "hws.tasks.waiting");
+  assert.deepEqual(sets().at(-1).value, { spc1: 2, spb: 2, spc2: 0, spq: 0 });
+  assert.match(m.text(), /Tasks \| 2/);
+  assert.equal(m.has("sidebar-waiting-spc1"), true);
+  assert.equal(m.has("sidebar-waiting-spc2"), false);
+
+  H.sharedValues["hws.tasks.waiting"] = { spb: 2, spc1: 2, spq: 0, spc2: 0 };
+  const before = sets().length;
+  await m.fireTimer(60000);
+  assert.equal(sets().length, before);
+});
+
+test("a failed task list counts as zero and leaves the list in place", async () => {
+  const H = setup({ hws: { list: [BOARDED], "todo list": { fail: "board is locked" } }, spaces: WITH_BOARD, sharedSets: [], sharedValues: {} });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.match(m.text(), /checkout demo \| Tasks/);
+  assert.doesNotMatch(m.text(), /board is locked/);
+  assert.deepEqual(H.sharedSets.find((x) => x.key === "hws.tasks.waiting").value, { spc1: 0, spb: 0 });
+});
+
+const TALL_LAYOUT = {
+  id: "root", type: "row", children: [{
+    id: "sidebar", type: "column", size: { px: 268 }, children: [
+      { id: "brand", type: "block", size: { px: 46 } },
+      { id: "sidebar-lists", type: "column", children: [{ id: "workspaces", type: "block", size: { px: 69 }, min: 31 }, { id: "spaces", type: "block", size: { weight: 1 }, min: 90 }, { id: "agents", type: "block", size: { weight: 1 }, min: 90 }] },
+      { id: "sidebar-footer", type: "block", size: { px: 97 } },
+    ],
+  }],
+};
+const MANY = Array.from({ length: 30 }, (_, i) => ({ ...APP, id: `w${i}`, name: `work ${i}`, spaces: [`w${i}`] }));
+
+test("the list grows to the room the window leaves the other sidebar blocks", async () => {
+  const H = setup({ hws: { list: MANY }, spaces: SPACED, layout: structuredClone(TALL_LAYOUT), window: { titlebar: "none" }, files: { "/Users/me/.config/herdr-app/window.json": JSON.stringify({ bounds: [31, 40, 1994, 1211] }) } });
+  await mount("hws-panel", { view: "sidebar" });
+  // 1211 less 46, 97 and two 90px minimums leaves 888 for the block.
+  assert.deepEqual(H.runs.filter((r) => r.name === "layout.resize").at(-1), { name: "layout.resize", args: { id: "workspaces", px: 888 } });
+
+  const small = setup({ hws: { list: MANY }, spaces: SPACED, layout: structuredClone(TALL_LAYOUT) });
+  await mount("hws-panel", { view: "sidebar" });
+  assert.deepEqual(small.runs.filter((r) => r.name === "layout.resize").at(-1), { name: "layout.resize", args: { id: "workspaces", px: 31 + 480 + 8 } });
+});
+
+test("the scrollbar paints only while the rows overflow", async () => {
+  const { overflows } = await import("../hws-panel/sidebar.js");
+  setup({ hws: { list: MANY }, spaces: SPACED, layout: structuredClone(TALL_LAYOUT) });
+  const tall = await mount("hws-panel", { view: "sidebar" });
+  assert.equal(overflows(tall.view.sidebar), true);
+
+  setup({ hws: { list: [APP] }, spaces: SPACED, layout: structuredClone(TALL_LAYOUT) });
+  const short = await mount("hws-panel", { view: "sidebar" });
+  assert.equal(overflows(short.view.sidebar), false);
+  findNode(short.render(), "sidebar-root").handlers.on_size_change({ width: 268, height: 50 }, short.cx);
+  assert.equal(overflows(short.view.sidebar), true);
 });
 
 test("clicking a workspace keeps the member already showing", async () => {
@@ -1659,8 +1910,8 @@ test("clicking a workspace keeps the member already showing", async () => {
 test("the sidebar chevron folds spaces, resizes the block and remembers the choice", async () => {
   const H = setup({ hws: { list: [GROUP] }, spaces: SPACED, layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 173 } });
-  H.layout.children[0].children[0].size.px = 173;
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 121 } });
+  H.layout.children[0].children[0].size.px = 121;
   await m.click("sidebar-fold-spc1");
   assert.equal(m.has("sidebar-space-spc1"), false);
   assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 69 } });
@@ -1798,6 +2049,7 @@ test("the move dialog stays open on a failed move, and Escape closes it", async 
 test("the minus takes a space out of the workspace", async () => {
   const H = setup({ hws: { list: [GROUP] }, spaces: SPACED });
   const m = await mount("hws-panel", { view: "sidebar" });
+  await hover(m, "sidebar-space-spc3", true);
   await m.click("sidebar-remove-spc3");
   assert.deepEqual(args(H).find((a) => a[0] === "space"), ["space", "remove", "--space", "spc3", "--json"]);
   assert.equal(H.runs.some((r) => r.name === "space.select"), false);

@@ -498,8 +498,9 @@ export default class Spaces extends View {
     if (changed) setShared("space.colors", kept);
     const shownElsewhere = workspaceSpaces();
     const heading = sp.some((s) => isHidden(s, shownElsewhere)) ? "Other spaces" : "Spaces";
-    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
+    // The top border divides this list from the Workspaces list, as Agents and the footer do.
+    return v_flex().size_full().min_h(0).bg(t.chrome).border_t(1).border_color(t.border).text_size(13)
+      .child(h_flex().h(39).pt(8).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(collapsed, el => el.pl(0).pr(0).justify_center())
         .when(!collapsed, el => el.child(heading))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))

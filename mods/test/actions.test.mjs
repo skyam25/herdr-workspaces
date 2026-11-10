@@ -16,6 +16,9 @@ const BROKEN = { code: 1, stdout: "", stderr: "execution error: no display (-1)"
 const TERMINAL = { terminal: "t1", overlay: "ov1" };
 const FLIPPED = { terminal: "t1", chat: true, pane: "p2", space: "spc1", overlay: "ov1" };
 
+// The sidebar shares the ids of every space in an open workspace.
+const IN_WORKSPACE = { sharedValues: { "hws.workspace.spaces": ["spc1"] } };
+
 function world(overrides) {
   const H = setup({ writes: [], sharedSets: [], sharedValues: {}, terminals: [], ...overrides });
   H.hcCalls = [];
@@ -31,26 +34,35 @@ const osascriptCalls = (H) => H.calls.filter((c) => c.command === "osascript");
 test("a terminal agent's menu has the rows every agent gets", async () => {
   world();
   const m = await mount("hws-actions", TERMINAL);
-  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Send to phone…", "Tasks", "Outputs"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Review a page…", "Send to phone…", "Tasks", "Outputs"]);
 });
 
 test("a flipped agent with a reply gets every row in table order", async () => {
   world();
   const m = await mount("hws-actions", { ...FLIPPED, lastReply: "Done." });
-  assert.deepEqual(rows(m), ["Sketch", "Write", "Write from last reply", "Review a page…", "Send to phone…", "Attach file…", "Tasks", "Outputs"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Write a note from last reply", "Review a page…", "Send to phone…", "Attach file…", "Tasks", "Outputs"]);
+});
+
+// The 240px popup leaves 191px for a label after padding, icon and gap. At 13px a
+// label of 30 characters measures about 170px, and the longest today is 28.
+test("every fixed row fits the 240px popup", async () => {
+  assert.equal(JSON.parse(read("../hws-actions/mod.json")).overlay.width, 240);
+  world(IN_WORKSPACE);
+  const m = await mount("hws-actions", { ...FLIPPED, cwd: "/w", lastReply: "Done." });
+  for (const row of rows(m)) assert.ok(row.length <= 30, row);
 });
 
 test("Orchestrate this space comes last, after its own divider", async () => {
-  world();
+  world(IN_WORKSPACE);
   const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
-  assert.deepEqual(rows(m), ["Sketch", "Write", "Review a page…", "Send to phone…", "Tasks", "Outputs", "Orchestrate this space"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Review a page…", "Send to phone…", "Tasks", "Outputs", "Orchestrate this space"]);
   const last = m.render().node.children.at(-1).node;
   assert.equal(last.children.length, 2);
   assert.equal(last.children[1].node.id, "orchestrate");
 });
 
 test("Orchestrate this space starts one in the agent's space and folder", async () => {
-  const H = world();
+  const H = world(IN_WORKSPACE);
   const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
   await m.click("orchestrate");
 
@@ -59,11 +71,19 @@ test("Orchestrate this space starts one in the agent's space and folder", async 
 });
 
 test("a flipped agent orchestrates its space too", async () => {
-  const H = world();
+  const H = world(IN_WORKSPACE);
   const m = await mount("hws-actions", { ...FLIPPED, cwd: "/w/flip" });
   await m.click("orchestrate");
 
   assert.deepEqual(openArgs(H), [["orchestrator", "start", "--space", "spc1", "--folder", "/w/flip", "--json"]]);
+});
+
+test("Orchestrate this space is hidden on a space outside every workspace", async () => {
+  for (const sharedValues of [{}, { "hws.workspace.spaces": ["spc9"] }]) {
+    world({ sharedValues });
+    const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
+    assert.equal(m.has("orchestrate"), false, JSON.stringify(sharedValues));
+  }
 });
 
 test("Orchestrate this space is hidden when the space or folder is unknown", async () => {
@@ -75,7 +95,7 @@ test("Orchestrate this space is hidden when the space or folder is unknown", asy
 });
 
 test("a failing orchestrator start shows its message and keeps the menu open", async () => {
-  const H = world({ hws: { "orchestrator start": { fail: "claude is not installed" } } });
+  const H = world({ ...IN_WORKSPACE, hws: { "orchestrator start": { fail: "claude is not installed" } } });
   const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
   await m.click("orchestrate");
 
@@ -109,7 +129,7 @@ test("a failing hws call shows its message and keeps the menu open", async () =>
   assert.deepEqual(H.closed, []);
 });
 
-test("Write from last reply saves the reply, then opens that file as a note", async () => {
+test("Write a note from last reply saves the reply, then opens that file as a note", async () => {
   const H = world();
   const m = await mount("hws-actions", { ...TERMINAL, lastReply: "The plan is ready." });
   await m.click("write-reply");

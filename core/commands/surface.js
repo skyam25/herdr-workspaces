@@ -108,6 +108,12 @@ function ownerTerminal(flags) {
   return terminal;
 }
 
+// The title names the pane in Herdr's header, so it is one line and never blank.
+function surfaceTitle(given, file, type) {
+  const line = (given ?? '').replace(/[\x00-\x1f\x7f]+/g, ' ').trim();
+  return line || (file ? basename(file) : type);
+}
+
 // One file opens as one surface per workspace, so its draft is there when it reopens.
 function surfaceIdFor(workspace, file) {
   if (!file || isUrl(file)) return newId('s');
@@ -197,7 +203,7 @@ export function surfaceOpen(flags) {
     act('pane.focus', { pane: already.pane });
     return { data: { ...already, workspace: workspace.id, focused: true }, text: `showed ${surfaceId}` };
   }
-  const title = flags.title ?? (file ? basename(file) : flags.type);
+  const title = surfaceTitle(flags.title, file, flags.type);
   const socket = socketPath(surfaceId);
   const dataDir = surfaceDataDir(workspace.id, surfaceId);
   mkdirSync(dataDir, { recursive: true });

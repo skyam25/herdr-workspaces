@@ -202,6 +202,45 @@ test("sub-agent rows peek, and a flipped sub-agent goes to its chat", async () =
   assert.deepEqual(H.runs, [{ name: "tab.select", args: { id: "tb1" } }, { name: "pane.focus", args: { pane: "pc1" } }]);
 });
 
+const titledPane = (a, title) => ({ ...paneOf(a), title });
+const rowIds = (view, address) => nodes(byId(view, `ag-${address}`)).map((n) => n.id).filter(Boolean);
+
+test("a priority row leads with its title and names its space after it, dim", async () => {
+  const a1 = listed("t1", "tb1", "spc1"), a4 = listed("t4", "tb3", "spc2");
+  shell({ agents: [a1, a4], panes: [titledPane(a1, "✳ Fix login"), titledPane(a4, "Pick a host")] });
+  const view = await mount("hws-agents");
+  assert.equal(textOf(byId(view, "title-t1")), "Fix login");
+  assert.equal(textOf(byId(view, "where-t1")), "· alpha");
+  assert.equal(byId(view, "where-t1").text_color, "color:dim");
+  assert.ok(rowIds(view, "t1").indexOf("title-t1") < rowIds(view, "t1").indexOf("where-t1"));
+  assert.equal(textOf(byId(view, "title-t4")), "Pick a host");
+});
+
+test("a priority row leaves out the space when every agent is in one", async () => {
+  const a1 = listed("t1", "tb1", "spc1"), a3 = listed("t3", "tb2", "spc1");
+  shell({ agents: [a1, a3], panes: [titledPane(a1, "Fix login"), titledPane(a3, "Pick a host")] });
+  const view = await mount("hws-agents");
+  assert.equal(textOf(byId(view, "title-t1")), "Fix login");
+  assert.equal(byId(view, "where-t1"), null);
+  assert.equal(byId(view, "where-t3"), null);
+});
+
+test("a grouped row names no space, because its header does", async () => {
+  const a1 = listed("t1", "tb1", "spc1"), a4 = listed("t4", "tb3", "spc2");
+  shell({ agents: [a1, a4], panes: [titledPane(a1, "Fix login"), titledPane(a4, "Pick a host")], sharedValues: { "agents.sort": "grouped" } });
+  const view = await mount("hws-agents");
+  assert.equal(textOf(byId(view, "title-t1")), "Fix login");
+  assert.equal(byId(view, "where-t1"), null);
+});
+
+test("a row with only a tab number reads its program's name", async () => {
+  const a1 = listed("t1", "tb1", "spc1"), a4 = listed("t4", "tb3", "spc2");
+  shell({ agents: [a1, a4], panes: [a1, a4].map(paneOf) });
+  const view = await mount("hws-agents");
+  assert.equal(textOf(byId(view, "title-t1")), "Claude Code");
+  assert.equal(textOf(byId(view, "where-t1")), "· alpha");
+});
+
 test("the sort menu reopens this mod", async () => {
   const H = shell(sevenAgents());
   const view = await mount("hws-agents");
@@ -237,11 +276,11 @@ const tabWorld = (overrides = {}) => shell({
 
 const inTab = (view, tab) => nodes(byId(view, `tab-${tab}`));
 
-test("a tab holding a flipped agent shows its name, icon and status", async () => {
-  tabWorld();
+test("a tab holding a flipped agent shows its title, icon and status", async () => {
+  tabWorld({ terminals: [flippedTerminal("t8", "pc1", { title: "✳ Fix login" })] });
   const view = await mount("hws-tabs");
   const tab = inTab(view, "tb2");
-  assert.equal(view.text().includes("Claude Code"), true);
+  assert.match(textOf(byId(view, "tab-tb2")), /^Fix login\b/);
   assert.ok(tab.some((n) => n.kind === "svg" && n.src === "icons/claude.svg"), "the agent's icon");
   assert.ok(tab.some((n) => n.kind === "svg" && n.src === "mods/workspace-chrome/spinner.svg"), "a working spinner");
 });
@@ -255,23 +294,45 @@ test("a tab shows the most urgent of its flipped agent and its own status", asyn
   assert.ok(tab.some((n) => n.kind === "div" && n.children.length === 0), "the status dot");
 });
 
-test("the Tasks badge shows only above zero", async () => {
-  tabWorld({ sharedValues: { "hws.tasks.waiting": 3 } });
+test("tabs named after their program read each agent's own title, and a person's name stays", async () => {
+  const tab = (id, name, named, index) => ({ id, name, named, index, active: index === 1, status: null });
+  const agentPane = (tabId, title) => ({ pane: `p-${tabId}`, terminal: `t-${tabId}`, tab: tabId, program: CLAUDE, status: "idle", focused: false, title });
+  tabWorld({
+    spaces: [{ ...SPACES[0], tabs: [tab("tc1", "Claude Code", true, 1), tab("tc2", "Claude Code", true, 2), tab("tc3", "Review", true, 3), tab("tc4", "4", false, 4), tab("tc5", "Claude Code", true, 5)] }],
+    panes: [agentPane("tc1", "✳ Fix login"), agentPane("tc2", "Pick a host"), agentPane("tc3", "Write docs"), agentPane("tc4", "Tidy notes"), agentPane("tc5", "Claude Code")],
+    terminals: [],
+  });
+  const view = await mount("hws-tabs");
+  const label = (id) => textOf(byId(view, `tab-${id}`)).split(" | ")[0];
+  assert.deepEqual(["tc1", "tc2", "tc3", "tc4", "tc5"].map(label), ["Fix login", "Pick a host", "Review", "Tidy notes", "Claude Code"]);
+});
+
+test("the two tabtitle.js copies are identical", () => {
+  assert.equal(read("hws-tabs/tabtitle.js"), read("hws-agents/tabtitle.js"));
+});
+
+test("the Tasks badge shows the active space's count, only above zero", async () => {
+  tabWorld({ sharedValues: { "hws.tasks.waiting": { spc1: 3, spc2: 5 } } });
   const shown = await mount("hws-tabs");
   assert.equal(shown.has("panel-tasks-badge"), true);
-  assert.equal(shown.text().includes("3"), true);
+  assert.equal(textOf(byId(shown, "panel-tasks-badge")), "3");
 
-  for (const value of [0, undefined]) {
+  const H = globalThis.__herdr;
+  H.spaces = [{ ...SPACES[0], active: false }, { ...SPACES[1], active: true }];
+  assert.equal(textOf(byId(shown, "panel-tasks-badge")), "5", "the badge follows the space on screen");
+
+  for (const value of [{ spc1: 0 }, { spc2: 4 }, {}, 3, [3], "3", null, undefined]) {
     tabWorld({ sharedValues: { "hws.tasks.waiting": value } });
-    assert.equal((await mount("hws-tabs")).has("panel-tasks-badge"), false);
+    assert.equal((await mount("hws-tabs")).has("panel-tasks-badge"), false, JSON.stringify(value));
   }
 });
 
-test("the buttons read Workspace, Tasks, Outputs, Files, Changes, with Tasks and Outputs even when panels are restricted", async () => {
+test("the buttons read Tasks, Workspace, a divider, then Outputs, Files, Changes, with Tasks and Outputs even when panels are restricted", async () => {
   tabWorld();
   const view = await mount("hws-tabs");
-  const order = nodes(view.render()).map((n) => n.id).filter((id) => /^panel-[a-z]+$/.test(id ?? ""));
-  assert.deepEqual(order, ["panel-workspace", "panel-tasks", "panel-outputs", "panel-files", "panel-changes"]);
+  const order = nodes(view.render()).map((n) => n.id).filter((id) => /^panel-[a-z]+$/.test(id ?? "") || id === "bar-divider");
+  assert.deepEqual(order, ["panel-tasks", "panel-workspace", "bar-divider", "panel-outputs", "panel-files", "panel-changes"]);
+  assert.equal(byId(view, "bar-divider").bg, "color:border");
 
   tabWorld({ sharedValues: { "workspace.panels": ["files"] } });
   const limited = await mount("hws-tabs");
@@ -571,6 +632,15 @@ test("a worktree whose checkout is hidden stands alone, and the last shown workt
   assert.deepEqual(shape(["a2"]), [["a", null], ["a1", "└─"], ["b", null], ["b1", "└─"]]);
   assert.deepEqual(shape(["b"]), [["a", null], ["a1", "├─"], ["a2", "└─"], ["b1", null]]);
   assert.deepEqual(shape(["a"]), [["a1", null], ["a2", null], ["b", null], ["b1", "└─"]]);
+});
+
+test("the spaces list draws a top border like Agents and the footer, with room above its heading", () => {
+  const border = /\.border_t\(1\)\.border_color\(t\.border\)/;
+  assert.match(read("hws-agents/main.js").replace(/\s+/g, ""), border);
+  assert.match(read("hws-footer/main.js"), border);
+  const render = read("hws-spaces/main.js").split("  render() {")[1];
+  assert.match(render, /return v_flex\(\)\.size_full\(\)\.min_h\(0\)\.bg\(t\.chrome\)\.border_t\(1\)\.border_color\(t\.border\)/);
+  assert.match(render, /\.child\(h_flex\(\)\.h\(39\)\.pt\(8\)/);
 });
 
 test("hws-spaces draws with workspace-chrome's icons and never reaches into the stock spaces mod", () => {

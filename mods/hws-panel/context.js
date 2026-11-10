@@ -87,7 +87,12 @@ export function nameList(names) {
 // The sketch surface and artifact keep the type `board`, but a person reads `sketch`.
 export const typeLabel = (type) => (type === "board" ? "sketch" : (type ?? ""));
 
-export const countsLine = (behind) => SOURCES.map((s) => plural(Number(behind?.[s.key]) || 0, s.one)).join(" · ");
+// Zero counts drop out. With nothing behind, every source still shows its zero.
+export function countsLine(behind) {
+  const counts = SOURCES.map((s) => ({ n: Number(behind?.[s.key]) || 0, one: s.one }));
+  const shown = counts.some(({ n }) => n > 0) ? counts.filter(({ n }) => n > 0) : counts;
+  return shown.map(({ n, one }) => plural(n, one)).join(" · ");
+}
 
 // Splits a line into its words and its cites. The cites become chips after the words.
 function splitCites(text) {

@@ -4,6 +4,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { Flipped } from "./flipped.js";
+import { leadPanes, title } from "./tabtitle.js";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
 
 function find(node, id) {
@@ -48,25 +49,6 @@ function showAgent(a) {
   run("pane.focus", { pane: a.pane });
 }
 
-const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
-
-function leadPanes(all) {
-  const leads = new Map();
-  for (const p of all) {
-    if (!p.terminal) continue;
-    const current = leads.get(p.tab);
-    // First agent, else first focused terminal, else first terminal in the tab.
-    if (!current || (!current.program?.agent && (p.program?.agent || (!current.focused && p.focused)))) leads.set(p.tab, p);
-  }
-  return leads;
-}
-
-function title(tab, l) {
-  const prog = l?.program?.name;
-  const live = clean(l?.title);
-  const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
-  return (tab.name === prog || !tab.named) && telling ? live : tab.name;
-}
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
 // blocked. It's never done: it reports to its parent, and the parent's done is the news.
@@ -308,9 +290,9 @@ export default class Agents extends View {
         .when(!open, (el) => el.child(String(subs.length)));
     };
 
-    // A row reads "space \u00b7 detail": the detail is a tab someone named or the
-    // agent's own title, never an automatic tab number unless two rows would
-    // otherwise read the same.
+    // A row leads with its detail, which is a tab someone named or the agent's own
+    // title. An automatic tab number gives way to the program's name, and stays
+    // only when two rows in a space would otherwise read the same.
     // Read the pane snapshot once: every host read copies the whole list into JS.
     const leads = leadPanes([...paneList, ...flips]);
     const tabLabels = new Map(spaceList.flatMap(s => s.tabs).map(tab => [tab.id, title(tab, leads.get(tab.id))]));
@@ -322,6 +304,7 @@ export default class Agents extends View {
     for (const a of list) {
       if (detail.get(a.address) == null && seen[`${a.space_name}\u0000`] > 1) detail.set(a.address, label(a));
     }
+    const oneSpace = new Set(list.map((a) => a.space)).size <= 1;
 
     const row = (a, i, subs = []) => {
       const pic = icon(a.program, 16, t.foreground);
@@ -361,10 +344,11 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
-      // Under a space header the space goes without saying; an automatic tab number says nothing.
-      // Without a space header above (priority, pinned) the row names its space.
-      const full = byPriority || isPinned;
-      const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      // Without a space header above (priority, pinned) the row names its space after the
+      // title, dim, unless every agent is in one space. The space truncates before the title.
+      const own = label(a);
+      const name = /^\d+$/.test(own) ? [a.program?.name, more].filter(Boolean).join(" ") || own : own;
+      const where = (byPriority || isPinned) && !oneSpace ? a.space_name : "";
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
@@ -389,8 +373,8 @@ export default class Agents extends View {
             cx.notify();
           })).child(pic)))
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
-          .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
-          .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
+          .child(div().id(`title-${a.address}`).min_w(0).flex_shrink(1).truncate().text_color(idle ? t.muted : t.foreground).child(name))
+          .when(Boolean(where), el => el.child(div().id(`where-${a.address}`).min_w(0).flex_shrink(1000).truncate().text_color(t.dim).child(`\u00b7 ${where}`))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address, el => el.child(pin))

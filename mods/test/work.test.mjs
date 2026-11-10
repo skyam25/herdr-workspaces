@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { setup, mount, settle, hwsCalls, usedMethods } from "./harness.mjs";
-import { modelsLine, ago, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, orchestratorFolder, ownerTag, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, storyHeight, todoColumns, todoDialogSize, todoLayout } from "../hws-work/data.js";
+import { modelsLine, ago, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, mergeWaiting, orchestratorFolder, ownerTag, parseOutputs, replyEnded, roster, sendTargets, sessionFor, severalDialogHeight, storyHeight, todoColumns, todoDialogSize, todoLayout } from "../hws-work/data.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -178,20 +178,33 @@ test("the Waiting on you count equals the cards waiting on you", async () => {
   H.hws["todo list"] = todoList(todo("a1", "Pick a host", { column: "waiting", note: "Which host?" }), todo("a2", "Other", { column: "waiting" }), todo("a3", "Busy", { column: "doing" }));
   const m = await mount("hws-work", { view: "tasks" });
   m.render();
-  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: 2 });
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: { spc1: 2 } });
   assert.match(m.text(), /Waiting on you \| 2 \| Pick a host \| Which host\?/);
 });
 
-test("Tasks sets the waiting count once, and only when it changes", async () => {
+test("mergeWaiting sets the board's spaces, keeps the rest and reports no change as null", () => {
+  assert.deepEqual(mergeWaiting({ spz: 4, spc1: 0 }, ["spc1", "spc2"], 2), { spz: 4, spc1: 2, spc2: 2 });
+  assert.equal(mergeWaiting({ spz: 4, spc1: 2, spc2: 2 }, ["spc1", "spc2"], 2), null);
+  for (const old of [3, null, undefined, "x", [1]]) assert.deepEqual(mergeWaiting(old, ["spc1"], 0), { spc1: 0 });
+});
+
+test("Tasks merges its count for every space on the board and keeps other spaces' counts", async () => {
+  const H = world();
+  H.sharedValues["hws.tasks.waiting"] = { spz: 4, spc2: 9 };
+  H.hws["todo list"] = { ...todoList(todo("a1", "Pick a host", { column: "waiting" })), spaces: ["spc2", "spb"], workspace: "w1" };
+  await mount("hws-work", { view: "tasks" });
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: { spz: 4, spc2: 1, spb: 1, spc1: 1 } });
+});
+
+test("Tasks sets the waiting map once, and only when it changes", async () => {
   const H = world();
   H.hws["todo list"] = todoList(todo("a1", "Pick a host", { column: "waiting" }));
   const m = await mount("hws-work", { view: "tasks" });
-  m.render();
-  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: 1 });
-  H.sharedValues["hws.tasks.waiting"] = 1;
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: { spc1: 1 } });
+  H.sharedValues["hws.tasks.waiting"] = { spc1: 1, spz: 3 };
   const before = H.sharedSets.length;
   m.render();
-  m.render();
+  await m.fireTimer(10000);
   assert.equal(H.sharedSets.length, before);
 });
 
@@ -199,18 +212,26 @@ test("the waiting count drops to 0 when nothing waits", async () => {
   const H = world({ agents: [] });
   H.sharedValues["hws.tasks.waiting"] = 3;
   H.hws["todo list"] = todoList(todo("a1", "Fix login"));
-  const m = await mount("hws-work", { view: "tasks" });
-  m.render();
-  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: 0 });
+  await mount("hws-work", { view: "tasks" });
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: { spc1: 0 } });
 });
 
 test("a failed first load still sets the waiting count", async () => {
   const H = world();
-  H.sharedValues["hws.tasks.waiting"] = 3;
+  H.sharedValues["hws.tasks.waiting"] = { spc1: 3 };
   H.hws["todo list"] = { fail: "the to-do file is damaged" };
+  await mount("hws-work", { view: "tasks" });
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: { spc1: 0 } });
+});
+
+test("a failed reload keeps the count for the spaces the board last listed", async () => {
+  const H = world();
+  H.hws["todo list"] = { ...todoList(todo("a1", "Pick a host", { column: "waiting" })), spaces: ["spc1", "spb"], workspace: "w1" };
   const m = await mount("hws-work", { view: "tasks" });
-  m.render();
-  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: 0 });
+  H.sharedValues["hws.tasks.waiting"] = { spz: 2 };
+  H.hws["todo list"] = { fail: "the to-do file is damaged" };
+  await m.fireTimer(10000);
+  assert.deepEqual(H.sharedSets.at(-1), { key: "hws.tasks.waiting", value: { spz: 2, spc1: 1, spb: 1 } });
 });
 
 test("Outputs never touches the waiting count", async () => {
@@ -357,11 +378,11 @@ test("Tasks shows each card with its summary and who runs it", async () => {
   H.hws["todo list"] = todoList(todo("a1", "Fix login", { notes: "\nCheck the token\nmore" }), todo("a2", "Ship", { column: "doing", terminal: "t1" }), todo("a3", "Old", { column: "done", terminal: "t8" }));
   const m = await mount("hws-work", { view: "tasks" });
   widen(m, 860);
-  assert.match(m.text(), /Tasks \| 2/);
+  assert.match(m.text(), /Tasks \| 2 open/);
   assert.match(m.text(), /To do \| 1 \| Fix login \| Check the token/);
   assert.match(m.text(), /In progress \| 1 \| Ship \| Run by Claude Code · Working/);
   assert.match(m.text(), /Waiting on you \| 0/);
-  assert.match(m.text(), /Done \| 1 \| Archive done \| Old \| Session ended/);
+  assert.match(m.text(), /Done \| 1 \| Archive done \| Old/);
   assert.equal(/\bt8\b/.test(m.text()), false);
   assert.deepEqual(hwsCalls(H).find((c) => c.args[0] === "todo").args, ["todo", "list", "--space", "spc1", "--json"]);
 });
@@ -528,6 +549,59 @@ test("a board that has not listed its to-dos shows no hint", async () => {
   H.hws["todo list"] = { fail: "the to-do file is damaged" };
   const m = await mount("hws-work", { view: "tasks" });
   assert.equal(m.has("board-hint"), false);
+  for (const key of ["todo", "doing", "waiting", "done"]) assert.equal(m.has(`empty-${key}`), false);
+});
+
+test("each empty column says what lands there, and an empty board's To do says how to start", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "Fix login"));
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(m.has("empty-todo"), false);
+  assert.equal(textOf(findNode(m, "empty-doing")), "Cards an agent is working on");
+  assert.equal(textOf(findNode(m, "empty-waiting")), "Cards that need your answer");
+  assert.equal(textOf(findNode(m, "empty-done")), "Cards an agent has finished");
+  H.hws["todo list"] = todoList();
+  await m.fireTimer(10000);
+  assert.equal(m.has("board-hint"), true);
+  assert.equal(m.has("empty-todo"), false);
+  assert.equal(m.has("empty-doing"), true);
+  H.hws["todo list"] = todoList(todo("a2", "Ship", { column: "done" }));
+  await m.fireTimer(10000);
+  assert.equal(textOf(findNode(m, "empty-todo")), "Cards nobody has started");
+});
+
+test("the heading names the workspace and says what its number counts", async () => {
+  const H = world();
+  H.hws["todo list"] = { ...todoList(todo("a1", "One"), todo("a2", "Two", { column: "waiting" }), todo("a3", "Three", { column: "done" })), spaces: ["spc1"], workspace: "w1" };
+  H.hws.list = [{ id: "w0", name: "other" }, { id: "w1", name: "checkout demo" }];
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(m, "heading")), "Tasks · checkout demo");
+  assert.equal(textOf(findNode(m, "heading-count")), "2 open");
+  await m.fireTimer(10000);
+  assert.equal(hwsCalls(H).filter((c) => c.args[0] === "list").length, 1);
+});
+
+test("the heading reads Tasks until the workspace name loads, and asks again after a failure", async () => {
+  const H = world();
+  H.hws["todo list"] = { ...todoList(), spaces: ["spc1"], workspace: "w1" };
+  H.hws.list = { fail: "no state" };
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(m, "heading")), "Tasks");
+  H.hws.list = [{ id: "w1", name: "checkout demo" }];
+  await m.fireTimer(10000);
+  assert.equal(textOf(findNode(m, "heading")), "Tasks · checkout demo");
+});
+
+test("board controls share one button look and Allow is the card's primary button", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("a1", "One", { owner: "unassigned" }), todo("a2", "Two", { owner: "unassigned" }), todo("a3", "Done", { column: "done" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  for (const id of ["add", "add-several", "allow-all", "archive-done"]) {
+    assert.equal(findNode(m, id).bg, "color:raised", id);
+    assert.equal(findNode(m, id).text_color, "color:foreground", id);
+  }
+  assert.equal(findNode(m, "allow-a1").bg, "color:solid");
+  assert.equal(findNode(m, "allow-a1").text_color, "color:solid_foreground");
 });
 
 test("a card shows note in place of notes, with owner and Worktree tags", async () => {
@@ -635,6 +709,36 @@ test("Done keeps its N more row with to-dos in it", async () => {
   assert.equal(m.has("todo-d9"), false);
   await m.click("done-more");
   assert.equal(m.has("todo-d9"), true);
+});
+
+test("a Done card is compact, with its title, one line of summary and Open or Resume", async () => {
+  const H = world({ agents: [named], terminals: [live("t1", { status: "idle" }), { address: "t8", state: "exited" }] });
+  H.hws["todo list"] = todoList(
+    todo("d1", "Live", { column: "done", terminal: "t1", report: "Changed the host\n\nChecked it", owner: "mine", worktree: true, addedBy: "t2" }),
+    todo("d2", "Saved", { column: "done", terminal: "t8", session: { tool: "claude", id: "c1", folder: "/w" } }),
+    todo("d3", "Gone", { column: "done", terminal: "t8" }),
+  );
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(m, "todo-d1")), "Live | Open | Changed the host Checked it");
+  assert.equal(m.has("tags-d1"), false);
+  assert.equal(m.has("session-d1"), false);
+  assert.equal(textOf(findNode(m, "todo-d2")), "Saved | Resume");
+  assert.equal(textOf(findNode(m, "todo-d3")), "Gone");
+  await m.click("open-d1");
+  assert.deepEqual(H.runs.at(-1), { name: "terminal.peek", args: { terminal: "t1" } });
+});
+
+test("a compact Done card still opens and drags from its body", async () => {
+  const H = world();
+  H.hws["todo list"] = todoList(todo("d1", "Shipped", { column: "done" }));
+  const m = await mount("hws-work", { view: "tasks" });
+  press(m, "todo-d1");
+  await release(m, "todo-d1", "lane-done", "root");
+  assert.equal(H.overlays.at(-1).props.id, "d1");
+  press(m, "todo-d1");
+  hover(m, "lane-todo", true);
+  await release(m, "lane-todo", "root");
+  assert.deepEqual(moves(H).at(-1).args.slice(0, 6), ["todo", "move", "--id", "d1", "--column", "todo"]);
 });
 
 // Orchestrator
@@ -904,6 +1008,79 @@ test("the dialog offers Resume for an ended session and runs it", async () => {
   assert.deepEqual(H.closed, ["ov9"]);
 });
 
+// A reply with nowhere to go
+
+const SAVED = { tool: "claude", id: "c1", folder: "/w" };
+
+test("replyEnded holds only for a card whose reply nothing can deliver", () => {
+  assert.equal(replyEnded(todo("a", "x", { column: "waiting", terminal: "t8" }), false), true);
+  assert.equal(replyEnded(todo("a", "x", { column: "waiting" }), false), true);
+  assert.equal(replyEnded(todo("a", "x", { column: "waiting", terminal: "t8" }), true), false);
+  assert.equal(replyEnded(todo("a", "x", { column: "waiting", terminal: "t8", session: SAVED }), false), false);
+  assert.equal(replyEnded(todo("a", "x", { column: "done", terminal: "t8" }), false), true);
+  assert.equal(replyEnded(todo("a", "x", { column: "done" }), false), false);
+  assert.equal(replyEnded(todo("a", "x", { column: "doing", terminal: "t8" }), false), false);
+  assert.equal(replyEnded(todo("a", "x", { column: "waiting", terminal: "t8", archived: true }), false), false);
+});
+
+test("a waiting card whose session ended unsaved offers Move to To do on the board", async () => {
+  const H = world({ terminals: [live("t1"), { address: "t8", state: "exited" }] });
+  H.hws["todo list"] = todoList(
+    todo("w1", "Stuck", { column: "waiting", terminal: "t8" }),
+    todo("w2", "Saved", { column: "waiting", terminal: "t8", session: SAVED }),
+    todo("w3", "Live", { column: "waiting", terminal: "t1" }),
+  );
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(textOf(findNode(m, "session-w1")), "Session ended | Move to To do");
+  assert.equal(m.has("resume-w2"), true);
+  assert.equal(m.has("move-todo-w2"), false);
+  assert.equal(m.has("open-w3"), true);
+  assert.equal(m.has("move-todo-w3"), false);
+  press(m, "move-todo-w1");
+  await m.click("move-todo-w1");
+  assert.deepEqual(moves(H).at(-1).args, ["todo", "move", "--id", "w1", "--column", "todo", "--space", "spc1", "--json"]);
+  assert.deepEqual(H.overlays, []);
+});
+
+test("the dialog swaps Reply for a plain sentence and Move to To do when the session ended unsaved", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", { column: "waiting", note: "Which host?", terminal: "t8", owner: "agent" }));
+  H.terminals = [live("t1"), { address: "t8", state: "exited" }];
+  const m = await form(H, "a1");
+  assert.equal(m.has("reply-todo"), false);
+  assert.match(textOf(findNode(m, "reply-ended")), /This session has ended and cannot be reopened\. \| Move to To do/);
+  assert.equal(m.has("send-t1"), true);
+  assert.notEqual(H.focusCalls.at(-1), REPLY_PLACEHOLDER);
+  await m.click("move-todo");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["todo", "move", "--id", "a1", "--column", "todo", "--space", "spc1", "--json"]);
+  assert.deepEqual(H.closed, ["ov9"]);
+});
+
+test("a waiting card with no session at all says so and offers Move to To do", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", { column: "waiting" }));
+  const m = await form(H, "a1");
+  assert.match(textOf(findNode(m, "reply-ended")), /No session runs this card, so it cannot take a reply\./);
+});
+
+test("a Done card whose session ended unsaved swaps Feedback for Move to To do", async () => {
+  const H = dialogWorld(todo("a1", "Fix login", { column: "done", terminal: "t8" }));
+  H.terminals = [{ address: "t8", state: "exited" }];
+  const m = await form(H, "a1");
+  assert.equal(m.has("reply-todo"), false);
+  assert.match(m.text(), /Feedback \| This session has ended and cannot be reopened\./);
+  m.view.form.title.type("Fix sign in", m.cx);
+  await m.click("move-todo");
+  assert.deepEqual(hwsCalls(H).slice(1).map((c) => c.args[1]), ["edit", "move"]);
+});
+
+test("a failed Move to To do shows in the dialog and keeps it open", async () => {
+  const H = dialogWorld(todo("a1", "Pick a host", { column: "waiting", terminal: "t8" }));
+  H.hws["todo move"] = { fail: "no to-do a1 in space spc1" };
+  const m = await form(H, "a1");
+  await m.click("move-todo");
+  assert.match(m.text(), /no to-do a1 in space spc1/);
+  assert.deepEqual(H.closed, []);
+});
+
 test("Stop asks first and runs nothing until confirmed", async () => {
   const H = orchWorld({ terminal: "t1", live: true });
   const m = await mount("hws-work", { view: "tasks" });
@@ -1017,7 +1194,7 @@ test("a card names its runner as Orchestrator, Worker or an agent, never by addr
 
 test("Open shows only for a live session and peeks a worker with no pane", async () => {
   const H = world({ terminals: [worker, { address: "t8", state: "exited" }] });
-  H.hws["todo list"] = todoList(todo("a1", "Live", { column: "doing", terminal: "t20" }), todo("a2", "Gone", { column: "done", terminal: "t8" }));
+  H.hws["todo list"] = todoList(todo("a1", "Live", { column: "doing", terminal: "t20" }), todo("a2", "Gone", { column: "doing", terminal: "t8" }));
   const m = await mount("hws-work", { view: "tasks" });
   widen(m, 860);
   assert.equal(m.has("open-a2"), false);
@@ -1037,7 +1214,7 @@ test("Open focuses a session that has a pane", async () => {
 
 test("a card nobody has run keeps its face short and tags who added it", async () => {
   const H = world({ agents: [named], terminals: [live("t1", { status: "working" })] });
-  H.hws["todo list"] = todoList(todo("a1", "Added", { addedBy: "t1", column: "done", note: "Shipped" }));
+  H.hws["todo list"] = todoList(todo("a1", "Added", { addedBy: "t1", column: "waiting", note: "Which host?" }));
   const m = await mount("hws-work", { view: "tasks" });
   assert.equal(m.has("session-a1"), false);
   assert.equal(textOf(findNode(m, "tags-a1")), "From Claude Code");
@@ -1353,7 +1530,7 @@ const form = async (H, id) => {
 };
 
 const dialogWorld = (...items) => {
-  const H = world({ agents: [{ ...agent("t1"), program: { key: "claude", name: "Claude Code" } }, { ...agent("t2"), app: "codex", program: { key: "codex", name: "Codex" } }] });
+  const H = world({ agents: [{ ...agent("t1"), program: { key: "claude", name: "Claude Code" } }, { ...agent("t2"), app: "codex", program: { key: "codex", name: "Codex" } }], terminals: [live("t1"), live("t2")] });
   H.hws["todo list"] = todoList(...items);
   H.hws["todo add"] = (args) => ({ ...todo("new1", "x"), args });
   return H;

@@ -100,16 +100,43 @@ const LINKED_CARD = { id: "a1", title: "Pick a host", notes: "Brief", note: "Whi
 const LINKED_HEADER = `const __terminals = () => [{ address: "t13", state: "live", status: "working", labels: {} }, { address: "t22", state: "exited", labels: {} }];\n`;
 const useLinked = (s) => s.replaceAll("terminals()", "__terminals()");
 const linkedDialog = (s) => useLinked(s).replaceAll("props()", "__props()").replace("if (this.id) this.load(cx);", `this.item = ${JSON.stringify(LINKED_CARD)}; this.orchestrator = "t13"; this.column = "waiting"; this.owner = "agent";`);
+const ENDED_CARD = { ...LINKED_CARD, terminal: "t22", addedBy: null, session: null };
+const endedDialog = (s) => useLinked(s).replaceAll("props()", "__props()").replace("if (this.id) this.load(cx);", `this.item = ${JSON.stringify(ENDED_CARD)}; this.column = "waiting"; this.owner = "agent";`);
 
 const SPACE_MENU = { view: "space-menu", space: "spc3", workspace: "spc1", workspaceName: "checkout demo", canLeave: true, overlay: "o" };
 const MOVE_SPACE = { view: "move-space", id: "spc2", name: "a space with a name long enough to truncate in the heading", folder: "/w/docs", overlay: "o" };
 const DESTINATIONS = [{ id: "w1", name: "docs", kind: "app" }, { id: "w2", name: "a workspace with a name long enough to truncate in its row", kind: "general" }, { id: "w3", name: "scrap", kind: "throwaway" }];
 const spaceMenuFile = (menuProps) => ({ "spacemenu.js": { header: `const __props = () => (${JSON.stringify(menuProps)});\n`, patch: (s) => s.replaceAll("props()", "__props()") } });
 
+// The sidebar footer and its Phones popup. phones.js goes through `files`, because main.js imports it.
+const PHONE_NOW = "Date.now()";
+const PHONES = [
+  `{ id: "d1", name: "iPhone", lastSeen: ${PHONE_NOW} - 30000, pairedAt: ${PHONE_NOW} - 3 * 86400000 }`,
+  `{ id: "d2", name: "iPad with a name long enough to truncate in the popup", lastSeen: ${PHONE_NOW} - 2 * 86400000, pairedAt: ${PHONE_NOW} - 40 * 86400000 }`,
+];
+const HANDOFFS = Array.from({ length: 7 }, (_, i) => `{ id: "h${i}", sessionId: "p${i}", sessionLabel: "demo · Claude Code", page: "docs/page-${i}.html", boardName: "ipad-h${i}", createdAt: 1, state: "open" }`);
+const phonesFile = (patch = (s) => s) => ({ "phones.js": { header: "", patch } });
+const phonesState = (status, extra = "", more = (s) => s) => phonesFile((s) => more(s).replace("this.status = null;", `this.status = ${status};`).replace("this.seq = 0;", `this.seq = 0; ${extra}`).replace("async load() {", "async load() { return;"));
+const footerPaired = (s) => s.replace("this.devices = null;", `this.devices = [${PHONES[0]}];`);
+const POPUP_PROPS = { view: "phones", overlay: "o" };
+const FOOTER_VARIANTS = [
+  { mod: "hws-footer", name: "footer-paired", props: undefined, patch: footerPaired, files: phonesFile() },
+  { mod: "hws-footer", name: "footer-rail-paired", props: undefined, patch: (s) => footerPaired(s).replace("const narrow = () =>", "const narrow = () => true || "), files: phonesFile() },
+  { mod: "hws-footer", name: "phones-reading", props: POPUP_PROPS, files: phonesState("null") },
+  { mod: "hws-footer", name: "phones-two-waiting", props: POPUP_PROPS, files: phonesState(`{ running: true, devices: [${PHONES.join(", ")}], handoffs: [${HANDOFFS.join(", ")}] }`) },
+  { mod: "hws-footer", name: "phones-confirm", props: POPUP_PROPS, files: phonesState(`{ running: true, devices: [${PHONES.join(", ")}], handoffs: [] }`, 'this.confirming = "d2";') },
+  { mod: "hws-footer", name: "phones-forgetting", props: POPUP_PROPS, files: phonesState(`{ running: true, devices: [${PHONES.join(", ")}], handoffs: [] }`, 'this.forgetting = "d1";') },
+  { mod: "hws-footer", name: "phones-none", props: POPUP_PROPS, files: phonesState("{ running: false, devices: [], handoffs: [] }") },
+  { mod: "hws-footer", name: "CONTROL-phones-typo", props: POPUP_PROPS, expectFailure: true, files: phonesState(`{ running: true, devices: [${PHONES[0]}], handoffs: [] }`, 'this.confirming = "d1";', (s) => s.replace(".id(`forget-${device.id}-confirm`)", ".id(`forget-${device.id}-confirm`).no_such_builder()")) },
+  { mod: "hws-footer", name: "phones-problem", props: POPUP_PROPS, files: phonesState("null", 'this.problem = "Couldn\'t read the phone status.";') },
+];
+
 const VARIANTS = [
   { mod: "hws-work", name: "board-run-allow", props: { view: "tasks" }, patch: boardState('this.todos = [{ id: "r1", title: "Ready", notes: "", column: "todo", owner: "agent", kind: "todo" }, { id: "u1", title: "One", notes: "", column: "todo", owner: "unassigned", kind: "todo" }, { id: "u2", title: "Two", notes: "", column: "todo", owner: "unassigned", kind: "todo" }, { id: "x1", title: "Ended", notes: "", column: "done", terminal: "t99", owner: "agent", session: { tool: "codex", id: "c1", folder: "/w" }, kind: "todo" }];') },
   { mod: "hws-work", name: "board-linked-card", props: { view: "tasks" }, header: LINKED_HEADER, patch: (s) => useLinked(boardState(`this.todos = [${JSON.stringify(LINKED_CARD)}];`)(s)) },
   { mod: "hws-work", name: "todo-dialog-linked", props: { view: "todo", space: "spc1", id: "a1", height: 700 }, files: { "todo.js": { header: `const __props = () => (${JSON.stringify({ view: "todo", space: "spc1", id: "a1", height: 700 })});\n${LINKED_HEADER}`, patch: linkedDialog } } },
+  { mod: "hws-work", name: "board-reply-ended", props: { view: "tasks" }, header: LINKED_HEADER, patch: (s) => useLinked(boardState(`this.todos = [${JSON.stringify(ENDED_CARD)}, ...${JSON.stringify(DONE_CARDS)}]; this.workspace = { id: "spc1", name: "checkout demo" };`)(s)) },
+  { mod: "hws-work", name: "todo-dialog-reply-ended", props: { view: "todo", space: "spc1", id: "a1", height: 700 }, files: { "todo.js": { header: `const __props = () => (${JSON.stringify({ view: "todo", space: "spc1", id: "a1", height: 700 })});\n${LINKED_HEADER}`, patch: endedDialog } } },
   { mod: "hws-work", name: "board-orchestrating", props: { view: "tasks" }, patch: boardState("") },
   { mod: "hws-work", name: "board-stop-confirm", props: { view: "tasks" }, patch: boardState("this.confirmingStop = true;") },
   { mod: "hws-work", name: "board-stopping", props: { view: "tasks" }, patch: boardState('this.orchestratorBusy = "stop";') },
@@ -117,7 +144,7 @@ const VARIANTS = [
   { mod: "hws-work", name: "board-archive-confirm", props: { view: "tasks" }, patch: boardState(`this.todos = ${JSON.stringify(DONE_CARDS)}; this.confirmingArchive = true;`) },
   { mod: "hws-work", name: "board-archiving", props: { view: "tasks" }, patch: boardState(`this.todos = ${JSON.stringify(DONE_CARDS)}; this.archiving = true;`) },
   { mod: "hws-actions", name: "actions-orchestrate", props: { terminal: "t13", space: "spc1", cwd: "/w", overlay: "o" } },
-  { mod: "hws-new", name: "menu-orchestrate", props: { overlay: "o" }, header: LIVE_HEADER, patch: (s) => s.replaceAll("focused()", "__focused()").replaceAll("spaces()", '__spaces().map((x) => ({ ...x, active: true, folder: "/w" }))') },
+  { mod: "hws-new", name: "menu-orchestrate", props: { overlay: "o" }, header: LIVE_HEADER, patch: (s) => s.replaceAll("focused()", "__focused()").replaceAll("spaces()", '__spaces().map((x) => ({ ...x, active: true, folder: "/w" }))').replace('shared("hws.workspace.spaces")', '["spc1"]') },
   { mod: "hws-new", name: "form", props: { step: "workspace" } },
   { mod: "hws-new", name: "form-from-space", props: { step: "workspace", space: { id: "spc1", name: "a space with a name long enough to truncate in the dialog's heading", folder: "/Users/me/Projects/checkout" } } },
   { mod: "hws-new", name: "form-problem", props: { step: "workspace" }, patch: (s) => s.replace("this.problem = null;", 'this.problem = "That folder does not exist.";') },
@@ -136,6 +163,7 @@ const VARIANTS = [
   { mod: "hws-panel", name: "panel-reader", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.reading = null;", 'this.reading = { title: "Spec", text: "# Hello", isLoading: false, reveal: "/a/spec.md" };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-outside-match", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];").replace("this.match = null;", 'this.match = { spaceId: "spc1", candidates: [{ id: "w1", name: "checkout", folder: "/w", home: null }, { id: "w2", name: "a workspace with a long name", folder: "/", home: null }] };').replace("this.note = null;", 'this.note = { text: "Could not move the space.", isError: true };') },
+  { mod: "hws-panel", name: "panel-outside-one", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];").replace("this.match = null;", 'this.match = { spaceId: "spc1", candidates: [{ id: "w1", name: "checkout", folder: "/w", home: null }] };') },
   { mod: "hws-panel", name: "panel-problem", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.problem = null;", 'this.problem = "hws failed";') },
   { mod: "hws-panel", name: "panel-kept", props: {}, header: LIVE_HEADER, patch: keptPanel(CONTEXT, 'this.tasks = { workspaceId: "spc1", counts: { todo: 2, doing: 1, waiting: 1 } };') },
   { mod: "hws-panel", name: "panel-kept-no-board", props: {}, header: LIVE_HEADER, patch: (s) => keptPanel(CONTEXT)(s).replace('"board":{"space":"spb","tab":"tbb"}', '"board":null,"stage":null,"home":"/w/docs/a/folder/deep/enough/to/truncate/in/the/middle"') },
@@ -147,11 +175,13 @@ const VARIANTS = [
   { mod: "hws-panel", name: "panel-record", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", `this.manifests = [${JSON.stringify(withSession)}];`).replace("this.context = null;", `this.context = ${JSON.stringify(RECORD)}; this.showSuperseded = true;`) },
   { mod: "hws-panel", name: "sidebar-fresh", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify(KEPT)}, __MANIFEST], problem: null, folded: new Set(), ahead: {}, fresh: { spc1: { level: "stale", title: "Current is 9 sessions behind" } } };`) },
   { mod: "hws-panel", name: "sidebar-tasks", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify({ ...KEPT, spaces: ["spc1", "spb"] })}], problem: null, folded: new Set(), ahead: {}, fresh: { spc1: { level: "unwritten", title: "No current note yet" } } };`), files: { "sidebar.js": { header: 'const __spaces = () => [{ id: "spc1", name: "api", active: true, status: "idle", tabs: [] }, { id: "spb", name: "Board", active: false, status: null, tabs: [] }];\n', patch: (s) => s.replaceAll("spaces()", "__spaces()") } } },
+  { mod: "hws-panel", name: "sidebar-waiting-hover", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify({ ...KEPT, spaces: ["spc1", "spc3", "spb"] })}], problem: null, folded: new Set(), ahead: {}, fresh: {}, waiting: { spc1: 3 }, hovered: "spc3", blockPx: 60 };`), files: { "sidebar.js": { header: 'const __spaces = () => [{ id: "spc1", name: "api", active: false, status: "idle", tabs: [] }, { id: "spc3", name: "web", active: true, status: null, tabs: [] }, { id: "spb", name: "Board", active: false, status: null, tabs: [] }];\n', patch: (s) => s.replaceAll("spaces()", "__spaces()") } } },
   { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null, folded: new Set(), ahead: {}, fresh: {} };") },
   { mod: "hws-panel", name: "add-space", props: { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1"] }, header: LIVE_HEADER },
   { mod: "hws-panel", name: "sidebar-archived", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [__MANIFEST], archived: [${JSON.stringify(KEPT)}], showArchived: true, problem: null, folded: new Set(), ahead: {}, fresh: {} };`) },
   { mod: "hws-panel", name: "stage-menu", props: { view: "stage-menu", workspace: "spc1", overlay: "o" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "stage-menu", workspace: "spc1", overlay: "o" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
   { mod: "hws-panel", name: "row-menu-kept",props: { view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: false, overlay: "o" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: false, overlay: "o" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
+  { mod: "hws-panel", name: "row-menu-adds", props: { view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: false, space: "spc1", spaces: ["spc1"], board: false, overlay: "o" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: false, space: "spc1", spaces: ["spc1"], board: false, overlay: "o" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
   { mod: "hws-panel", name: "row-menu-archived", props: { view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: true, overlay: "o" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "row-menu", workspace: "spc1", name: "checkout", kind: "app", archived: true, overlay: "o" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
   { mod: "hws-panel", name: "space-menu-member", props: SPACE_MENU, patch: (s) => s.replace("initSpaceMenu(this, cx);", 'this.git = "linked";'), files: spaceMenuFile(SPACE_MENU) },
   { mod: "hws-panel", name: "space-menu-plain", props: { view: "space-menu", space: "spc2", overlay: "o" }, patch: (s) => s.replace("initSpaceMenu(this, cx);", "this.git = null;"), files: spaceMenuFile({ view: "space-menu", space: "spc2", overlay: "o" }) },
@@ -161,12 +191,21 @@ const VARIANTS = [
   { mod: "hws-panel", name: "confirm-archive", props: { view: "confirm", action: "archive", workspace: "spc1", name: "checkout", kind: "app" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "confirm", action: "archive", workspace: "spc1", name: "checkout", kind: "app" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
   { mod: "hws-panel", name: "sidebar-empty", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [], problem: null };") },
   { mod: "hws-panel", name: "sidebar-problem", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", 'this.sidebar = { workspaces: null, problem: "hws failed" };') },
-  { mod: "hws-tabs", name: "tabs-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace('shared("hws.tasks.waiting")', "3") },
+  { mod: "hws-tabs", name: "tabs-flipped", props: {}, header: FLIP_HEADER, patch: (s) => {
+    if (!s.includes('shared("hws.tasks.waiting")')) throw new Error('hws-tabs/main.js has no shared("hws.tasks.waiting") to force a count on');
+    return flipWorld(s).replace('shared("hws.tasks.waiting")', "({ spc1: 3 })");
+  } },
   { mod: "hws-agents", name: "agents-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("this.folded = new Set();", 'this.folded = new Set(); this.hovered = "t22";') },
+  { mod: "hws-agents", name: "agents-spaces-named", props: {}, header: FLIP_HEADER, patch: (s) => {
+    const anchor = "const oneSpace = new Set(list.map((a) => a.space)).size <= 1;";
+    if (!s.includes(anchor)) throw new Error(`hws-agents/main.js has no "${anchor}" to force a state on`);
+    return flipWorld(s).replace(anchor, "const oneSpace = false;");
+  } },
   { mod: "hws-agents", name: "agents-rail", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("const narrow = () =>", "const narrow = () => true || ") },
   { mod: "hws-spaces", name: "spaces-hidden", props: {}, header: FLIP_HEADER, patch: (s) => s.replaceAll("spaces()", '[...__spaces(), { id: "spc2", name: "hidden", active: false, machine: null, tabs: [] }, { id: "spc3", name: "other", active: false, machine: null, tabs: [] }]').replace("shared(WORKSPACE_SPACES)", '["spc2"]') },
   { mod: "hws-spaces", name: "spaces-all-hidden-rail", props: {}, header: FLIP_HEADER, patch: (s) => s.replaceAll("spaces()", "__spaces()").replace("shared(WORKSPACE_SPACES)", '["spc1"]').replace("const narrow = () =>", "const narrow = () => true || ") },
-  { mod: "hws-work", name: "CONTROL-board-typo", props: { view: "tasks" }, expectFailure: true, patch: (s) => boardState("")(s).replace("rowAction(t, id, text, action, color = null) {\n    return div()", "rowAction(t, id, text, action, color = null) {\n    return div().no_such_builder()") },
+  ...FOOTER_VARIANTS,
+  { mod: "hws-work", name: "CONTROL-board-typo", props: { view: "tasks" }, expectFailure: true, patch: (s) => boardState("")(s).replace("rowAction(t, id, text, action, primary = false) {\n    return buttonLook(div()", "rowAction(t, id, text, action, primary = false) {\n    return buttonLook(div().no_such_builder()") },
   { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('dialogRoot(t, "hws-new-form")', 'dialogRoot(t, "hws-new-form").no_such_builder()') },
 ];
 
@@ -176,7 +215,7 @@ for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  for (const file of ["hws.js", "sidebar.js", "rowmenu.js", "spacemenu.js", "artifactmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "board.js", "data.js", "open.js", "todo.js"]) {
+  for (const file of ["hws.js", "sidebar.js", "rowmenu.js", "spacemenu.js", "artifactmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "tabtitle.js", "board.js", "data.js", "open.js", "todo.js"]) {
     if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
   }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");

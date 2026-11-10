@@ -6,6 +6,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { closeOverlay, openOverlay, panes, props, run, spaces } from "herdr";
 import { hws, submitDialog, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, button, problemLine } from "./hws.js";
 import { STAGES } from "./context.js";
+import { showBoard } from "./cites.js";
 
 const MOD = "hws-panel";
 const MENU_WIDTH = 176;
@@ -15,6 +16,7 @@ const MENU_PADDING_PX = 4;
 
 const RENAME_DIALOG = { width: 420, height: 170 };
 const CONFIRM_DIALOG = { width: 440, height: 176 };
+const ADD_SPACE_DIALOG = { width: 440, height: 460 };
 
 const openDialog = ({ width, height }, dialogProps) => openOverlay({ mod: MOD, kind: "dialog", modal: true, width, height, props: dialogProps });
 
@@ -50,16 +52,35 @@ function openPanel(spaceId) {
   if (anchor) run("pane.split", { direction: "right", pane: anchor.pane, mod: MOD, props: anchor.terminal ? { terminal: anchor.terminal } : {} });
 }
 
+function openAddSpace(target) {
+  const dialogProps = { view: "add-space", workspace: target.workspace, name: target.name, spaces: target.spaces };
+  openDialog(ADD_SPACE_DIALOG, dialogProps);
+}
+
+// The sidebar reloads once the Board space appears.
+function addTasks(target) {
+  hws(["board", "add", "--workspace", target.workspace]).then(showBoard).catch(() => {});
+}
+
+// Only the sidebar's target carries `spaces`, so the panel's ··· menu leaves these out.
+function addItems(target) {
+  if (!Array.isArray(target.spaces)) return [];
+  const addSpace = { id: "add-space", label: "Add space…", open: () => openAddSpace(target) };
+  return target.board ? [addSpace] : [addSpace, { id: "add-tasks", label: "Add tasks", open: () => addTasks(target) }];
+}
+
 function menuItems(target) {
   const panel = target.space ? [{ id: "panel", label: "Open panel", open: () => openPanel(target.space) }] : [];
   const rename = { id: "rename", label: "Rename…", open: () => openRename(target) };
   const confirm = (id, label) => ({ id, label, open: () => openConfirm(id, target) });
   if (target.archived) return [confirm("restore", "Restore…"), rename, confirm("remove", "Remove…")];
-  if (target.kind === "throwaway") return [...panel, rename, confirm("close", "Close…")];
-  return [...panel, rename, confirm("archive", "Archive…")];
+  const adds = addItems(target);
+  if (target.kind === "throwaway") return [...panel, ...adds, rename, confirm("close", "Close…")];
+  return [...panel, ...adds, rename, confirm("archive", "Archive…")];
 }
 
-// `target` is `{ workspace, name, kind, archived }`.
+// `target` is `{ workspace, name, kind, archived, space }`. The sidebar adds
+// `spaces` and `board`, whether the workspace has a Board.
 export function openRowMenu(target) {
   const height = menuItems(target).length * MENU_ROW_PX + MENU_PADDING_PX * 2;
   openOverlay({ mod: MOD, kind: "popup", width: MENU_WIDTH, height, props: { ...target, view: "row-menu" } });

@@ -102,6 +102,35 @@ test('standalone surface opens a tab in the selected space with no workspace', (
   assert.match(record.pane, /^p/);
 });
 
+test('every pane gets a one-line title, the given one or else the file name', (t) => {
+  const box = sandbox(t);
+  box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
+  let bundles = 0;
+
+  // Each open shows a new file, so none of them finds a pane already open.
+  const opened = (args) => {
+    const file = join(box.folder(`bundle-${++bundles}`), 'prompt.md');
+    writeFileSync(file, 'Apply it.');
+    box.clearCalls();
+    const surface = box.json(['surface', 'open', '--type', 'page', '--file', file, ...args]);
+    const [call] = box.actions();
+    return { surface, call, environment: hostEnvOf(call) };
+  };
+
+  const named = opened(['--title', 'Task workflow', '--standalone']);
+  assert.equal(named.environment.HWS_SURFACE_TITLE, 'Task workflow');
+  assert.equal(named.call[named.call.indexOf('--name') + 1], 'Task workflow');
+
+  for (const blank of ['', '   ']) {
+    const fallback = opened(['--title', blank, '--standalone']);
+    assert.equal(fallback.environment.HWS_SURFACE_TITLE, 'prompt.md');
+    assert.equal(fallback.surface.title, 'prompt.md');
+  }
+
+  const glued = opened(['--title', 'Two\nlines', '--terminal', 't1']);
+  assert.equal(glued.environment.HWS_SURFACE_TITLE, 'Two lines');
+});
+
 test('standalone surface in a workspace space belongs to that workspace', (t) => {
   const box = sandbox(t);
   const manifest = box.app();

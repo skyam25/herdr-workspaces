@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import { hasAnnotations } from '../shared/annotations';
 import type { BoardEntry, CompanionApi, Draft } from '../shared/ipc';
 import { outlinePathFor } from '../shared/outline';
+import type { Delivery } from './delivery';
 import type { DraftBook } from './drafts';
 import { FileUnder, type FilingTab } from './FilingMenu';
 import { DeleteItem, MoreMenu } from './FooterMenu';
@@ -84,8 +85,10 @@ export function DraftEditor(props: {
   onCopyReference: () => void;
   /** The target chip and Send, last in the footer. */
   sendBar?: ReactNode;
-  /** A surface has one note, so filing, queueing and deleting it mean nothing. */
+  /** A surface has one note and no boards, so filing, queueing, deleting and linking a board mean nothing. */
   surface?: boolean;
+  /** The buttons that hand the note over, which the source line names. */
+  delivery?: Delivery;
   /** The mic, which talks to this note's comments. */
   voice: ReviewVoice;
   /** The mic is on, so a selection becomes a comment at once. */
@@ -188,7 +191,7 @@ export function DraftEditor(props: {
       )}
       {draft.source && (
         <p className="draft-source muted" data-testid="draft-source">
-          {sourceLine(draft.source.path, sourceOutline, props.surface ? 'Done' : 'Send')}
+          {sourceLine(draft.source.path, sourceOutline, props.delivery)}
         </p>
       )}
       {draft.source && fileChanged && (
@@ -233,26 +236,30 @@ export function DraftEditor(props: {
         )}
       </div>
       <footer>
-        <label className={draft.board ? 'board-pick' : 'board-pick unset'} title="A board whose sketch goes out with this draft">
-          <LinkIcon />
-          <select
-            aria-label="Board"
-            value={draft.board ?? ''}
-            onChange={(e) => book.link(draft.id, e.target.value || undefined)}
-            data-testid="draft-board"
-          >
-            <option value="">Board</option>
-            {boardOptions.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </label>
-        {draft.board && (
-          <button className="ghost small link" onClick={() => props.onOpenBoard(draft.board!)} data-testid="draft-open-board">
-            Open board
-          </button>
+        {!props.surface && (
+          <>
+            <label className={draft.board ? 'board-pick' : 'board-pick unset'} title="A board whose sketch goes out with this draft">
+              <LinkIcon />
+              <select
+                aria-label="Board"
+                value={draft.board ?? ''}
+                onChange={(e) => book.link(draft.id, e.target.value || undefined)}
+                data-testid="draft-board"
+              >
+                <option value="">Board</option>
+                {boardOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {draft.board && (
+              <button className="ghost small link" onClick={() => props.onOpenBoard(draft.board!)} data-testid="draft-open-board">
+                Open board
+              </button>
+            )}
+          </>
         )}
         <span className="spacer" />
         {(book.saveError || props.shelf.saveError) && (

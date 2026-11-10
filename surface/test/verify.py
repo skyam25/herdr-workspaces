@@ -84,6 +84,7 @@ def note_new():
     name = 'note_new'
     s = Surface('nn1', ROOT, surface_type='note', title='Launch memo')
     s.wait(7)
+    check(name, 'pane_title', s.d.title == 'Launch memo', s.d.title)
     s.d.click(1200, 500)
     s.wait(0.5)
     for ch in 'Ship the surface first.':
@@ -231,6 +232,7 @@ def page_standalone():
     folder, path = demo_page('proj-solo')
     s = Surface('ps1', ROOT, surface_type='page', title='demo', file=path, folder=folder, terminal='', mode='standalone')
     s.wait(9)
+    check(name, 'pane_title', s.d.title == 'demo', s.d.title)
     pin(s, 'tighten this')
     s.d.click(*DONE)
     s.wait(6)

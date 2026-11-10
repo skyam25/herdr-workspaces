@@ -95,7 +95,7 @@ The audit found these from reading code.
 
 - [ ] Make `/sketch` and the band open a glued surface inside Herdr. They still open the old panel.
 - [ ] Decide what the plugin's Brief pane does when the `hws-brief` mod is available.
-- [ ] Remove the leftover `Board` chip from the note footer.
+- [x] Remove the leftover `Board` chip from the note footer. A surface in a pane hides it, and the Agent Brief panel keeps it.
 
 ### 5. Reduce the cost per surface
 
@@ -187,7 +187,7 @@ Built 2026-11-09 by four Opus workers against fakes, then installed. The lead sa
 - [ ] Press the Tasks line in the panel, and Add tasks on a workspace with no Board.
 - [ ] Press Archive done in Tasks and confirm.
 - [ ] Drag a space in Other spaces while workspace spaces are hidden.
-- [ ] Make the Tasks badge in the tab bar follow the workspace on screen. It shows the count from the last Tasks pane that drew.
+- [x] Make the Tasks badge in the tab bar follow the workspace on screen. `hws.tasks.waiting` is a count per space, written by the sidebar and the Tasks pane.
 
 ### 13. Test the review loop by hand
 
@@ -211,3 +211,24 @@ Built 2026-11-09 against fakes, then installed. The window reported no errors, a
 - [ ] Right-click a space under a workspace with two spaces. Take out of NAME should make it a plain space, and Move to workspace… should leave out its own workspace.
 - [ ] Right-click a workspace's only space. The menu should show neither move item.
 - [ ] Press Make this space a workspace… in the panel of a plain space.
+
+### 15. Test the UI review fixes by hand
+
+Built 2026-11-09 by six Opus workers against fakes, after a review of the live window. Nobody has clicked any of it.
+
+- [ ] Read the Workspaces list. Each workspace should show a letter tile in its space's colour, every name should start at the same x, and a workspace with one space should show no child row for it.
+- [ ] Select the last workspace in the list. Its rows should stay on screen, and Other spaces and Agents should keep at least 90px each.
+- [ ] Right-click a workspace row and choose Add space… and Add tasks.
+- [ ] Hover a space row under a workspace with two spaces. The minus should show only on that row.
+- [ ] Move a card to Waiting on you. Its count should show on the sidebar's Tasks row and on the tab bar's Tasks button, and the button should follow the space on screen.
+- [ ] Open the Waiting on you card whose session has ended. The dialog should offer Move to To do in place of Reply.
+- [ ] Read the Tasks heading, the buttons, a Done card and an empty column.
+- [ ] Open the Workspace panel on a kept workspace with a separate home, and on a plain space with one matching workspace.
+- [ ] Read the Agents list with agents in two spaces, and the tab names of unnamed Claude tabs.
+- [ ] Open the launcher and the `+` menu on a plain space. Neither should offer Orchestrate this space.
+- [ ] Open a standalone note and read the line under its title. It should name Open terminal and Copy link.
+- [ ] Click the Phone row with a phone paired. The Phones popup should open above the row, list the phone as Connected or with its last seen time, and Forget should ask first.
+- [ ] Press Pair another phone or iPad in that popup. The Pair phone tab should open, and the row should gain the new name.
+- [ ] Close the panes that started before commit 015706a. They still show a terminal address as their title.
+- [ ] Section 14 expects a menu on a workspace's only space. That space no longer has a row, so decide whether the workspace row's menu should carry Rename and Close for it.
+

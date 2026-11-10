@@ -7,6 +7,7 @@ import { isLocalUrl } from '../shared/outputs';
 import { anchorLabel, baseName, commentCount, sitePage, type DraftReview, type ReviewAnchor, type ReviewComment, type ReviewRect } from '../shared/review';
 import type { InsertKind, ReviewEdit, SelectedElement } from '../shared/review-edit';
 import { isTagged, pagePin, REVIEW_SOURCE, type FromPage, type PagePin, type ToPage } from '../review/messages';
+import { pageHint, type Delivery } from './delivery';
 import type { DraftBook } from './drafts';
 import { newPictureId } from './editor/pictures';
 import { useStore } from './hooks';
@@ -104,6 +105,8 @@ export function ReviewView(props: {
   onOpenFeedbackItem?: (output: string, n: number) => void;
   /** Copies a line that brings this page into another Claude Code session. */
   onCopyReference: () => void;
+  /** The buttons that hand the comments over, which the line under them names. */
+  delivery?: Delivery;
 }) {
   const { book, draft, host } = props;
   const voice = useStore(props.voice);
@@ -684,7 +687,7 @@ export function ReviewView(props: {
         </ol>
       )}
       <footer className="muted review-foot">
-        {count > 0 ? `${commentCount(count)} · ⌘↩ sends with pictures` : 'Send hands Claude each comment with a picture of its element.'}
+        {pageHint(props.delivery ?? 'send', count > 0 ? commentCount(count) : undefined)}
       </footer>
     </>
   );

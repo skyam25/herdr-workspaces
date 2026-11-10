@@ -5,6 +5,7 @@
  */
 
 import type { CiteMark, DirectionScope, OutlineCite, OutlineDoc, OutlineIntentLine, OutlineKind, OutlineOp, OutlinePoint, OutlineSection } from '../protocol';
+import type { Delivery } from './delivery';
 
 export const MARK_GLYPH: Record<CiteMark, string> = { supports: '✓', partly: '~', not: '✗', unknown: '?' };
 
@@ -159,8 +160,16 @@ export function leavesRow(dir: -1 | 1, tops: { caret: number; first: number; las
   return dir === -1 ? tops.caret <= tops.first + 1 : tops.caret >= tops.last - 1;
 }
 
-/** A note's line about the file it came from. With an outline, Send revises the outline first. */
-export function sourceLine(path: string, outline?: string, action = 'Send'): string {
+/**
+ * A note's line about the file it came from, worded for the buttons the footer shows.
+ * With an outline, Claude revises the outline first.
+ */
+export function sourceLine(path: string, outline?: string, delivery: Delivery = 'send'): string {
+  if (delivery === 'standalone') {
+    const then = outline ? ` Claude folds them into ${outline} first.` : '';
+    return `From ${path}. Open terminal starts Claude on your changes, and Copy link copies a line to paste into Claude.${then}`;
+  }
+  const action = delivery === 'done' ? 'Done' : 'Send';
   return outline
     ? `From ${path}. ${action} folds your comments into ${outline} first, and Claude proposes a direction there.`
     : `From ${path}. ${action} sends this back to Claude, with any changes you made.`;

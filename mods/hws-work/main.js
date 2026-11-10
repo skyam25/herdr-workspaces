@@ -5,7 +5,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, exec, home, layout, openOverlay, panes, props, readTextFile, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
-import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, agentName, cardSummary, cleanPath, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, orchestratorFolder, outputGroups, ownerTag, parseOutputs, roster, sendTargets, sessionFor, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
+import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, agentName, cardSummary, cleanPath, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, ownerTag, parseOutputs, replyEnded, roster, sendTargets, sessionFor, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
 import { focusAgent, hws, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
@@ -27,6 +27,24 @@ const SILENT_START_MS = 20000;
 const silentSince = (record, since) => !record.status && !(record.turn > 0) && Date.now() - since > SILENT_START_MS;
 
 const message = (e) => String(e?.message ?? e);
+
+// One quiet look for every board control. A primary one is solid.
+function buttonLook(el, t, enabled, primary) {
+  return el
+    .flex_none()
+    .h(22)
+    .px(8)
+    .flex()
+    .items_center()
+    .rounded(6)
+    .border_1()
+    .border_color(primary ? t.solid : t.input)
+    .bg(primary ? t.solid : t.raised)
+    .text_size(11.5)
+    .text_color(primary ? t.solid_foreground : t.foreground)
+    .opacity(enabled ? 1 : 0.5)
+    .when(enabled, (e) => e.cursor_pointer().hover((s) => (primary ? s.opacity(0.88) : s.bg(t.hover))));
+}
 
 // True when Outputs is the visible child of a shown panel.
 function outputsShowing() {
@@ -70,6 +88,8 @@ export default class Work extends View {
     this.confirmingArchive = false;
     this.archiving = false;
     this.members = [];
+    this.boardSpaces = [];
+    this.workspace = null;
     if (this.kind === "tasks") {
       this.makeQuickAdd();
       this.syncTodos(cx);
@@ -137,6 +157,8 @@ export default class Work extends View {
       this.note = null;
       this.drag = null;
       this.over = null;
+      this.boardSpaces = [];
+      this.workspace = null;
     }
     this.todoSpace = space;
     this.todoRevision = revision;
@@ -159,18 +181,33 @@ export default class Work extends View {
           this.todos = todoItems(listed);
           this.orchestrator = listed?.orchestrator ?? null;
           this.plainSpace = listed?.workspace === null;
-          this.setMembers(listed?.spaces ?? [], cx);
+          this.boardSpaces = listed?.spaces ?? [];
+          this.setMembers(this.boardSpaces, cx);
           if (!this.orchestrator?.live) this.confirmingStop = false;
           this.todoProblem = null;
+          if (listed?.workspace && listed.workspace !== this.workspace?.id) this.loadWorkspaceName(listed.workspace, cx);
         }
       } catch (e) {
         if (space === this.todoSpace) this.todoProblem = message(e);
       }
+      if (space === this.todoSpace) this.publishWaiting(space);
       this.loadingTodos = false;
       if (this.loadAgain) {
         this.loadAgain = false;
         this.loadTodos(cx);
       }
+      cx.notify();
+    });
+  }
+
+  // The heading names the workspace. A failed lookup clears the record, so the next load asks again.
+  loadWorkspaceName(id, cx) {
+    this.workspace = { id, name: null };
+    cx.spawn(async (cx) => {
+      const listed = await hws(["list"]).catch(() => null);
+      if (this.workspace?.id !== id) return;
+      if (!Array.isArray(listed)) this.workspace = null;
+      else this.workspace.name = listed.find((m) => m.id === id)?.name || null;
       cx.notify();
     });
   }
@@ -483,9 +520,13 @@ export default class Work extends View {
     return null;
   }
 
-  // Keeps the tab bar's badge equal to the Waiting on you count.
-  publishWaiting(count) {
-    if (shared(WAITING_KEY) !== count) setShared(WAITING_KEY, count);
+  // Sets this board's spaces in the shared map of space id to Waiting on you count.
+  // The tab bar shows the active space's entry, and other spaces' entries stay.
+  publishWaiting(space) {
+    const count = (this.todos ?? []).filter((x) => x.column === "waiting").length;
+    const ids = [...new Set([...this.boardSpaces, space])];
+    const next = mergeWaiting(shared(WAITING_KEY), ids, count);
+    if (next !== null) setShared(WAITING_KEY, next);
   }
 
   render(cx) {
@@ -530,8 +571,8 @@ export default class Work extends View {
       .items_center()
       .border_b(1)
       .border_color(t.border)
-      .child(div().font_semibold().child(title))
-      .when(count !== null, (el) => el.child(div().text_size(12).text_color(t.dim).child(String(count))))
+      .child(div().id("heading").min_w(0).truncate().font_semibold().child(title))
+      .when(count !== null, (el) => el.child(div().id("heading-count").flex_none().text_size(12).text_color(t.dim).child(String(count))))
       .child(div().flex_1())
       .when(control !== null, (el) => el.child(control));
   }
@@ -546,7 +587,6 @@ export default class Work extends View {
     if (this.plainSpace) return { header: this.header(t, "Tasks", null, h_flex()), quiet: null, content: this.message(t, NEEDS_WORKSPACE) };
 
     const columns = todoColumns(this.todos ?? []);
-    if (this.todos !== null || this.todoProblem !== null) this.publishWaiting(columns.waiting.length);
     const open = columns.todo.length + columns.doing.length + columns.waiting.length;
     const controls = h_flex()
       .flex_none()
@@ -558,7 +598,8 @@ export default class Work extends View {
       .children(this.runButton(t))
       .child(this.headerButton(t, "add", "+ Add", () => this.openTodo(null)))
       .child(this.headerButton(t, "add-several", "Add several", () => this.openSeveral()));
-    const header = this.header(t, "Tasks", this.todos === null ? null : open, controls);
+    const title = this.workspace?.name ? `Tasks · ${this.workspace.name}` : "Tasks";
+    const header = this.header(t, title, this.todos === null ? null : `${open} open`, controls);
     const fits = this.width >= LANES_FIT_PX;
     const empty = this.todos !== null && Object.values(columns).every((cards) => cards.length === 0);
     const lanes = COLUMNS.map((c) => this.lane(t, c, columns[c.key], fits, empty));
@@ -568,7 +609,7 @@ export default class Work extends View {
 
   // A label names the arrow, so the control reads as the models a run uses.
   modelsLabel(t) {
-    return h_flex().gap(6).items_center().child(div().text_color(t.dim).child("Models")).child(div().child(modelsLine(this.modelSettings)));
+    return h_flex().gap(6).items_center().child(div().text_color(t.muted).child("Models")).child(div().child(modelsLine(this.modelSettings)));
   }
 
   // What is ready, in flight and owed, so the header answers "what happens if I press Run?".
@@ -620,19 +661,8 @@ export default class Work extends View {
   }
 
   headerButton(t, id, text, action, enabled = true, primary = false) {
-    return div()
-      .id(id)
-      .flex_none()
-      .px(6)
-      .h(20)
-      .flex()
-      .items_center()
-      .rounded(5)
-      .text_size(11)
-      .text_color(primary ? t.solid_foreground : t.muted)
-      .when(primary, (el) => el.bg(t.solid))
-      .opacity(enabled ? 1 : 0.5)
-      .when(enabled, (el) => el.cursor_pointer().hover((s) => (primary ? s.opacity(0.88) : s.bg(t.hover).text_color(t.foreground))).on_click(action))
+    return buttonLook(div().id(id), t, enabled, primary)
+      .when(enabled, (el) => el.on_click(action))
       .child(text);
   }
 
@@ -662,7 +692,11 @@ export default class Work extends View {
         el.child(div().flex_1()).child(this.headerButton(t, "archive-done", this.archiving ? "Archiving…" : "Archive done", (_e, cx) => this.askArchive(true, cx), !this.archiving)),
       );
     const rows = this.laneRows(t, column, cards);
-    if (empty && column.key === "todo") rows.push(div().id("board-hint").flex_none().px(4).py(4).text_size(11.5).text_color(t.dim).whitespace_normal().child(TASKS_HINT));
+
+    // An empty column says what lands there. An empty board's To do says how to start instead.
+    const hint = (id, text) => div().id(id).flex_none().px(4).py(4).text_size(11.5).text_color(t.dim).whitespace_normal().child(text);
+    if (empty && column.key === "todo") rows.push(hint("board-hint", TASKS_HINT));
+    else if (this.todos !== null && cards.length === 0) rows.push(hint(`empty-${column.key}`, column.empty));
     const lane = v_flex()
       .id(`lane-${column.key}`)
       .h_full()
@@ -713,18 +747,8 @@ export default class Work extends View {
   }
 
   // Stops the press, so a card's buttons neither open it nor start a drag.
-  rowAction(t, id, text, action, color = null) {
-    return div()
-      .id(id)
-      .flex_none()
-      .px(5)
-      .rounded(4)
-      .border_1()
-      .border_color(color ?? t.border)
-      .text_size(10)
-      .text_color(color ?? t.muted)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
+  rowAction(t, id, text, action, primary = false) {
+    return buttonLook(div().id(id), t, true, primary)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => {
         cx.stop_propagation();
@@ -744,28 +768,33 @@ export default class Work extends View {
     return `From ${live && name ? name : SOME_AGENT}`;
   }
 
-  // The session running the card, with Open while it is live and Resume once it has ended.
+  // Open while the session is live and Resume once it has ended. A waiting card that can take no
+  // reply offers Move to To do, the one move that frees it.
+  sessionAction(t, item, address, live) {
+    if (live) return this.rowAction(t, `open-${item.id}`, "Open", () => openSession(address));
+    if (item.session) return this.rowAction(t, `resume-${item.id}`, "Resume", (cx) => this.resumeTodo(item.id, cx));
+    if (item.column === "waiting" && replyEnded(item, false)) return this.rowAction(t, `move-todo-${item.id}`, "Move to To do", (cx) => this.moveTodo(item.id, "todo", cx));
+    return null;
+  }
+
+  // The session running the card, with the action that fits its state.
   sessionRow(t, item, address) {
     const { name, status, live } = this.describe(address);
     const text = live ? [`Run by ${name ?? SOME_AGENT}`, status].filter(Boolean).join(" · ") : SESSION_ENDED;
+    const action = this.sessionAction(t, item, address, live);
     return h_flex()
       .id(`session-${item.id}`)
       .gap(6)
       .items_center()
       .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child(text))
-      .when(live, (row) => row.child(this.rowAction(t, `open-${item.id}`, "Open", () => openSession(address))))
-      .when(!live && Boolean(item.session), (row) => row.child(this.rowAction(t, `resume-${item.id}`, "Resume", (cx) => this.resumeTodo(item.id, cx))));
+      .when(action !== null, (row) => row.child(action));
   }
 
-  todoCard(t, item, columnKey) {
-    const summary = item.summary ?? cardSummary(item);
-    const tags = [ownerTag(item), item.worktree && "Worktree", this.fromTag(item)].filter(Boolean);
-    const canAllow = item.owner === "unassigned" && item.column === "todo";
+  // What every card shares: the frame, the press that starts a drag and the release that opens it.
+  cardFrame(t, item, columnKey) {
     return v_flex()
       .id(`todo-${item.id}`)
       .flex_none()
-      .p(8)
-      .gap(3)
       .rounded(7)
       .border_1()
       .border_color(t.border)
@@ -775,7 +804,30 @@ export default class Work extends View {
       .when(this.drag?.id === item.id && this.drag.moved, (el) => el.opacity(0.45))
       .on_mouse_down("left", () => this.pressTodo(item, columnKey))
       .on_mouse_up("left", (_e, cx) => this.releaseOnCard(item, cx))
-      .on_hover((hovered, cx) => this.hoverCard(item.id, hovered, cx))
+      .on_hover((hovered, cx) => this.hoverCard(item.id, hovered, cx));
+  }
+
+  // A Done card is one title line with its action, and at most one line of summary.
+  doneCard(t, item) {
+    const summary = item.summary ?? cardSummary(item);
+    const action = item.terminal ? this.sessionAction(t, item, item.terminal, this.describe(item.terminal).live) : null;
+    const top = h_flex().id(`done-top-${item.id}`).gap(6).items_center().child(div().flex_1().min_w(0).truncate().child(item.title));
+    return this.cardFrame(t, item, "done")
+      .px(8)
+      .py(5)
+      .gap(1)
+      .child(top.when(action !== null, (row) => row.child(action)))
+      .when(Boolean(summary), (el) => el.child(div().truncate().text_size(11).text_color(t.dim).child(summary)));
+  }
+
+  todoCard(t, item, columnKey) {
+    if (columnKey === "done") return this.doneCard(t, item);
+    const summary = item.summary ?? cardSummary(item);
+    const tags = [ownerTag(item), item.worktree && "Worktree", this.fromTag(item)].filter(Boolean);
+    const canAllow = item.owner === "unassigned" && item.column === "todo";
+    return this.cardFrame(t, item, columnKey)
+      .p(8)
+      .gap(3)
       .child(div().line_height("18px").max_h(36).overflow_hidden().whitespace_normal().child(item.title))
       .when(Boolean(summary), (el) => el.child(div().line_height("15px").max_h(45).overflow_hidden().whitespace_normal().text_size(11).text_color(t.dim).child(summary)))
       .when(Boolean(item.terminal), (el) => el.child(this.sessionRow(t, item, item.terminal)))
@@ -785,8 +837,9 @@ export default class Work extends View {
             .id(`tags-${item.id}`)
             .flex_wrap()
             .gap(4)
+            .items_center()
             .children(tags.map((x) => this.tag(t, x)))
-            .when(canAllow, (row) => row.child(this.rowAction(t, `allow-${item.id}`, "Allow", (cx) => this.allowTodo(item.id, cx), t.accent))),
+            .when(canAllow, (row) => row.child(this.rowAction(t, `allow-${item.id}`, "Allow", (cx) => this.allowTodo(item.id, cx), true))),
         ),
       );
   }

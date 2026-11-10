@@ -3,9 +3,17 @@ import { h_flex } from "gpui-base";
 import { spaces, panes, terminals, focused, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
 import { Flipped } from "./flipped.js";
 import { boardTab, openBoard } from "./board.js";
+import { leadPanes, title } from "./tabtitle.js";
 
 // The sidebar shares the Board tab ids, because it lists each Board.
 const BOARD_TABS = "hws.board.tabs";
+
+// `hws.tasks.waiting` maps a space id to its count of cards in Waiting on you.
+// The sidebar and the Tasks pane write it. A value that is not an object counts as none.
+export function waitingIn(map, spaceId) {
+  if (!map || typeof map !== "object" || Array.isArray(map)) return 0;
+  return Number(map[spaceId]) || 0;
+}
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 
@@ -87,6 +95,7 @@ export default class Tabs extends View {
     const board = boardTab(space, paneList);
     this.noteTab(space, board);
     const flips = this.flipped.list(paneList, terminals(), spaces(), focused());
+    const leads = leadPanes([...paneList, ...flips]);
     const button = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop).on_click(action).child(label);
     const item = (c, i) => {
@@ -94,7 +103,9 @@ export default class Tabs extends View {
       const held = flips.filter(f => f.tab === c.id);
       const program = isBoard ? null : paneList.find(p => p.tab === c.id && p.program?.agent)?.program ?? held[0]?.program ?? paneList.find(p => p.tab === c.id)?.program;
       const status = held.reduce((top, f) => ((RANK[f.status] ?? 0) > (RANK[top] ?? 0) ? f.status : top), c.status);
-      const name = !/^tb\d+$/.test(c.name) ? c.name : isBoard ? "Tasks" : program?.name ?? "Terminal";
+      // A tab nobody named, or one named after its program, reads its agent's own title.
+      const own = isBoard ? c.name : title(c, leads.get(c.id));
+      const name = !/^tb\d+$/.test(own) ? own : isBoard ? "Tasks" : program?.name ?? "Terminal";
       return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover))
@@ -118,7 +129,7 @@ export default class Tabs extends View {
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
     const enabled = [...new Set([...(shared("workspace.panels") ?? ["files", "changes"]), "outputs"])].filter(id => id !== "tasks");
-    const waiting = Number(shared("hws.tasks.waiting")) || 0;
+    const waiting = waitingIn(shared("hws.tasks.waiting"), space?.id);
     this.syncPanel(space, panel, body, enabled);
     const barButton = (id, label, icon, on, action, count = 0) => h_flex().id(`panel-${id}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
       .text_size(12).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
@@ -141,8 +152,11 @@ export default class Tabs extends View {
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
-      .child(barButton("workspace", "Workspace", "mods/workspace-chrome/panel-right.svg", panelOpen, () => run("mod.open", { name: "hws-panel" })))
+      // Tasks leaves the space and Workspace opens a pane in this tab. The divider sets
+      // them apart from the buttons that toggle the right panel.
       .child(barButton("tasks", "Tasks", "mods/hws-tabs/tasks.svg", onBoard, (_e, cx) => (onBoard ? this.leaveBoard(space, board) : this.toBoard(space, cx)), waiting))
+      .child(barButton("workspace", "Workspace", "mods/workspace-chrome/panel-right.svg", panelOpen, () => run("mod.open", { name: "hws-panel" })))
+      .child(div().id("bar-divider").w(1).h(16).mx(5).flex_none().bg(t.border))
       .when(enabled.includes("outputs"), el => el.child(panelButton("outputs", "Outputs", "mods/hws-tabs/outputs.svg")))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))
       .when(enabled.includes("changes"), el => el.child(panelButton("changes", "Changes", "mods/changes/changes.svg")))

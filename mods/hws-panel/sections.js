@@ -14,8 +14,9 @@ import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog,
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
 
+// A small dim label, so a section title never reads as one of the note's headings.
 export function sectionTitle(t, title) {
-  return div().px(8).pb(6).text_size(13).font_semibold().text_color(t.foreground).child(title);
+  return div().px(8).pb(4).text_size(11.5).font_medium().text_color(t.dim).child(title);
 }
 
 function smallButton(t, id, text, action, enabled = true) {
@@ -93,7 +94,7 @@ function freshnessRow({ t, host, workspace, target }) {
   const sentence = context ? context.line || "Freshness unknown" : "Checking…";
   const live = livePass(context?.status);
   return h_flex()
-    .pt(6)
+    .h(22)
     .gap(6)
     .items_center()
     .when(Boolean(level), (el) => el.child(freshnessDot(t, level)))
@@ -106,7 +107,7 @@ function freshnessRow({ t, host, workspace, target }) {
 function tasksRow({ t, host, workspace }) {
   if (!workspace.board) {
     return h_flex()
-      .pt(4)
+      .h(22)
       .gap(6)
       .items_center()
       .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child("No task list yet"))
@@ -116,7 +117,6 @@ function tasksRow({ t, host, workspace }) {
   const counts = !tasks ? "Checking…" : tasks.counts ? tasksLine(tasks.counts) : "";
   return h_flex()
     .id("tasks-row")
-    .mt(4)
     .h(22)
     .gap(8)
     .items_center()
@@ -131,65 +131,50 @@ function tasksRow({ t, host, workspace }) {
 // The folder name sits at the end, so the middle gives way first.
 const pathText = (t, path) => div().min_w(0).truncate().text_ellipsis_middle().text_color(t.dim).child(tilde(path));
 
-function folderLine(t, workspace) {
-  if (!workspace.home) return pathText(t, workspace.folder).text_size(11);
-  return h_flex()
-    .gap(4)
-    .text_size(11)
-    .text_color(t.dim)
-    .child(div().flex_none().child("Runs in"))
-    .child(pathText(t, workspace.folder))
-    .child(div().flex_none().child("· files in"))
-    .child(pathText(t, workspace.home));
-}
+const labeledPath = (t, id, label, path) => h_flex().id(id).gap(4).text_size(11).text_color(t.dim).child(div().flex_none().child(label)).child(pathText(t, path));
 
-function stagePill(t, workspace) {
-  return div()
-    .id("stage")
-    .flex_none()
-    .px(5)
-    .rounded(4)
-    .border_1()
-    .border_color(t.border)
-    .text_size(10)
-    .text_color(workspace.stage ? t.muted : t.dim)
-    .cursor_pointer()
-    .hover((s) => s.bg(t.raised).text_color(t.foreground))
-    .on_click(() => openStageMenu(workspace))
-    .child(workspace.stage || "Set stage");
+// A separate home gets a line of its own, so each path gives way only once.
+function folderLines(t, workspace) {
+  if (!workspace.home) return [pathText(t, workspace.folder).id("header-folder").text_size(11)];
+  return [labeledPath(t, "header-runs-in", "Runs in", workspace.folder), labeledPath(t, "header-files-in", "Files in", workspace.home)];
 }
 
 function workspaceMenu(workspace) {
   openRowMenu({ workspace: workspace.id, name: workspace.name, kind: workspace.kind, archived: false, space: null });
 }
 
+// What the workspace is sits above a gap, and how its context stands sits below.
 export function headerSection(view) {
   const { t, host, workspace } = view;
   const isThrowaway = workspace.kind === "throwaway";
   const firstLine = workspace.instructions ? workspace.instructions.split("\n")[0] : "";
-  return v_flex()
-    .flex_none()
-    .px(14)
-    .py(10)
-    .gap(2)
-    .border_b(1)
-    .border_color(t.border)
+  const identity = v_flex()
+    .id("header-identity")
+    .gap(3)
     .child(
       h_flex()
-        .gap(8)
+        .gap(6)
         .items_center()
         .child(div().flex_1().min_w(0).truncate().font_semibold().child(workspace.name))
-        .child(isThrowaway ? pill(t, "Throwaway") : stagePill(t, workspace))
+        .child(isThrowaway ? div().flex_none().text_size(11).text_color(t.dim).child("Throwaway") : smallButton(t, "stage", workspace.stage || "Set stage", () => openStageMenu(workspace)))
         .child(smallButton(t, "workspace-menu", "···", () => workspaceMenu(workspace)).tooltip(isThrowaway ? "Rename or close" : "Rename or archive")),
     )
+    .when(!isThrowaway, (el) => el.children(folderLines(t, workspace)))
     .child(
       h_flex()
         .gap(6)
         .items_center()
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(firstLine ? t.muted : t.dim).child(firstLine || "No instructions yet"))
         .child(smallButton(t, "edit-instructions", "Instructions…", () => host.openInstructions(workspace))),
-    )
-    .when(!isThrowaway, (el) => el.child(folderLine(t, workspace)).child(freshnessRow(view)).child(tasksRow(view)));
+    );
+  return v_flex()
+    .flex_none()
+    .px(14)
+    .py(10)
+    .border_b(1)
+    .border_color(t.border)
+    .child(identity)
+    .when(!isThrowaway, (el) => el.child(v_flex().id("header-state").mt(10).gap(2).child(freshnessRow(view)).child(tasksRow(view))));
 }
 
 // Current
@@ -556,15 +541,15 @@ function placesToggle(t, host) {
     .items_center()
     .rounded(6)
     .cursor_pointer()
-    .text_size(13)
-    .font_semibold()
-    .text_color(t.foreground)
-    .hover((s) => s.bg(t.hover))
+    .text_size(11.5)
+    .font_medium()
+    .text_color(t.dim)
+    .hover((s) => s.bg(t.hover).text_color(t.muted))
     .on_click((_e, cx) => {
       host.showPlaces = !host.showPlaces;
       cx.notify();
     })
-    .child(svg(`mods/workspace-chrome/chevron-${host.showPlaces ? "down" : "right"}.svg`).size(12).flex_none())
+    .child(svg(`mods/workspace-chrome/chevron-${host.showPlaces ? "down" : "right"}.svg`).size(10).flex_none())
     .child("Where files go");
 }
 

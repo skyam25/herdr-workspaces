@@ -3,12 +3,12 @@
 export const POLL_MS = 10000;
 export const DONE_SHOWN = 8;
 
-// The Tasks columns. `drop` marks the ones a card can move to.
+// The Tasks columns. `drop` marks the ones a card can move to, and `empty` says what lands there.
 export const COLUMNS = [
-  { key: "todo", name: "To do", color: "idle", drop: true },
-  { key: "doing", name: "In progress", color: "working", drop: true },
-  { key: "waiting", name: "Waiting on you", color: "blocked", drop: false },
-  { key: "done", name: "Done", color: "done", drop: true },
+  { key: "todo", name: "To do", color: "idle", drop: true, empty: "Cards nobody has started" },
+  { key: "doing", name: "In progress", color: "working", drop: true, empty: "Cards an agent is working on" },
+  { key: "waiting", name: "Waiting on you", color: "blocked", drop: false, empty: "Cards that need your answer" },
+  { key: "done", name: "Done", color: "done", drop: true, empty: "Cards an agent has finished" },
 ];
 
 const CHAT_MOD = "hws-chat";
@@ -159,6 +159,24 @@ export function describeSession({ terminals, targets, orchestrator }, address) {
     status: live ? STATUS_WORDS[record.status] ?? "" : SESSION_ENDED,
     live,
   };
+}
+
+// True when a card asks for a reply that nothing can deliver. Its terminal has ended and it saved no
+// session to reopen, so only a move back to To do frees it.
+export function replyEnded(item, live) {
+  if (item.archived || item.session || live) return false;
+  return item.column === "waiting" || (item.column === "done" && Boolean(item.terminal));
+}
+
+export const REPLY_ENDED = "This session has ended and cannot be reopened.";
+export const NO_SESSION = "No session runs this card, so it cannot take a reply.";
+
+// The shared map of space id to waiting count, with this board's spaces set to `count`.
+// Returns null when nothing changes. A value that is not a map counts as empty.
+export function mergeWaiting(current, ids, count) {
+  const before = current !== null && typeof current === "object" && !Array.isArray(current) ? current : {};
+  if (ids.every((id) => before[id] === count)) return null;
+  return { ...before, ...Object.fromEntries(ids.map((id) => [id, count])) };
 }
 
 export function cardTimes(item, now) {

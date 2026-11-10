@@ -95,16 +95,20 @@ export default class Actions extends View {
 
   items() {
     const p = props() ?? {};
+
+    // Tasks exists only inside a workspace, so a plain space has nothing to orchestrate.
+    const inWorkspace = (shared("hws.workspace.spaces") ?? []).includes(p.space);
+
     return [
       { id: "sketch", name: "Sketch", icon: "sketch", work: () => this.openSurface("board") },
-      { id: "write", name: "Write", icon: "write", work: () => this.openSurface("note") },
-      ...(p.lastReply ? [{ id: "write-reply", name: "Write from last reply", icon: "reply", work: () => this.writeFromReply(p.lastReply) }] : []),
+      { id: "write", name: "Write a note", icon: "write", work: () => this.openSurface("note") },
+      ...(p.lastReply ? [{ id: "write-reply", name: "Write a note from last reply", icon: "reply", work: () => this.writeFromReply(p.lastReply) }] : []),
       { id: "review", name: "Review a page…", icon: "review", work: () => this.reviewPage() },
       { id: "phone-send", name: "Send to phone…", icon: "phone", work: () => this.sendToPhone() },
       ...(p.chat ? [{ id: "attach", name: "Attach file…", icon: "attach", work: () => setShared("hws-chat.attach", { pane: p.pane, at: Date.now() }) }] : []),
       { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: openBoard },
       { id: "outputs", name: "Outputs", icon: "outputs", work: () => showPanel("outputs") },
-      ...(p.space && p.cwd ? [{ id: "orchestrate", name: "Orchestrate this space", icon: "orchestrate", divided: true, work: () => hws(["orchestrator", "start", "--space", p.space, "--folder", p.cwd]) }] : []),
+      ...(p.space && p.cwd && inWorkspace ? [{ id: "orchestrate", name: "Orchestrate this space", icon: "orchestrate", divided: true, work: () => hws(["orchestrator", "start", "--space", p.space, "--folder", p.cwd]) }] : []),
       ...this.boardRows(p.boards ?? []),
     ];
   }

@@ -38,6 +38,7 @@ import { usePanelKeys } from './usePanelKeys';
 import { reviewPage, useSend } from './useSend';
 import { useWorkspace } from './useWorkspace';
 import { WriteView } from './WriteView';
+import { deliveryOf } from './delivery';
 import { cleanError } from './ipc-error';
 
 interface Boot {
@@ -627,6 +628,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
               onSendText={(sessionId, build) => void sendText(sessionId, build)}
               onError={reviewError}
               surface={!!surface}
+              delivery={deliveryOf(surface)}
             />
           )}
           {mode === 'review' && (
@@ -645,6 +647,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
               onSendFeedback={(sessionId, build) => void sendText(sessionId, build)}
               onCopyReference={copyReference}
               surface={!!surface}
+              delivery={deliveryOf(surface)}
             />
           )}
           {mode === 'initiative' && (

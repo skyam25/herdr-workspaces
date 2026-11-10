@@ -479,7 +479,7 @@ export default class Panel extends View {
   }
 
   messageRoot(t) {
-    return v_flex().id("hws-panel").size_full().min_h(0).p(14).gap(10).bg(t.background).text_color(t.dim).text_size(13);
+    return v_flex().id("hws-panel").size_full().min_h(0).p(14).gap(12).bg(t.background).text_color(t.dim).text_size(13);
   }
 
   renderMessage(t, text) {
@@ -487,13 +487,20 @@ export default class Panel extends View {
   }
 
   // A plain space. When workspaces hold its folder, it offers to join one.
+  // A single candidate is the main action, so its button is filled.
   renderOutside(t) {
     const match = this.match?.spaceId === this.spaceId ? this.match : null;
     const candidates = match?.candidates ?? [];
-    const text = candidates.length === 0 ? "This space is not a workspace." : `This space is not in a workspace. Its folder belongs to ${nameList(candidates.map((c) => c.name))}.`;
-    const joinButton = (c) => button(t, `join-${c.id}`, this.busy === `join-${c.id}` ? "Adding…" : `Add this space to ${c.name}`, false, (_e, cx) => this.joinWorkspace(c, cx), !this.busy);
+    const text = candidates.length === 0 ? "No workspace holds its folder." : `Its folder belongs to ${nameList(candidates.map((c) => c.name))}.`;
+    const isOnly = candidates.length === 1;
+    const joinButton = (c) => button(t, `join-${c.id}`, this.busy === `join-${c.id}` ? "Adding…" : `Add this space to ${c.name}`, isOnly, (_e, cx) => this.joinWorkspace(c, cx), !this.busy);
     return this.messageRoot(t)
-      .child(div().whitespace_normal().child(text))
+      .child(
+        v_flex()
+          .gap(4)
+          .child(div().id("outside-title").text_size(11.5).font_medium().text_color(t.dim).child("Not in a workspace"))
+          .child(div().text_color(t.muted).whitespace_normal().child(text)),
+      )
       .child(
         v_flex()
           .items_start()

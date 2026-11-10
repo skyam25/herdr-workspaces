@@ -66,6 +66,7 @@ class Driver:
         self.latest = None
         self.open_chunk = None
         self.exited = False
+        self.title = None
 
     def write(self, data):
         os.write(self.master, data)
@@ -156,7 +157,9 @@ class Driver:
 
     def osc(self, body):
         text = body.decode('latin1')
-        if text.startswith('10;?'):
+        if text.startswith(('0;', '2;')):
+            self.title = body[2:].decode('utf-8', 'replace')
+        elif text.startswith('10;?'):
             self.reply('\x1b]10;rgb:dd/dd/dd\x1b\\')
         elif text.startswith('11;?'):
             self.reply('\x1b]11;rgb:1a/1a/1a\x1b\\')

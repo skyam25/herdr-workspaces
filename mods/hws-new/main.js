@@ -17,7 +17,7 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-import { theme, props, closeOverlay, focused, openOverlay, spaces } from "herdr";
+import { theme, props, closeOverlay, focused, openOverlay, spaces, shared } from "herdr";
 import { hws, message, submitDialog, openWorkspaceForm, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 
 export default class Launcher extends View {
@@ -73,19 +73,23 @@ export default class Launcher extends View {
     openWorkspaceForm();
   }
 
-  // The active local space and its folder, or null when either is unknown.
-  orchestrateTarget() {
-    const space = spaces().find((s) => s.active);
+  // The space and its folder, or null for a remote space or an unknown folder.
+  orchestrateTarget(space) {
     if (!space || space.machine) return null;
     const f = focused();
     const folder = (f?.space === space.id && f.cwd) || space.folder;
     return folder ? { space: space.id, folder } : null;
   }
 
-  orchestrateRow() {
-    const target = this.orchestrateTarget();
+  // Every `hws orchestrator` command needs a workspace, so a plain space gets no row.
+  // The sidebar shares the ids of every space in an open workspace.
+  orchestrateRows() {
+    const space = spaces().find((s) => s.active);
+    const inWorkspace = shared("hws.workspace.spaces");
+    if (!space || !Array.isArray(inWorkspace) || !inWorkspace.includes(space.id)) return [];
+    const target = this.orchestrateTarget(space);
     const args = target && ["orchestrator", "start", "--space", target.space, "--folder", target.folder];
-    return { id: "orchestrate", name: "Orchestrate this space", line: "Run Tasks with an agent that assigns the work.", go: target ? (cx) => this.launch("orchestrate", args, cx) : null };
+    return [{ id: "orchestrate", name: "Orchestrate this space", line: "Run Tasks with an agent that assigns the work.", go: target ? (cx) => this.launch("orchestrate", args, cx) : null }];
   }
 
   openFind() {
@@ -156,7 +160,7 @@ export default class Launcher extends View {
       { id: "find-past", name: "Find past work…", line: "Bring back an archived workspace or a closed throwaway.", go: () => this.openFind() },
       { id: "new-board", name: "New sketch", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled sketch", "--standalone"], cx) },
       { id: "new-note", name: "New note", line: "A prompt, template or note on its own.", go: (cx) => this.launch("new-note", ["surface", "open", "--type", "note", "--title", "Untitled note", "--standalone"], cx) },
-      this.orchestrateRow(),
+      ...this.orchestrateRows(),
     ];
   }
 
@@ -172,11 +176,12 @@ export default class Launcher extends View {
 
   renderMenu(t) {
     const items = this.menuItems();
+    // mod.json gives the menu no height, so the dialog fits its rows.
     return v_flex()
       .id("hws-new")
       .track_focus(this.handle)
       .on_key_down((e, cx) => this.menuKey(e, cx, items))
-      .size_full()
+      .w_full()
       .min_h(0)
       .p(6)
       .gap(1)

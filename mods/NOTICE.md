@@ -12,9 +12,9 @@
 - Mod names and asset paths carry the `hws-` prefix.
 - `hws-chat/addons.js` turns off voice, reactions, artifacts, task browser, Autopilot, machine sync and usage insights.
 - `hws-pane` drops Autopilot and Assistant slots and runs the parked-agent sweep.
-- `hws-tabs` adds Tasks and Outputs panel buttons, the Tasks waiting badge, and flipped agents' status on tabs.
-- `hws-agents` lists flipped agents, found with `flipped.js`, and sends their rows to the chat pane.
-- `hws-spaces` hides local spaces listed in `hws.workspace.spaces` and then heads its list Other spaces.
+- `hws-tabs` adds Tasks and Outputs panel buttons, the Tasks waiting badge, and flipped agents' status on tabs. Tabs read their agent's title through `tabtitle.js`.
+- `hws-agents` lists flipped agents, found with `flipped.js`, and sends their rows to the chat pane. A row leads with its title and names its space after it.
+- `hws-spaces` hides local spaces listed in `hws.workspace.spaces` and then heads its list Other spaces. It draws a top border.
 - `hws-chat` shows the CLI's status lines under the box, in `statusline.js`.
 - `hws-chat` reads the macOS clipboard and accepts Finder's copied files, in `clipboard.js` and `attach.js`.
 - `hws-chat` finds a Codex session by folder and start time when no process holds its log, in `core/chat-log.js`.
