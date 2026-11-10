@@ -20,6 +20,13 @@ const REVIEW = [
   "Never open it with --standalone, because that pane has no agent to answer.",
 ].join(" ");
 
+// Agent Brief's own outputs and iPad pairing never reach a phone paired with Herdr.
+const PHONE = [
+  'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn.',
+  "Their markup arrives as your next prompt. Agent Brief's Outputs panel does not reach the phone.",
+  "Run `~/.local/bin/hws` if `hws` is not on PATH.",
+].join(" ");
+
 const NOTE_RULE = [
   "When the person asks to update the current note or the current state, or to catch up on where this work stands, load the herdr-workspaces:tidy skill before you read or write anything, and follow it.",
   "Never rewrite the current note yourself. Only a tidy pass may, because it records what the note covers.",
@@ -140,7 +147,7 @@ async function main() {
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, matchContext(match)].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

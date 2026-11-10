@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane, or asks to look over, comment on or give feedback on a page or document. Explains how to read the workspace, use the space's task list, hand a page to the user for review and ask for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane, asks to look over, comment on or give feedback on a page or document, or asks to see or review something on their phone, iPhone or iPad. Explains how to read the workspace, use the space's task list, hand a page to the user for review and ask for input through a surface.
 ---
 
 # Herdr workspace
@@ -151,13 +151,13 @@ After opening a surface, end the turn and wait. The user presses Done and the fe
 
 ## Send to the phone
 
-Use this only when the user asks to review something on their phone or iPad.
+Use this only when the user asks to review something on their phone or iPad. Agent Brief's Outputs panel, `declare_output` and its iPad button do not reach a phone paired with Herdr, so use `hws phone send`.
 
 ```sh
 hws phone send FILE_OR_ARTIFACT_ID --prompt "What to look at"
 ```
 
-The phone opens `.html` and `.excalidraw` files. Render a Markdown note to HTML first. End the turn after sending, because the user's markup arrives as the next prompt. If no phone is paired, run `hws phone pair`, which opens a tab with a QR code for the user to scan.
+The phone opens `.html` and `.excalidraw` files. Render a Markdown note to HTML first. End the turn after sending, because the user's markup arrives as the next prompt. If no phone is paired, run `hws phone pair`, which opens a tab with a QR code for the user to scan. The user can also pair from Phone at the bottom of the Herdr sidebar.
 
 ## Draw on a surface
 

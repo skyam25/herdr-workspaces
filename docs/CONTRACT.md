@@ -594,7 +594,7 @@ The Agent Brief app on an iPad or iPhone pairs with Herdr as one more host. `sur
 | Item | Behaviour |
 |---|---|
 | Process | One per state root, plain Node, `surface/app/out/phone/host.cjs`, started with `hc run --bg` in a terminal with no pane |
-| Lifetime | Ends with Herdr. `hws phone pair`, `send` and `status` restart it. It exits when no phone is paired and no code is open |
+| Lifetime | Ends with Herdr. `hws phone pair`, `send` and `status` restart it, and the [sidebar footer](#sidebar-footer) runs `status` when Herdr starts. It exits when no phone is paired and no code is open |
 | Network | HTTPS on port 47614, peers on this Mac's subnets only. Agent Brief keeps 47613 |
 | Pairing | One-use code, 10 minutes. The QR code carries the certificate fingerprint, and the phone pins it |
 | Control | HTTP on the phone socket. `hws` is the only client |
@@ -681,6 +681,18 @@ The `spaces` block runs `hws-spaces`, a copy of Herdr's `spaces`.
 | Every local space hidden | The heading and + remain |
 | Drag, worktree order, rail numbers | Count hidden spaces too, matching `space.move` and `space.select:N` |
 | Worktree whose checkout is hidden | Shows as a plain row |
+
+## Sidebar footer
+
+The `sidebar-footer` block runs `hws-footer`, 97px tall. It keeps `workspace-chrome`'s footer rows and adds Phone, because Herdr's Settings has no section a mod can add to.
+
+| Row | Shows | Click |
+|---|---|---|
+| Settings | An accent dot when an app update is ready | `app.settings` |
+| Add machine | Always | `mod.open` for `machine-add` |
+| Phone | `Pair phone` when none is paired, else the paired names and a done dot | `hws phone pair`, which opens the Pair phone tab |
+
+The row reads `hws phone status --json` when the footer loads. That restarts the listener for a paired phone each time Herdr starts. After a click it reads status every 3 seconds until a new phone appears or 10 minutes pass. The sidebar rail shows icons with tooltips.
 
 ## Chat and Terminal flip
 
@@ -820,7 +832,6 @@ A popup that the pane header and the chat composer open at the pointer.
 | Write from last reply | `lastReply` is set | Writes the reply to a file, then opens it with `--type note --file F` |
 | Review a page… | Always | macOS file chooser, then `--type page --file F` |
 | Send to phone… | Always | macOS file chooser, then `hws phone send F --terminal T` |
-| Pair phone | Always | `hws phone pair` |
 | Attach file… | `chat` is true | `setShared("hws-chat.attach", { pane, at })` |
 | Tasks | Always | Opens the Board tab |
 | Outputs | Always | Selects `outputs` in `panel-body` and shows `panel` |
@@ -973,7 +984,7 @@ A surface runs on this computer. The `+` menu is hidden for a remote agent, and 
 
 | Skill | Loaded | Does |
 |---|---|---|
-| `herdr-workspace` | When the person mentions a workspace, the task list, where files land, a surface, or looking over a page | Explains the manifest, places, the task list, `hws review` and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
+| `herdr-workspace` | When the person mentions a workspace, the task list, where files land, a surface, looking over a page, or reviewing on their phone or iPad | Explains the manifest, places, the task list, `hws review` and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
 | `orchestrate` | By the first prompt of `hws orchestrator start` | Runs the board |
 | `tidy` | By the first prompt of `hws tidy start` | Reads the packet, writes `proposal.json` and `proposal.md` beside it, opens `proposal.md` with `hws surface open --type page --file F --terminal T` and ends the turn. On Done it runs `hws tidy apply --file proposal.json`, with `--skip` for parts the person turned down |
 
@@ -987,7 +998,7 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 1. Runs `hws register --terminal T --session S --json` and `hws current --line` in parallel.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
-3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE` and rules out `--standalone`.
+3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE` and rules out `--standalone`. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws phone send FILE --prompt X` and says Agent Brief's Outputs panel does not reach the phone.
 
 | Places sentence | |
 |---|---|

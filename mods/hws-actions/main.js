@@ -101,7 +101,6 @@ export default class Actions extends View {
       ...(p.lastReply ? [{ id: "write-reply", name: "Write from last reply", icon: "reply", work: () => this.writeFromReply(p.lastReply) }] : []),
       { id: "review", name: "Review a page…", icon: "review", work: () => this.reviewPage() },
       { id: "phone-send", name: "Send to phone…", icon: "phone", work: () => this.sendToPhone() },
-      { id: "phone-pair", name: "Pair phone", icon: "phone", work: () => hws(["phone", "pair"]) },
       ...(p.chat ? [{ id: "attach", name: "Attach file…", icon: "attach", work: () => setShared("hws-chat.attach", { pane: p.pane, at: Date.now() }) }] : []),
       { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: openBoard },
       { id: "outputs", name: "Outputs", icon: "outputs", work: () => showPanel("outputs") },

@@ -129,6 +129,10 @@ export async function mount(mod, props, H = globalThis.__herdr) {
   const { default: ViewClass } = await import(`../${mod}/main.js?g=${generation}`);
   const view = new ViewClass();
   const timers = [];
+  const task = (timer) => {
+    timers.push(timer);
+    return { cancel: () => { timer.cancelled = true; }, is_done: () => Boolean(timer.cancelled) };
+  };
   const cx = {
     notify() {},
     stop_propagation() {},
@@ -136,8 +140,8 @@ export async function mount(mod, props, H = globalThis.__herdr) {
     spawn: (fn) => { fn(cx); },
     sleep: () => new Promise(() => {}),
     timer: {
-      every: (ms, fn) => { timers.push({ ms, fn, repeating: true }); },
-      after: (ms, fn) => { timers.push({ ms, fn, repeating: false }); },
+      every: (ms, fn) => task({ ms, fn, repeating: true }),
+      after: (ms, fn) => task({ ms, fn, repeating: false }),
     },
   };
   view.init(props, cx);
@@ -171,7 +175,7 @@ export async function mount(mod, props, H = globalThis.__herdr) {
       await settle();
     },
     async fireTimer(ms) {
-      for (const t of timers.filter((x) => x.ms === ms)) t.fn(cx);
+      for (const t of timers.filter((x) => x.ms === ms && !x.cancelled)) t.fn(cx);
       await settle();
     },
   };

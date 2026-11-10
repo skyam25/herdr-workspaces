@@ -29,3 +29,4 @@ export const knownAgents = () => Promise.resolve([]);
 export const notify = (n) => { H().notices?.push(n); return null; };
 export const settings = () => ({});
 export const layout = () => H().layout ?? null;
+export const updates = () => H().updates ?? { app: { version: "1", ready: null, updates: true } };
