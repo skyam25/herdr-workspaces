@@ -1,7 +1,8 @@
 // Workspace spaces: stable colored avatars, worktrees under their checkout,
 // grouped by machine when more than one is known. After a space's name, the repo
 // its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
-// switch, right-click for its menu, drag to reorder.
+// switch, right-click for its menu, drag to reorder. A local space's menu comes
+// from hws-panel, which adds Move to workspace.
 //
 // Local spaces that belong to an open workspace are hidden, because the Workspaces
 // list shows them. The workspace sidebar shares their ids as `hws.workspace.spaces`.
@@ -277,7 +278,8 @@ export default class Spaces extends View {
 
   menu(w) {
     // A popup is as tall as its items; height is only the most.
-    openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: w.id } } });
+    if (w.machine) openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: w.id } } });
+    else openOverlay({ mod: "hws-panel", kind: "popup", width: 210, height: 260, props: { view: "space-menu", space: w.id } });
   }
 
   orderingDue(now) {

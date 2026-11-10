@@ -47,6 +47,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Tasks and Agent Brief | Tasks shows only `hws` cards and never runs `agent-brief`. Outputs still reads Agent Brief sessions |
 | Spaces list | `hws-spaces`, a copy of Herdr's `spaces`, hides the spaces a workspace already lists and titles the rest Other spaces |
 | Plain space on a workspace's folder | `hws space match` finds the workspace. The panel offers Add this space to NAME and session start tells the agent once |
+| Moving a space | A right-click on a space's sidebar row opens the space menu. Move to workspace… lists every open workspace and New workspace from this space…, which runs `hws new workspace --space S`. A drag between the two sidebar lists is left out, because they are separate mods |
 | Throwaway scratch | Shells start in `<state>/workspaces/<id>/scratch`. Keep moves it under `~/Documents/Herdr Workspaces/<name>/`, Trash and purge trash it |
 
 ## Next steps, in order
@@ -199,3 +200,14 @@ Built 2026-11-09 against fakes. Nothing has run in the real window.
 - [ ] Open the Workspace panel. The page's row should show `1 feedback`, unfold the round, and read it in the panel.
 - [ ] Open a page from the panel with no agent in the space, comment, and press Copy link twice. The comment should clear after the first press, and the second should copy the same link.
 - [ ] Confirm a parked agent keeps a `herdr.space` or `where` label. Without one, `hws` falls back to the tab the agent was recorded in.
+
+### 14. Test moving a space by hand
+
+Built 2026-11-09 against fakes, then installed. The window reported no errors, and nobody has clicked any of it.
+
+- [ ] Right-click a space in Other spaces. The menu should show Rename, the worktree items in a repo, Move to workspace… and Close, and be as tall as its items.
+- [ ] Choose Move to workspace… and click a workspace. The space should leave Other spaces and appear under that workspace.
+- [ ] Choose New workspace from this space…. The form should start with the space's name and folder, and Create should list the space as a workspace without opening another space.
+- [ ] Right-click a space under a workspace with two spaces. Take out of NAME should make it a plain space, and Move to workspace… should leave out its own workspace.
+- [ ] Right-click a workspace's only space. The menu should show neither move item.
+- [ ] Press Make this space a workspace… in the panel of a plain space.

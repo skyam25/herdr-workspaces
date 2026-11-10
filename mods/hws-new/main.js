@@ -18,7 +18,7 @@ function plural(count, word) {
 }
 
 import { theme, props, closeOverlay, focused, openOverlay, spaces } from "herdr";
-import { hws, message, submitDialog, openWorkspaceForm, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine } from "./hws.js";
+import { hws, message, submitDialog, openWorkspaceForm, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 
 export default class Launcher extends View {
   init(_props, cx) {
@@ -43,9 +43,11 @@ export default class Launcher extends View {
       this.handle.focus();
       return;
     }
+    // An open space to make the workspace from, as `{ id, name, folder }`.
+    this.space = props()?.space ?? null;
     const submit = (cx) => this.create(cx);
-    makeInput(this, "name", { placeholder: "Untitled workspace", submit });
-    makeInput(this, "folder", { submit });
+    makeInput(this, "name", { value: this.space?.name ?? "", placeholder: "Untitled workspace", submit });
+    makeInput(this, "folder", { value: tilde(this.space?.folder), submit });
     makeInput(this, "home", { placeholder: "Optional. A folder inside it for this workspace's files", submit });
     makeInput(this, "instructions", { rows: 4, placeholder: "Optional. How agents should work and organize context here." });
     fillParent(this, cx);
@@ -141,6 +143,7 @@ export default class Launcher extends View {
         "--folder", path,
         ...(home ? ["--home", home] : []),
         ...(instructions ? ["--instructions", instructions] : []),
+        ...(this.space ? ["--space", this.space.id] : []),
       ]);
     }, cx);
   }
@@ -211,7 +214,8 @@ export default class Launcher extends View {
           .overflow_y_scrollbar()
           .p(18)
           .gap(12)
-          .child(div().text_size(15).font_semibold().child("New workspace"))
+          .child(div().text_size(15).font_semibold().truncate().child(this.space ? `New workspace from ${this.space.name || "this space"}` : "New workspace"))
+          .when(Boolean(this.space), (el) => el.child(div().text_color(t.muted).whitespace_normal().child("The space keeps its name, tabs and terminals.")))
           .child(labeled(t, "Name", field(t, this, "name")))
           .child(labeled(t, "Claude runs in", folderRow(t, this)))
           .child(labeled(t, "Workspace files in", folderRow(t, this, "home")))

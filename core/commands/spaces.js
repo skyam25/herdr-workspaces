@@ -13,21 +13,21 @@ import { boardOf, callerSpace, moveCards } from './todo.js';
 
 const BOARD_TAB = 'Workspace board';
 
-function liveSpace(id) {
+export function liveSpace(id) {
   const space = requireLive().spaces.find((item) => item.id === id);
   if (!space) throw new HwsError(`no open space ${id}`);
   if (space.machine) throw new HwsError(`${space.name} is on ${space.machine}, and a workspace holds only spaces on this computer`);
   return space;
 }
 
-function requireOtherSpaces(manifest, space) {
+export function requireOtherSpaces(manifest, space) {
   if (manifest.board?.space === space.id) throw new HwsError(`the Tasks space stays with ${manifest.name}`);
   if (manifest.spaces.length > 1) return;
   throw new HwsError(`${space.name} is the only space in ${manifest.name}, so add another space there first`);
 }
 
 // Takes a space and its terminal records out of a workspace, and returns the records.
-function takeSpace(manifest, space) {
+export function takeSpace(manifest, space) {
   const tabIds = new Set((space.tabs ?? []).map((tab) => tab.id));
   let taken = [];
   updateManifest(manifest.id, (draft) => {

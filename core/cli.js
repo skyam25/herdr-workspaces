@@ -43,7 +43,7 @@ const ROUTES = [
     path: ['new', 'workspace'],
     run: newWorkspace,
     prunes: true,
-    options: { name: text, folder: text, home: text, kind: text, tabs: text, instructions: text },
+    options: { name: text, folder: text, home: text, kind: text, tabs: text, instructions: text, space: text },
   },
   { path: ['new', 'throwaway'], run: newThrowaway, prunes: true, options: { name: text } },
   { path: ['board', 'add'], run: boardAdd, options: { workspace: text } },

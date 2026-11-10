@@ -326,3 +326,76 @@ test('space match defaults to the calling terminal\'s space', (t) => {
   assert.equal(result.space, plain);
   assert.deepEqual(result.candidates.map((item) => item.id), [manifest.id]);
 });
+
+function saveCards(box, board, titles) {
+  mkdirSync(join(box.root, 'todos'), { recursive: true });
+  const items = titles.map((title, n) => ({ id: `t${n + 1}`, title, notes: '', column: 'todo', terminal: null, owner: 'unassigned', archived: false, createdAt: 1, updatedAt: 1 }));
+  writeFileSync(join(box.root, 'todos', `${encodeURIComponent(board)}.json`), JSON.stringify({ version: 1, space: board, items }));
+}
+
+test('new workspace --space turns a plain space into a workspace and keeps its cards', (t) => {
+  const box = sandbox(t);
+  const plain = plainSpace(box);
+  saveCards(box, plain, ['Mine']);
+  box.clearCalls();
+  const folder = box.folder('adopted');
+  const manifest = box.json(['new', 'workspace', '--name', 'adopted', '--folder', folder, '--space', plain]);
+  assert.deepEqual(box.actions(), []);
+  assert.equal(manifest.id, plain);
+  assert.deepEqual(manifest.spaces, [plain]);
+  assert.deepEqual([manifest.kind, manifest.folder, manifest.stage], ['general', folder, 'discovery']);
+  assert.deepEqual(manifest.tabs, [{ tabId: `tb-${plain}`, name: '1', role: null }]);
+  assert.deepEqual(manifest.terminals, []);
+  assert.equal(box.json(['current', '--terminal', `t-${plain}`]).id, plain);
+  assert.deepEqual(box.json(['todo', 'list', '--space', plain]).items.map((item) => item.title), ['Mine']);
+  assert.equal(box.json(['parent']).folder, folder);
+});
+
+test('new workspace --space takes a space out of its workspace with its terminal records', (t) => {
+  const box = sandbox(t);
+  const { manifest: from, second } = workspaceWithTwoSpaces(box);
+  box.json(['todo', 'add', '--title=Stays', '--space', second]);
+  const made = box.json(['new', 'workspace', '--name', 'split', '--folder', box.folder('split'), '--space', second]);
+  assert.deepEqual(box.manifest(from.id).spaces, [from.id]);
+  assert.equal(box.manifest(from.id).terminals.length, 1);
+  assert.deepEqual(made.spaces, [second]);
+  assert.equal(made.terminals.length, 1);
+  assert.deepEqual(box.json(['todo', 'list', '--space', from.id]).items.map((item) => item.title), ['Stays']);
+  assert.deepEqual(box.json(['todo', 'list', '--space', second]).items, []);
+});
+
+test('a space that founded a workspace and left it gets a workspace with a fresh id', (t) => {
+  const box = sandbox(t);
+  const { manifest: first } = workspaceWithTwoSpaces(box);
+  box.json(['todo', 'add', '--title=Shared', '--space', first.id]);
+  box.json(['space', 'remove', '--space', first.id]);
+  saveCards(box, `${first.id}~space`, ['Own']);
+  const made = box.json(['new', 'workspace', '--name', 'again', '--folder', box.folder('again'), '--space', first.id]);
+  assert.match(made.id, /^ws[0-9a-f]{12}$/);
+  assert.deepEqual(made.spaces, [first.id]);
+  assert.equal(box.manifest(first.id).name, 'demo');
+  assert.deepEqual(box.json(['todo', 'list', '--space', first.id]).items.map((item) => item.title), ['Own']);
+  assert.deepEqual(box.json(['todo', 'list', '--space', box.manifest(first.id).spaces[0]]).items.map((item) => item.title), ['Shared']);
+});
+
+test('new workspace --space refuses a last space, a Tasks space, a closed space and --tabs', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app('demo');
+  const folder = box.folder('no');
+  const last = box.hws(['new', 'workspace', '--name', 'x', '--folder', folder, '--space', manifest.id]);
+  assert.equal(last.code, 1);
+  assert.match(last.stderr, /only space in demo/);
+
+  const board = box.json(['board', 'add', '--workspace', manifest.id]);
+  const tasks = box.hws(['new', 'workspace', '--name', 'x', '--folder', folder, '--space', board.space]);
+  assert.equal(tasks.code, 1);
+  assert.match(tasks.stderr, /Tasks space stays with demo/);
+
+  const closed = box.hws(['new', 'workspace', '--name', 'x', '--folder', folder, '--space', 'sp-gone']);
+  assert.equal(closed.code, 1);
+  assert.match(closed.stderr, /no open space sp-gone/);
+
+  const plain = plainSpace(box);
+  assert.equal(box.hws(['new', 'workspace', '--name', 'x', '--folder', folder, '--space', plain, '--tabs', 'Plan']).code, 2);
+  assert.deepEqual(box.json(['list']).map((item) => item.id), [manifest.id]);
+});

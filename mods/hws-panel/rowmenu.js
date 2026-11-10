@@ -65,7 +65,25 @@ export function openRowMenu(target) {
   openOverlay({ mod: MOD, kind: "popup", width: MENU_WIDTH, height, props: { ...target, view: "row-menu" } });
 }
 
-// `items` are `{ id, label, open }`. Each closes the menu and then acts.
+// One menu item. It closes the menu and then acts.
+export function menuRow(t, item, overlay) {
+  return h_flex()
+    .id(`row-menu-${item.id}`)
+    .h(MENU_ROW_PX)
+    .flex_none()
+    .px(8)
+    .items_center()
+    .rounded(5)
+    .cursor_pointer()
+    .hover((s) => s.bg(t.hover))
+    .on_click(() => {
+      closeOverlay(overlay);
+      item.open();
+    })
+    .child(item.label);
+}
+
+// `items` are `{ id, label, open }`.
 export function popupMenu(t, items, overlay) {
   return v_flex()
     .id("hws-row-menu")
@@ -74,24 +92,7 @@ export function popupMenu(t, items, overlay) {
     .bg(t.popover)
     .text_color(t.foreground)
     .text_size(13)
-    .children(
-      items.map((item) =>
-        h_flex()
-          .id(`row-menu-${item.id}`)
-          .h(MENU_ROW_PX)
-          .flex_none()
-          .px(8)
-          .items_center()
-          .rounded(5)
-          .cursor_pointer()
-          .hover((s) => s.bg(t.hover))
-          .on_click(() => {
-            closeOverlay(overlay);
-            item.open();
-          })
-          .child(item.label),
-      ),
-    );
+    .children(items.map((item) => menuRow(t, item, overlay)));
 }
 
 export function renderRowMenu(t) {

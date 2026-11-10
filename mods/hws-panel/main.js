@@ -2,7 +2,7 @@
 // One copy runs per use. A pane shows the panel, a dialog copy shows the close
 // decision or Promote, a `mod.open` copy toggles the pane and closes itself, a
 // layout block with `view: "sidebar"` shows the Workspaces section, and a popup
-// copy shows the workspace menu, the stage menu or an artifact's menu.
+// copy shows the workspace menu, a space's menu, the stage menu or an artifact's menu.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -13,6 +13,7 @@ import { initRename, renderConfirm, renderRename, renderRowMenu, renderStageMenu
 import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, nameList, noteLines, placeRows, resolvePath, taskCounts, typeLabel, validStatus } from "./context.js";
 import { openCite, openExternally, revealPath, showBoard } from "./cites.js";
 import { renderArtifactMenu } from "./artifactmenu.js";
+import { initMoveSpace, initSpaceMenu, renderMoveSpace, renderSpaceMenu, spaceRef } from "./spacemenu.js";
 import { artifactsSection, currentSection, headerSection, historySection, notesSection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
 
 const MOD = "hws-panel";
@@ -53,6 +54,10 @@ export default class Panel extends View {
       focusField(this, "instructions", cx);
     } else if (this.view === "rename") {
       initRename(this, cx);
+    } else if (this.view === "space-menu") {
+      initSpaceMenu(this, cx);
+    } else if (this.view === "move-space") {
+      initMoveSpace(this, cx);
     } else if (this.view === "row-menu" || this.view === "stage-menu" || this.view === "artifact-menu") {
       // The menu draws from its props.
     } else if (this.view === "decide" || this.view === "confirm") {
@@ -494,7 +499,7 @@ export default class Panel extends View {
           .items_start()
           .gap(6)
           .children(candidates.map(joinButton))
-          .child(button(t, "new-workspace", "New workspace…", false, openWorkspaceForm)),
+          .child(button(t, "new-workspace", "Make this space a workspace…", false, () => openWorkspaceForm(spaceRef(this.spaceId)), Boolean(this.spaceId))),
       )
       .when(Boolean(this.note), (el) => el.child(div().text_size(11).text_color(this.note.isError ? t.blocked : t.dim).whitespace_normal().child(this.note.text)));
   }
@@ -654,6 +659,8 @@ export default class Panel extends View {
     if (this.view === "artifact-menu") return renderArtifactMenu(t);
     if (this.view === "rename") return renderRename(t, this);
     if (this.view === "confirm") return renderConfirm(t, this);
+    if (this.view === "space-menu") return renderSpaceMenu(t, this);
+    if (this.view === "move-space") return renderMoveSpace(t, this);
     return this.renderPanel(t, cx);
   }
 }

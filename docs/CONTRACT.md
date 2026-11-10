@@ -102,7 +102,7 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 }
 ```
 
-`id` is the first space's id and never changes, even after that space closes or leaves. `spaces` lists every space in the workspace. A manifest without it has only `id`. `board` is the workspace's Board space and its Board tab, absent until someone adds a Board.
+`id` is the first space's id and never changes, even after that space closes or leaves. A workspace made with `--space` from a space whose id already named a workspace takes a generated id, `ws` and twelve hex digits. `spaces` lists every space in the workspace. A manifest without it has only `id`. `board` is the workspace's Board space and its Board tab, absent until someone adds a Board.
 
 | Field | Meaning |
 |---|---|
@@ -169,6 +169,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws update` | Pulls `main` with `--ff-only`, then runs `install.sh --force` with its output on stderr when the checkout's install version differs from `<state root>/install-version` or that file is missing. Prints `{updated,from,commit,installed}`, or `{updated:false,commit}` when the pull found nothing and the install is current. Fails with no change on another branch or with uncommitted changes to tracked files. A failed install records nothing, so the next `hws update` installs again |
 | `hws new terminal [--folder F]` | Opens a normal tab. No manifest |
 | `hws new workspace --name N --folder F [--home H] [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
+| `hws new workspace --name N --folder F --space S [--home H] [--kind K] [--instructions X]` | Makes the workspace from the open local space S and opens nothing. S keeps its name, tabs and terminals. A plain space's cards become the workspace's Board. A space leaving another workspace brings its terminal records and leaves its cards there, and fails when it is that workspace's last space or its Board space. `--tabs` with `--space` exits 2 |
 | `hws board add [--workspace W]` | Adds W's one Board space, or finds it, and prints `{workspace,space,tab}`. W defaults to the current workspace. A new Board space is named `Tasks` |
 | `hws board open --space S` | Finds the Board of S's workspace and prints `{workspace,space,tab}`, with null `space` and `tab` when it has none. Prints `{"workspace":null}` for a plain space. Never creates a Board |
 | `hws space add --workspace W [--name N] [--folder F]` | Opens a new space in W. F defaults to W's folder |
@@ -660,7 +661,7 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | New workspace row, shown when there are none | Opens the workspace form |
 | Workspace row | `space.select` for its showing space, else its first |
 | Chevron, shown with two or more spaces | Folds or unfolds its spaces. The choice is remembered |
-| Space row, shown for every space unless folded | `space.select` for that space |
+| Space row, shown for every space unless folded | `space.select` for that space. A right-click opens the [space menu](#space-menu) |
 | Tasks row, the Board space listed first and with no minus | `space.select` for the Board space, then `tab.select` for its Board tab |
 | Minus on a space row, shown with two or more spaces | `hws space remove` |
 | Add space, shown under the current workspace | Opens the dialog for `hws space add` and `hws space move` |
@@ -668,6 +669,21 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | Panel button on the current workspace | `mod.open` for `hws-panel` |
 
 The section reloads with `hws list` when the spaces change and every 60 seconds. Each reload sets `shared("hws.workspace.spaces")` to the sorted ids of every space in an open workspace, Board spaces included, only when the list changes. Each reload also runs `hws tidy status --workspace W` for every kept workspace. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A kept workspace with no `tidiedAt` shows a dim unwritten ring, which is neither behind nor stale. A throwaway, or a failed status, shows no ring. Space rows show each space's status. Tabs appear only in the top bar. Right-clicking a workspace row opens a menu with Open panel, Rename and Archive, or Open panel, Rename and Close for a throwaway. Open panel selects the workspace's space and splits the panel beside a terminal on its shown tab, or focuses a panel already there. Archive, Close, Restore and Remove each ask first in a dialog. `hws list --archived` fills a folded Archived row at the end of the list. Clicking an archived workspace offers Restore, and its right-click menu has Restore, Rename and Remove, which runs `hws close`. The section sizes its block with `layout.resize`, up to 300px of rows and then scrolling, and shows only the + when the sidebar is narrower than 160px.
+
+## Space menu
+
+A right-click on a local space's row opens `hws-panel` as a popup with `{"view":"space-menu","space":S}`. A row under a workspace adds `workspace`, `workspaceName` and `canLeave`, which is true when the workspace has another space. The Tasks row has no menu, and a remote space keeps Herdr's own menu.
+
+| Item | Shown | Runs |
+|---|---|---|
+| Rename | Always | `space.rename` |
+| New worktree, Open worktree | The space's folder is in a git repo | Herdr's `worktree` dialog |
+| Remove worktree | The folder is a linked worktree | Herdr's `worktree` dialog |
+| Move to workspace… | A plain space, or `canLeave` | Opens the move dialog |
+| Take out of NAME | `canLeave` | `hws space remove --space S`. A failure shows as a notification |
+| Close | Always | `space.close` |
+
+The move dialog is `hws-panel` with `{"view":"move-space","id":S,"name":N,"folder":F}`. It runs `hws list` and `hws space match --space S`, and lists every open workspace but the space's own, with the workspaces that hold its folder first. A click runs `hws space move --space S --workspace W`, and a failure shows in the dialog. Its last row, New workspace from this space…, opens the workspace form with `{"step":"workspace","space":{id,name,folder}}`. That form starts with the space's name and folder, and Create adds `--space S` to `hws new workspace`. The folder is the live folder of the space's first terminal, else the folder the space was made in.
 
 ## Spaces sidebar section
 
@@ -764,7 +780,7 @@ Each section is a function in `mods/hws-panel/sections.js` that takes `{ t, host
 | Reading a document | Back, its title, Show in Finder and the rendered text, in place of every other section. History rows, and Open note with no agent, open here |
 | Kept | Header, Current note, Not in the note yet, History once a log exists, Notes once there are any, Artifacts, Open now once something is open, Where files go |
 | Throwaway | Header, Record, Open now once something is open |
-| Plain space | A sentence, Add this space to NAME for up to three candidates, then New workspace… |
+| Plain space | A sentence, Add this space to NAME for up to three candidates, then Make this space a workspace… |
 
 Reads, on each `hws list` refresh:
 
@@ -789,6 +805,7 @@ Reads, on each `hws list` refresh:
 | Tasks line | Under the freshness line for a kept workspace with a Board. `N to do · N in progress · N waiting on you`, zeros left out, or Nothing open. Shows Tasks the way the `[card:ID]` chip does, without opening a card |
 | Add tasks | With no Board, beside No task list yet. Runs `hws board add --workspace W`, then shows Tasks |
 | Add this space to NAME | On a plain space. Runs `hws space move --space S --workspace W`, then reloads |
+| Make this space a workspace… | On a plain space. Opens the workspace form with the space, as the move dialog's last row does |
 | History rows | Decision log and Updates read in the panel |
 | Current note | The first 24 non-blank lines of the note, and a button that shows the rest in place. Each cite becomes a chip. The note's own `# Current` title is left out. With no note, says what the note is and where Tidy writes it |
 | `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |

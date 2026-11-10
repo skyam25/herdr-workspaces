@@ -8,6 +8,7 @@ import { hws, message, openWorkspaceForm } from "./hws.js";
 import { freshness } from "./context.js";
 import { freshnessDot } from "./sections.js";
 import { openConfirm, openRowMenu } from "./rowmenu.js";
+import { openSpaceMenu } from "./spacemenu.js";
 
 const NODE = "workspaces";
 const HEADING_PX = 31;
@@ -308,6 +309,10 @@ function spaceRow(t, state, workspace, space, canRemove) {
     .when(space.active, (el) => el.bg(t.hover))
     .when(!space.active, (el) => el.hover((s) => s.bg(t.hover)))
     .on_click(() => (isBoard ? showBoard(workspace.board) : run("space.select", { id: space.id })))
+    .when(!isBoard, (el) => el.on_mouse_down("right", (_e, cx) => {
+      cx.stop_propagation();
+      openSpaceMenu({ space: space.id, workspace: workspace.id, workspaceName: workspace.name, canLeave: canRemove });
+    }))
     .child(svg(isBoard ? "mods/hws-panel/board.svg" : icon("terminal")).size(12).flex_none())
     .child(div().flex_1().min_w(0).truncate().child(isBoard ? "Tasks" : space.name || workspace.name))
     .when(Boolean(space.status), (el) => el.child(statusDot(t, space.status)))

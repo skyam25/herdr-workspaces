@@ -68,8 +68,9 @@ export const KINDS = [
 ];
 
 // The new-workspace form, opened by the launcher and by the panel outside a workspace.
-export function openWorkspaceForm() {
-  openOverlay({ mod: "hws-new", kind: "dialog", modal: true, width: 500, height: 540, props: { step: "workspace" } });
+// With `space` as `{ id, name, folder }`, the form makes the workspace from that open space.
+export function openWorkspaceForm(space = null) {
+  openOverlay({ mod: "hws-new", kind: "dialog", modal: true, width: 500, height: 540, props: { step: "workspace", ...(space ? { space } : {}) } });
 }
 
 function expandFolder(text) {

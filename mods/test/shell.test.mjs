@@ -500,6 +500,18 @@ test("a remote space stays listed even when its id is shared", async () => {
   assert.equal(heading(view), "Spaces");
 });
 
+test("right-clicking a local space opens the space menu, and a remote one keeps Herdr's menu", async () => {
+  const remote = space("spc2", "beta", { machine: "box" });
+  const H = spaceWorld({ spaces: [THREE[0], remote], machines: [{ name: null, layout: "ready" }, { name: "box", layout: "ready" }], overlays: [] });
+  const view = await mount("hws-spaces");
+  byId(view, "space-spc1").handlers.on_mouse_down_right({}, view.cx);
+  byId(view, "space-spc2").handlers.on_mouse_down_right({}, view.cx);
+  assert.deepEqual(H.overlays.map((o) => [o.mod, o.kind, o.props]), [
+    ["hws-panel", "popup", { view: "space-menu", space: "spc1" }],
+    ["menu", "popup", { tab: "space", target: { id: "spc2" } }],
+  ]);
+});
+
 test("with every local space hidden the heading and + remain", async () => {
   const H = spaceWorld({ sharedValues: { [WORKSPACE_SPACES]: ["spc1", "spc2", "spc3"] } });
   const view = await mount("hws-spaces");

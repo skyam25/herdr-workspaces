@@ -236,6 +236,25 @@ async function form(extra = {}) {
   return { H, m };
 }
 
+test("the form makes a workspace from an open space, with its name and folder filled in", async () => {
+  const H = setup();
+  const m = await mount("hws-new", { overlay: "ov1", step: "workspace", space: { id: "spc7", name: "api", folder: "/Users/me/Projects/api" } });
+  assert.match(m.text(), /New workspace from api \| The space keeps its name, tabs and terminals\./);
+  assert.deepEqual([m.view.values.name, m.view.values.folder], ["api", "~/Projects/api"]);
+  await m.click("create");
+  assert.deepEqual(args(H), [["new", "workspace", "--name", "api", "--folder", "/Users/me/Projects/api", "--space", "spc7", "--json"]]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("the form from a space with no folder starts at the parent folder and shows hws's refusal", async () => {
+  const H = setup({ hws: { parent: { folder: "/Users/me/Projects" }, "new workspace": { fail: "api is the only space in demo, so add another space there first" } } });
+  const m = await mount("hws-new", { overlay: "ov1", step: "workspace", space: { id: "spc7", name: "api", folder: "" } });
+  assert.equal(m.view.values.folder, "~/Projects");
+  await m.click("create");
+  assert.match(m.text(), /only space in demo/);
+  assert.deepEqual(H.closed, []);
+});
+
 test("form requires a folder and calls nothing without one", async () => {
   const { H, m } = await form();
   m.view.inputs.folder.type("", m.cx);
@@ -417,14 +436,14 @@ test("closing a throwaway with work opens the Keep or Trash dialog", async () =>
 
 // Panel
 
-test("panel outside a workspace says so and offers New workspace", async () => {
-  const H = setup({ hws: { list: [] } });
+test("panel outside a workspace says so and offers to make this space a workspace", async () => {
+  const H = setup({ hws: { list: [] }, spaces: [{ id: "spc1", name: "api", machine: null, folder: "/made/here", tabs: [{ id: "tb1" }] }], panes: [{ pane: "p1", terminal: "t1", tab: "tb1", cwd: "/Users/me/now" }] });
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /not a workspace/);
+  assert.match(m.text(), /not a workspace.*Make this space a workspace…/);
   assert.deepEqual(args(H).find((a) => a[0] === "space"), ["space", "match", "--space", "spc1", "--json"]);
   await m.click("new-workspace");
   assert.equal(H.overlays[0].mod, "hws-new");
-  assert.equal(H.overlays[0].props.step, "workspace");
+  assert.deepEqual(H.overlays[0].props, { step: "workspace", space: { id: "spc1", name: "api", folder: "/Users/me/now" } });
 });
 
 const MATCH = (count) => ({ space: "spc1", folder: "/w/app", candidates: Array.from({ length: count }, (_, i) => ({ id: `w${i}`, name: `work ${i}`, folder: "/w", home: null })) });
@@ -432,7 +451,7 @@ const MATCH = (count) => ({ space: "spc1", folder: "/w/app", candidates: Array.f
 test("a plain space whose folder sits in a workspace offers to join it, then reloads", async () => {
   const H = setup({ hws: { list: [], "space match": MATCH(1), "space move": { space: "spc1", workspace: "w0" } } });
   const m = await mount("hws-panel", {});
-  assert.match(m.text(), /This space is not in a workspace\. Its folder belongs to work 0\..*Add this space to work 0.*New workspace…/);
+  assert.match(m.text(), /This space is not in a workspace\. Its folder belongs to work 0\..*Add this space to work 0.*Make this space a workspace…/);
   const lists = args(H).filter((a) => a[0] === "list").length;
   await m.click("join-w0");
   assert.deepEqual(args(H).find((a) => a[1] === "move"), ["space", "move", "--space", "spc1", "--workspace", "w0", "--json"]);
@@ -1673,6 +1692,107 @@ test("the sidebar shows no dot when tidy status fails", async () => {
   const m = await mount("hws-panel", { view: "sidebar" });
   assert.equal(m.has("sidebar-fresh-spc1"), false);
   assert.match(m.text(), /checkout demo/);
+});
+
+// Space menu
+
+const menuIds = (m) => ["rename", "worktree-new", "worktree-open", "worktree-remove", "move", "leave", "close"].filter((id) => m.has(`row-menu-${id}`));
+const gitAnswers = (top, common) => (_command, argv) => ({ code: top ? 0 : 128, stdout: argv.includes("--show-toplevel") ? top : common, stderr: "" });
+
+test("right-clicking a workspace's space opens the space menu, and the Tasks row has none", async () => {
+  const withBoard = { ...GROUP, spaces: ["spc1", "spc3", "spc2"], board: { space: "spc2", tab: "tb9" } };
+  const H = setup({ hws: { list: [withBoard] }, spaces: SPACED });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  await m.rightClick("sidebar-space-spc3");
+  const spec = H.overlays.at(-1);
+  assert.deepEqual([spec.mod, spec.kind], ["hws-panel", "popup"]);
+  assert.deepEqual(spec.props, { space: "spc3", workspace: "spc1", workspaceName: "checkout demo", canLeave: true, view: "space-menu" });
+  assert.equal(m.clickable("sidebar-space-spc2"), true);
+  await assert.rejects(m.rightClick("sidebar-space-spc2"));
+});
+
+test("a plain space's menu renames, moves and closes it", async () => {
+  const H = setup({ spaces: SPACED, panes: [], other: gitAnswers("", "") });
+  const m = await mount("hws-panel", { view: "space-menu", space: "spc2", overlay: "ov1" });
+  assert.deepEqual(menuIds(m), ["rename", "move", "close"]);
+  await m.click("row-menu-rename");
+  await m.click("row-menu-close");
+  assert.deepEqual(H.runs, [{ name: "space.rename", args: { id: "spc2" } }, { name: "space.close", args: { id: "spc2" } }]);
+  await m.click("row-menu-move");
+  assert.deepEqual(H.closed, ["ov1", "ov1", "ov1"]);
+  const spec = H.overlays.at(-1);
+  assert.deepEqual([spec.kind, spec.modal, spec.props], ["dialog", true, { view: "move-space", id: "spc2", name: "other", folder: "" }]);
+});
+
+test("a space in a repo offers worktrees, and a linked one offers Remove worktree", async () => {
+  const world = { spaces: SPACED.map((s) => ({ ...s, folder: "/w/app" })), panes: [] };
+  const H = setup({ ...world, other: gitAnswers("/w/app", "/w/app/.git") });
+  const main = await mount("hws-panel", { view: "space-menu", space: "spc2", overlay: "ov1" });
+  assert.deepEqual(menuIds(main), ["rename", "worktree-new", "worktree-open", "move", "close"]);
+  await main.click("row-menu-worktree-open");
+  assert.deepEqual(H.overlays.at(-1), { mod: "worktree", kind: "dialog", width: 560, height: 480, props: { space: "spc2", action: "open" } });
+
+  setup({ ...world, other: gitAnswers("/w/app-fix", "/w/app/.git") });
+  const linked = await mount("hws-panel", { view: "space-menu", space: "spc2", overlay: "ov1" });
+  assert.deepEqual(menuIds(linked), ["rename", "worktree-new", "worktree-open", "worktree-remove", "move", "close"]);
+});
+
+test("a member space's menu takes it out, and a workspace's only space cannot move", async () => {
+  const member = { view: "space-menu", space: "spc3", workspace: "spc1", workspaceName: "checkout demo", overlay: "ov1" };
+  const H = setup({ spaces: SPACED, panes: [], notices: [] });
+  const m = await mount("hws-panel", { ...member, canLeave: true });
+  assert.deepEqual(menuIds(m), ["rename", "move", "leave", "close"]);
+  assert.match(m.text(), /Take out of checkout demo/);
+  await m.click("row-menu-leave");
+  assert.deepEqual(args(H), [["space", "remove", "--space", "spc3", "--json"]]);
+  assert.deepEqual(H.notices, []);
+
+  const failing = setup({ spaces: SPACED, panes: [], notices: [], hws: { "space remove": { fail: "herdr is not answering" } } });
+  const again = await mount("hws-panel", { ...member, canLeave: true });
+  await again.click("row-menu-leave");
+  assert.deepEqual(failing.notices.map((n) => [n.body, n.level]), [["herdr is not answering", "error"]]);
+
+  setup({ spaces: SPACED, panes: [] });
+  const only = await mount("hws-panel", { ...member, canLeave: false });
+  assert.deepEqual(menuIds(only), ["rename", "close"]);
+});
+
+const DOCS = { ...APP, id: "spd", name: "docs", spaces: ["spd"] };
+const SCRAP = { ...THROWAWAY, id: "spt", name: "scrap", spaces: ["spt"] };
+const MOVE = { view: "move-space", id: "spc2", name: "other", folder: "/w/docs/site", overlay: "ov1" };
+
+test("the move dialog lists every open workspace, folder matches first, and moves on a click", async () => {
+  const H = setup({ hws: { list: [APP, SCRAP, DOCS], "space match": { space: "spc2", folder: "/w/docs/site", candidates: [{ id: "spd", name: "docs", folder: "/w/docs", home: null }] } } });
+  const m = await mount("hws-panel", MOVE);
+  assert.match(m.text(), /^Move other to a workspace \| docs \| Holds this folder \| checkout demo \| scrap \| Throwaway \| New workspace from this space… \| Cancel$/);
+  await m.click("move-to-spc1");
+  assert.deepEqual(args(H).at(-1), ["space", "move", "--space", "spc2", "--workspace", "spc1", "--json"]);
+  assert.deepEqual(H.closed, ["ov1"]);
+});
+
+test("the move dialog leaves out the space's own workspace and says what it leaves", async () => {
+  setup({ hws: { list: [GROUP, DOCS] } });
+  const m = await mount("hws-panel", { ...MOVE, id: "spc3", name: "web" });
+  assert.match(m.text(), /^Move web to a workspace \| It leaves checkout demo, which keeps its tasks\. \| docs \| New workspace/);
+  assert.equal(m.has("move-to-spc1"), false);
+});
+
+test("the move dialog hands the space to the new-workspace form", async () => {
+  const H = setup({ hws: { list: [] } });
+  const m = await mount("hws-panel", MOVE);
+  await m.click("move-to-new");
+  assert.deepEqual(H.closed, ["ov1"]);
+  assert.deepEqual([H.overlays.at(-1).mod, H.overlays.at(-1).props], ["hws-new", { step: "workspace", space: { id: "spc2", name: "other", folder: "/w/docs/site" } }]);
+});
+
+test("the move dialog stays open on a failed move, and Escape closes it", async () => {
+  const H = setup({ hws: { list: [APP], "space move": { fail: "other is on vps, and a workspace holds only spaces on this computer" } } });
+  const m = await mount("hws-panel", MOVE);
+  await m.click("move-to-spc1");
+  assert.match(m.text(), /holds only spaces on this computer/);
+  assert.deepEqual(H.closed, []);
+  await m.key("escape");
+  assert.deepEqual(H.closed, ["ov1"]);
 });
 
 test("the minus takes a space out of the workspace", async () => {

@@ -1,12 +1,15 @@
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 
 import { UsageError } from '../errors.js';
 import { act } from '../herdr.js';
-import { createManifest, updateManifest } from '../manifest.js';
-import { expandFolder } from '../paths.js';
+import { createManifest, manifestOfSpace, updateManifest } from '../manifest.js';
+import { expandFolder, workspaceDir } from '../paths.js';
 import { ensurePlace } from '../places.js';
 import { requireFlag, splitList } from '../resolve.js';
 import { parentFolder, rememberParent, requireFolder } from '../settings.js';
+import { liveSpace, requireOtherSpaces, takeSpace } from './spaces.js';
+import { boardOf, moveCards } from './todo.js';
 
 export const KEPT_KINDS = ['general', 'app', 'deliverable'];
 
@@ -71,21 +74,42 @@ export function newTerminal(flags) {
 // New work starts out exploring, so a tidy pass decides nothing the person has not.
 const FIRST_STAGE = 'discovery';
 
+// A space that never founded a workspace gives the new one its id, and its cards
+// already sit on that board. Any trace of an earlier workspace under that id
+// calls for a fresh id.
+function adoptedId(space, ownBoard) {
+  const isFree = ownBoard === space.id && !existsSync(workspaceDir(space.id));
+  return isFree ? space.id : `ws${randomBytes(6).toString('hex')}`;
+}
+
+// Makes a workspace around an open space, which keeps its name, tabs and
+// terminals. Its own cards come along. Cards on a workspace it leaves stay there.
+function adoptSpace({ name, kind, folder, instructions }, spaceId) {
+  const space = liveSpace(spaceId);
+  const source = manifestOfSpace(space.id);
+  if (source) requireOtherSpaces(source, space);
+
+  const terminals = source ? takeSpace(source, space) : [];
+  const ownBoard = boardOf(space.id);
+  const id = adoptedId(space, ownBoard);
+  const tabs = (space.tabs ?? []).map((tab) => ({ tabId: tab.id, name: tab.name ?? null, role: null }));
+  const manifest = createManifest({ id, name, kind, folder, instructions: instructions ?? '', spaces: [space.id], tabs, terminals });
+  if (ownBoard !== id) moveCards(ownBoard, id);
+  return manifest;
+}
+
 export function newWorkspace(flags) {
   const { name, folder, home, kind } = keptFields(flags);
-  const manifest = createWorkspace({
-    name,
-    kind,
-    folder,
-    instructions: flags.instructions,
-    tabs: parseTabs(flags.tabs),
-  });
+  if (flags.space && flags.tabs) throw new UsageError('--tabs opens tabs in a new space, so leave it out with --space');
+  const fields = { name, kind, folder, instructions: flags.instructions };
+  const manifest = flags.space ? adoptSpace(fields, flags.space) : createWorkspace({ ...fields, tabs: parseTabs(flags.tabs) });
   const started = updateManifest(manifest.id, (draft) => {
     draft.stage = FIRST_STAGE;
     if (home && home !== folder) draft.home = home;
   });
   rememberParent(folder);
-  return { data: started, text: `created ${kind} workspace ${name} (${manifest.id})` };
+  const from = flags.space ? ` from space ${flags.space}` : '';
+  return { data: started, text: `created ${kind} workspace ${name} (${manifest.id})${from}` };
 }
 
 export function newThrowaway(flags) {
