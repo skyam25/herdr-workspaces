@@ -51,6 +51,7 @@ Update with `hws update`, which pulls `main`, reinstalls every part when the ins
 - A surface opens with `hws surface open --type board --title X --terminal "$HC_TERMINAL_ID"`.
 - Done delivers to the terminal that opened the surface and closes the pane. The work stays in `.herdr-workspace/` inside the workspace folder.
 - A standalone surface offers Open terminal and Copy link.
+- An agent shows a page for comments with `hws review FILE`. Done sends the comments back and clears them from the page, and the agent runs the command again after its changes.
 - `hws resume` restarts recorded Claude sessions after a reboot.
 - Delivery failures are written to `~/.local/state/herdr-workspaces/delivery.log`.
 

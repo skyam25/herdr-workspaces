@@ -1,9 +1,29 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, extname, join, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { HwsError } from './errors.js';
 import { updateManifest, listManifests } from './manifest.js';
 import { listRetired } from './retired.js';
+
+// Marks a round of comments on a page. Like a tidy review, it is a message and not stream work.
+export const FEEDBACK_ROLE = 'feedback';
+
+// Follows symlinks where the path exists, so /tmp and /private/tmp compare equal.
+export function realOf(path) {
+  return existsSync(path) ? realpathSync(path) : resolve(path);
+}
+
+// True when child is parent or sits below it.
+export function isInside(parent, child) {
+  const rel = relative(realOf(parent), realOf(child));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+// The artifact that tracks a file. Reviews of the file are filed under it.
+export function artifactOfFile(manifest, file) {
+  const real = realOf(file);
+  return manifest.artifacts.find((item) => item.type === 'file' && !item.role && realOf(item.path) === real) ?? null;
+}
 
 export function linkFor(promptPath) {
   if (/^https?:/i.test(promptPath)) return promptPath;

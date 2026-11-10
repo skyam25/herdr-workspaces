@@ -67,6 +67,7 @@ export default class Panel extends View {
       this.tasksAsk = 0;
       this.match = null;
       this.showSuperseded = false;
+      this.showRounds = new Set();
       this.showAllBacklog = false;
       this.showPlaces = false;
       this.showWholeNote = false;
@@ -505,6 +506,7 @@ export default class Panel extends View {
       this.spaceId = spaceId;
       this.note = null;
       this.showSuperseded = false;
+      this.showRounds = new Set();
       this.showAllBacklog = false;
       this.showPlaces = false;
       this.showWholeNote = false;

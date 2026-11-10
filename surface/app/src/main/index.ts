@@ -600,6 +600,8 @@ async function start(): Promise<void> {
     socket: socketPath,
     push: (s) => send(CH.surface, s),
     ...(process.env.HWS_SURFACE_WINDOW === '1' ? { close: () => app.quit() } : {}),
+    handedOff: (deliveryId) => sender.handedOff(deliveryId),
+    settle: (handed) => sender.settle(handed),
     // Verification reads the link from a file, so it never touches the real clipboard.
     copy: (text) => (process.env.HWS_CLIPBOARD_FILE ? writeFileSync(process.env.HWS_CLIPBOARD_FILE, text) : clipboard.writeText(text)),
   });
@@ -674,6 +676,7 @@ async function start(): Promise<void> {
     void surfaceHost?.ready();
   });
   ipc.handle('surfaceWant', (action) => surfaceHost?.want(action));
+  ipc.handle('surfaceRepeat', async () => (await surfaceHost?.repeat()) ?? false);
   transport.on(CH.reply, (_e, reply) => bridge.handleReply(reply as BoardReply));
   // A surface has no place to hide to. Its pane is the window.
   ipc.on('hidePanel', () => {

@@ -114,7 +114,9 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `current.covers` | The newest stream item each source had absorbed at that pass. Any key may be null |
 | `tidy` | The tidy pass `hws tidy start` opened. Absent when none was started |
 | `terminals[].role` | `tidy` on the terminal `hws tidy start` opened. Freshness leaves its session out |
-| `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. Freshness, the panel's Artifacts section and `hws artifact scan` leave it out. Absent on other artifacts |
+| `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. `feedback` on the Done bundle of any other page that shows a file. Freshness and `hws artifact scan` leave both out, and the panel lists neither as an artifact of its own. Absent on other artifacts |
+| `artifacts[].file` | On a `feedback` round, the absolute path of the file the page showed. Absent otherwise |
+| `artifacts[].reviewOf` | On a `feedback` round, the id of the `file` artifact that tracked that file at Done, or null when none did. Absent otherwise |
 | `artifacts[].status` | `draft`, `current` or `superseded`. Done writes `current`. A record without it reads as `current` |
 | `artifacts[].supersedes` | The id of the artifact this one replaces, or null. Absent reads as null |
 | `artifacts[].type` | `board`, `note` or `page` from Done, `file` or `link` from `hws artifact add` |
@@ -187,12 +189,13 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list [--archived]` | Every open manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest. `--archived` lists only archived workspaces |
 | `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal |
-| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane]` | Starts the host and records the surface. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T. For an agent flipped to Chat, `--beside-pane` and `--space` name its chat pane P and space S, and fail unless T's `herdr.chat` label equals P |
+| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane]` | Starts the host and records the surface. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. A file already open in a pane gets the focus, and the result has `focused: true` |
+| `hws review FILE\|ARTIFACT [--title X] [--terminal T]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T` does. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane with no agent attached. Never opens standalone |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open}]`. Leaves out closed windows with no work |
 | `hws surface resume --id S` | Brings an open window forward, or starts a closed one again on the same id and data |
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
-| `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place |
+| `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place. See [Delivery on Done](#delivery-on-done) |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
 | `hws phone pair` | In a terminal, shows a QR code and waits for a phone. Without a terminal on stdout, opens a Pair phone tab that does this. See [Phone](#phone) |
 | `hws phone send FILE\|ARTIFACT [--prompt X] [--terminal T] [--space S]` | Puts an `.html` or `.excalidraw` file in the phone's inbox, tied to T. Prints the hand-off. Fails when no phone is paired or the file is another type |
@@ -223,8 +226,35 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 1. The host writes a bundle folder with `prompt.md` and any `images/`.
 2. It calls `hws surface done --id S --bundle DIR`.
 3. `hws` moves the bundle under the workspace's `artifacts` place and rewrites paths inside `prompt.md` to the new location.
-4. For a glued surface whose terminal is live, `hws` runs `hc send T "<prompt.md text>"`, then `herdr-app do pane.close --pane P`, then `herdr-app do pane.focus --terminal T`.
-5. For standalone, or a terminal that ended, `hws` records the artifact and prints `{"standalone":true,"artifact":"...","link":"@..."}`. The host then shows Open terminal and Copy link.
+4. For a glued surface whose terminal is live, `hws` runs `hc send T "<prompt.md text>"`, drops the surface's record, then runs `herdr-app do pane.close --pane P` and `herdr-app do pane.focus --terminal T`.
+5. For standalone, or a terminal that ended, `hws` records the artifact and prints `{"standalone":true,"artifact":"...","link":"@..."}`. The host then shows Open terminal and Copy link. A surface in a pane keeps its record, so the file opens to the same pane and a second press files a second bundle. A board in its own window loses its record.
+
+### Feedback rounds
+
+A page that shows a file is a round of feedback on that file. Tidy reviews are the exception.
+
+| Item | Behaviour |
+|---|---|
+| Record | `type: page`, `role: feedback`, `title: Feedback on <surface title>`, `file`, and `reviewOf` |
+| `reviewOf` | The `file` artifact whose path is the file, compared after resolving links. `hws review` tracks the file first, so its rounds always have one |
+| Prompt | Before a live terminal gets it, `prompt.md` gains a last line. It asks the agent to run `hws review <file>` after changing the page |
+| Freshness, scan, session start | Leave rounds out, because a round is a message and not work that landed |
+| Panel | Lists a round under the artifact it reviews. See [Workspace panel](#workspace-panel-hws-panel) |
+
+### Clearing what was delivered
+
+The host keeps a sent draft until `hws surface done` succeeds, so a refused bundle loses nothing.
+
+| Case | Behaviour |
+|---|---|
+| Before the call | The host writes `<data folder>/handed-off.json` with the draft's id and revision |
+| `hws` fails | The host removes that file and keeps the draft |
+| `hws` succeeds, pane stays open | The host deletes the draft, removes the file, pushes `sent` to the page, and opens the file again. The page drops the delivered comments and keeps any added since |
+| `hws` succeeds, pane closes | Closing the pane ends the host. The next host on that data folder finds the file at start and deletes the draft |
+| Draft edited after the Send | It stays, because that text did not go out |
+| A standalone press with nothing new | Acts on the artifact the last press saved |
+
+A file opens as the same surface each time, so this is what keeps delivered comments off the page when it opens again.
 
 ## Temporary throwaways
 
@@ -334,7 +364,7 @@ Counted on read against `current.covers`.
 | Source | Behind when |
 |---|---|
 | Sessions | A session recorded in `terminals` has a transcript modified after `sessionsThrough`. The tidy terminal's session and sessions with no transcript are left out |
-| Artifacts | `createdAt` is after `artifactsThrough`, or the file changed after it, which sets `editedAt`. A review saved from the tidy terminal is left out |
+| Artifacts | `createdAt` is after `artifactsThrough`, or the file changed after it, which sets `editedAt`. An artifact with a `role` is left out, which covers tidy reviews and feedback rounds |
 | Commits | In `git log covers.commit..HEAD` in the workspace folder, limited to `home` when the workspace has one of its own. With no `covers.commit`, every commit since the workspace's `createdAt`. A commit whose files all sit under the `scratch`, `current`, `decisions` or `history` place is left out |
 | Cards | A Done card on the workspace's task list that is not archived |
 
@@ -417,7 +447,7 @@ Prints `{ terminal, started, packet }`.
 ```
 
 - `since` holds exactly the items `hws tidy status` counts as behind.
-- `live.artifacts` lists every artifact not superseded, so a pass can catch an old one that a new decision contradicts.
+- `live.artifacts` lists every artifact not superseded and with no `role`, so a pass can catch an old one that a new decision contradicts.
 - `cutoff` is taken when the packet is written. The time keys hold that moment, and `commit` holds HEAD. Work that lands during the pass stays in the next backlog.
 - `current.hash` is the sha256 of the note file, or null when the file does not exist.
 
@@ -512,6 +542,17 @@ Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live.
 | `COMPANION_DATA_DIR` | The surface data folder |
 
 The host's start script is `surface/run.sh`.
+
+## In a pane
+
+Herdr resends a pane's whole image for each change to the page, so a surface in a pane holds still until the person acts. `surface/still.cjs` holds the rules, and a surface in its own window or a web view has none of them.
+
+| Rule | Applies to |
+|---|---|
+| The caret stays solid | The app's page and every review page |
+| Transitions finish at once | The app's page |
+| `prefers-reduced-motion` reads `reduce` | The app's page and every review page |
+| A hover reaches the page after the pointer rests for 90 ms. A press, a drag and a wheel turn arrive at once | Every page |
 
 ## Own window
 
@@ -741,8 +782,10 @@ Reads, on each `hws list` refresh:
 | `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |
 | `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID` |
 | `[commit:SHA]` chip | Copies the sha with `pbcopy` |
-| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board opens its `comments.md`, or its sketch in the default app when it has none. Another Done bundle opens its `comments.md`, or else its `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
-| Artifact title and Open | Run the `[artifact:ID]` action |
+| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board opens its `comments.md`, or its sketch in the default app when it has none. Another Done bundle opens the first it has of `review.md`, `annotations.md`, `comments.md` and `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
+| Artifact title and Open | Run the `[artifact:ID]` action. A `file` artifact is the page itself, so its row opens the page |
+| `N feedback` on an artifact row | Shown when rounds name the artifact in `reviewOf`. Unfolds them beneath the row, newest first |
+| Feedback round row | Reads the round in the panel, from the first it has of `review.md`, `annotations.md`, `comments.md` and `prompt.md`. A round whose `reviewOf` is null or gone is a row of its own at the end of Artifacts, under its title |
 | Artifact `···` menu | Open in browser for HTML, Open sketch for a board, otherwise Open in default app. Then Show in Finder and Copy for Claude, which copies the `@path` from `hws link ARTIFACT` |
 | Show in Finder, in the reader and the `···` menu | `open -R` on the file, or `xdg-open` on its folder on Linux, where the label reads Show in folder. A bundle reveals its `prompt.md` |
 | Not in the note yet | The four `behind` counts, then `items`, eight at first. A row runs its item's cite. A live pass row focuses its terminal |
@@ -785,7 +828,7 @@ A popup that the pane header and the chat composer open at the pointer.
 | Resume or Show `<title>` | Per entry in `boards` | `hws surface resume --id S`. An untitled sketch reads `sketch` |
 | Discard `<title>` | Per closed entry in `boards` | `hws surface discard --id S` |
 
-Every `hws surface open` passes `--terminal T`. A flipped agent also passes `--beside-pane P --space S`.
+Every `hws surface open` passes `--terminal T`. A flipped agent also passes `--beside-pane P --space S`, which the menu already knows.
 
 ### Flipped agents
 
@@ -796,6 +839,8 @@ A flipped agent has no pane, and `herdr-app ls` does not list chat panes. Mods f
 3. Its tab is the pane's `tab`. Its space is the entry in `spaces()` that holds that tab.
 
 `hws surface open --terminal T --beside-pane P --space S` opens a board in its own window and splits a note or page beside P. It fails unless T's `herdr.chat` label equals P. On Done, `hws` reads T's `herdr.chat` label again. It focuses that pane when the label is set and the terminal otherwise.
+
+An agent calling `hws` knows neither P nor S, so `--terminal T` alone works too. `hws` takes P from T's `herdr.chat` label. It takes S from T's `herdr.space` label, else from a `where` label that matches one space name, else from the space that holds the tab T was recorded in. With no space it fails and asks for both flags.
 
 ### Board
 
@@ -928,7 +973,7 @@ A surface runs on this computer. The `+` menu is hidden for a remote agent, and 
 
 | Skill | Loaded | Does |
 |---|---|---|
-| `herdr-workspace` | When the person mentions a workspace, the task list, where files land or a surface | Explains the manifest, places, the task list and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
+| `herdr-workspace` | When the person mentions a workspace, the task list, where files land, a surface, or looking over a page | Explains the manifest, places, the task list, `hws review` and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
 | `orchestrate` | By the first prompt of `hws orchestrator start` | Runs the board |
 | `tidy` | By the first prompt of `hws tidy start` | Reads the packet, writes `proposal.json` and `proposal.md` beside it, opens `proposal.md` with `hws surface open --type page --file F --terminal T` and ends the turn. On Done it runs `hws tidy apply --file proposal.json`, with `--skip` for parts the person turned down |
 
@@ -942,7 +987,7 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 1. Runs `hws register --terminal T --session S --json` and `hws current --line` in parallel.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
-3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line.
+3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE` and rules out `--standalone`.
 
 | Places sentence | |
 |---|---|

@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdir
 import { request as httpRequest } from 'node:http';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import { linkFor, moveBundle } from '../artifacts.js';
+import { FEEDBACK_ROLE, artifactOfFile, linkFor, moveBundle, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import {
   act,
@@ -22,7 +22,7 @@ import {
 import { TIDY_ROLE, ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
 import { HOST_SCRIPT, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
 import { isForeign, isKept, placeOf, writablePlace } from '../places.js';
-import { callingTerminal, requireCallingTerminal, requireFlag } from '../resolve.js';
+import { callingTerminal, requireCallingTerminal, requireFlag, spaceOfTerminal } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
 
@@ -36,19 +36,27 @@ export function newId(prefix) {
   return prefix + randomBytes(3).toString('hex');
 }
 
+const isUrl = (file) => /^[a-z][a-z0-9+.-]*:\/\//i.test(file);
+
 function resolveFile(file) {
   if (!file) return '';
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(file) ? file : resolve(file);
+  return isUrl(file) ? file : resolve(file);
 }
 
-// A glued surface splits beside its terminal.
+// A glued surface splits beside its terminal. A flipped agent has no pane and is
+// missing from the listing, so its labels name the chat pane and space to split beside.
 function gluedPlacement(live, terminal) {
   const found = findTerminal(live, terminal);
-  if (!found) throw new HwsError(`terminal ${terminal} is not in the Herdr window`);
-  return { workspace: manifestOfSpace(found.space.id), pane: found.pane, space: found.space.id };
+  if (found) return { workspace: manifestOfSpace(found.space.id), pane: found.pane, space: found.space.id };
+  const labels = terminalInfo(terminal)?.labels ?? {};
+  const chatPane = labels['herdr.chat'];
+  if (!chatPane) throw new HwsError(`terminal ${terminal} is not in the Herdr window`);
+  const space = spaceOfTerminal(terminal, labels);
+  if (!space) throw new HwsError(`Herdr cannot place flipped terminal ${terminal} in a space, so pass --beside-pane and --space`);
+  return { workspace: manifestOfSpace(space), pane: chatPane, space };
 }
 
-// A flipped agent has no pane, so its surface splits beside its chat pane.
+// The caller names the chat pane and space itself, as a mod that already knows them does.
 function flippedPlacement(terminal, chatPane, space) {
   if (chatPaneOf(terminal) !== chatPane) {
     throw new HwsError(`terminal ${terminal} is not flipped to chat pane ${chatPane}`);
@@ -102,7 +110,7 @@ function ownerTerminal(flags) {
 
 // One file opens as one surface per workspace, so its draft is there when it reopens.
 function surfaceIdFor(workspace, file) {
-  if (!file || /^[a-z][a-z0-9+.-]*:\/\//i.test(file)) return newId('s');
+  if (!file || isUrl(file)) return newId('s');
   return `s${createHash('sha256').update(`${workspace.id}\n${file}`).digest('hex').slice(0, 8)}`;
 }
 
@@ -246,7 +254,15 @@ function isTidyReview(manifest, { terminal, file }) {
   return Boolean(file) && dirname(resolve(file)) === join(workspaceDir(manifest.id), 'tidy');
 }
 
-// Kept bundles land under the workspace's artifacts place.
+// A page that shows a file is a round of feedback on it. The round names the file and
+// the artifact that tracks it, so the panel files it under that artifact.
+function feedbackFields(manifest, surface) {
+  if (surface.type !== 'page' || !surface.file || isUrl(surface.file)) return null;
+  const file = realOf(surface.file);
+  return { role: FEEDBACK_ROLE, title: `Feedback on ${surface.title}`, file, reviewOf: artifactOfFile(manifest, file)?.id ?? null };
+}
+
+// Kept bundles land under the workspace's artifacts place. The surface's record stays.
 export function archiveBundle({ manifest, surface }, bundle) {
   const artifactId = newId('a');
 
@@ -254,7 +270,7 @@ export function archiveBundle({ manifest, surface }, bundle) {
   const place = surface.type === 'note' && isKept(manifest) ? 'notes' : 'artifacts';
   const artifactDir = join(writablePlace(manifest, place), isKept(manifest) ? `${slug(surface.title)}-${artifactId}` : artifactId);
   const prompt = moveBundle(bundle, artifactDir);
-  const fromTidy = isTidyReview(manifest, surface);
+  const review = isTidyReview(manifest, surface) ? { role: TIDY_ROLE } : feedbackFields(manifest, surface);
   const artifact = {
     id: artifactId,
     type: surface.type,
@@ -264,13 +280,26 @@ export function archiveBundle({ manifest, surface }, bundle) {
     fromTerminal: surface.terminal,
     createdAt: Date.now(),
     status: 'current',
-    ...(fromTidy ? { role: TIDY_ROLE } : {}),
+    ...review,
   };
   updateManifest(manifest.id, (draft) => {
-    draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
     draft.artifacts.push(artifact);
   });
   return artifact;
+}
+
+function dropSurface(manifest, surface) {
+  updateManifest(manifest.id, (draft) => {
+    draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
+  });
+}
+
+const quoted = (path) => (/[\s"'$`\\]/.test(path) ? `'${path.replaceAll("'", `'\\''`)}'` : path);
+
+// Tells the agent how to hand the page back, in the prompt it is about to read.
+function askForAnotherLook(artifact) {
+  if (artifact.role !== FEEDBACK_ROLE) return;
+  appendFileSync(artifact.prompt, `\n\nIf you change the page, run \`hws review ${quoted(artifact.file)}\` afterwards so the person can look again.\n`);
 }
 
 function logDelivery(surface, reason) {
@@ -356,9 +385,7 @@ export function surfaceDiscard(flags) {
   const data = surfaceDataDir(manifest.id, surface.id);
   const drafts = linkedDraftHome(data);
   if (existsSync(data)) moveToTrash([data, ...(drafts ? [drafts] : [])]);
-  updateManifest(manifest.id, (draft) => {
-    draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
-  });
+  dropSurface(manifest, surface);
   return { data: { id: surface.id, discarded: true }, text: `discarded ${surface.id}` };
 }
 
@@ -369,20 +396,26 @@ export async function surfaceDone(flags) {
   assertBundle(bundle);
   const artifact = archiveBundle(found, bundle);
   const link = linkFor(artifact.prompt);
-  const { surface } = found;
+  const { manifest, surface } = found;
 
-  const standalone = { standalone: true, artifact: artifact.id, link };
-  if (!surface.terminal) return { data: standalone };
+  // A pane with no terminal to answer stays open on its work, so its record stays too.
+  const saved = () => {
+    if (!surface.pane) dropSurface(manifest, surface);
+    return { standalone: true, artifact: artifact.id, link };
+  };
+  if (!surface.terminal) return { data: saved() };
   if (!isTerminalAlive(surface.terminal)) {
     logDelivery(surface, `terminal ${surface.terminal} is not live`);
-    return { data: standalone };
+    return { data: saved() };
   }
+  askForAnotherLook(artifact);
   try {
     sendText(surface.terminal, promptToSend(artifact.prompt));
   } catch (error) {
     logDelivery(surface, error.message);
-    return { data: { ...standalone, deliveryError: error.message } };
+    return { data: { ...saved(), deliveryError: error.message } };
   }
+  dropSurface(manifest, surface);
 
   if (surface.pane) {
     // The user may have flipped since the surface opened, so the label is read now.

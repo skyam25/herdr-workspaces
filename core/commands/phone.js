@@ -3,13 +3,12 @@ import { request } from 'node:http';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { findArtifact, freeName, linkFor } from '../artifacts.js';
+import { findArtifact, freeName, isInside, linkFor, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isIdleShell, isTerminalAlive, listLive, requireLive, runDetached, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { ensureStandaloneManifest, manifestOfSpace, readManifest, writeJsonAtomic } from '../manifest.js';
 import { HWS_BIN, PHONE_HOST, home, phoneDir, phoneSocket, stateRoot } from '../paths.js';
 import { requireCallingTerminal, requireFlag } from '../resolve.js';
-import { isInside, realOf } from './artifact.js';
 import { archiveBundle, assertBundle, newId, promptToSend, windowOwnerLabel } from './surface.js';
 
 const CONTROL_MS = 15_000;

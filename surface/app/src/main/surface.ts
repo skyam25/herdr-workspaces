@@ -16,6 +16,7 @@ import type { DeliveriesResponse, Delivery, OpenRequest } from '../protocol';
 import type { SurfaceAction, SurfaceState, SurfaceType } from '../shared/ipc';
 import { isLocalUrl } from '../shared/outputs';
 import { portablePrompt } from '../shared/sessions';
+import type { HandedDraft } from './sender';
 
 export interface SurfaceConfig {
   id: string;
@@ -120,7 +121,14 @@ export interface SurfaceDeps {
   copy: (text: string) => void;
   /** Ends a surface with no pane for `hws` to close. */
   close?: () => void;
+  /** The draft a delivery handed over, which stays until `hws` takes the bundle. */
+  handedOff?: (deliveryId: string) => HandedDraft | undefined;
+  /** Deletes a handed draft, so the file opens next time with no delivered comments. */
+  settle?: (handed: HandedDraft) => void;
 }
+
+/** Names the draft `hws` is being handed. `hws` closes the pane on success, which ends this process before it can settle. */
+const handedFile = (dataDir: string) => join(dataDir, 'handed-off.json');
 
 type HwsResult = { standalone?: boolean; artifact?: string; link?: string; text?: string; deliveryError?: string; message?: string };
 
@@ -159,7 +167,27 @@ export class SurfaceHost {
   /** Registers the stand-in session and keeps it alive until the host stops. */
   start(): void {
     mkdirSync(this.cwd, { recursive: true });
+    this.settleLeftover();
     void this.poll();
+  }
+
+  /** Settles the draft an earlier host handed over just before its pane closed. */
+  private settleLeftover(): void {
+    this.settleHanded(readHanded(handedFile(this.cfg.dataDir)));
+  }
+
+  /** Deletes the handed draft and the marker that names it. */
+  private settleHanded(handed: HandedDraft | undefined): void {
+    if (handed) this.deps.settle?.(handed);
+    rmSync(handedFile(this.cfg.dataDir), { force: true });
+  }
+
+  /** Runs the waiting press on the artifact already saved, when the surface has nothing new to send. */
+  async repeat(): Promise<boolean> {
+    const waiting = !!this.action && !!this.state.artifact;
+    if (waiting) await this.afterArtifact();
+    else this.action = undefined;
+    return waiting;
   }
 
   stop(): void {
@@ -219,19 +247,24 @@ export class SurfaceHost {
 
   private async finish(delivery: Delivery): Promise<void> {
     this.update({ busy: true });
+    const handed = this.deps.handedOff?.(delivery.id);
+    const marker = handedFile(this.cfg.dataDir);
     try {
       const bundle = prepareBundle(delivery, join(this.cfg.dataDir, 'bundles'));
       const signature = bundleSignature(bundle);
       if (this.state.artifact && signature === this.signature) {
         rmSync(bundle, { recursive: true, force: true });
+        await this.settled(handed, delivery.id);
         await this.afterArtifact();
         return;
       }
+      if (handed) writeFileSync(marker, JSON.stringify(handed));
       const result = await this.hws(['surface', 'done', '--id', this.cfg.id, '--bundle', bundle, '--json']);
       this.signature = signature;
       if (result.standalone) {
         const fellBack = !this.state.standalone;
         this.state = { ...this.state, standalone: true, artifact: result.artifact };
+        await this.settled(handed, delivery.id);
         if (fellBack) {
           const text = result.deliveryError
             ? `Could not reach the terminal, so this was saved as an artifact. ${result.deliveryError}`
@@ -241,11 +274,23 @@ export class SurfaceHost {
         await this.afterArtifact(fellBack);
         return;
       }
+      this.settleHanded(handed);
       this.update({ busy: false, delivered: true, notice: { text: 'Delivered.' } });
       this.deps.close?.();
     } catch (err) {
+      rmSync(marker, { force: true });
       this.update({ busy: false, notice: { text: `Done failed: ${(err as Error).message}`, error: true } });
     }
+  }
+
+  /**
+   * Clears what a saved bundle holds from a pane that stays open. The renderer drops its copy
+   * when it sees `sent`, and a file's page then opens again with no delivered comments.
+   */
+  private async settled(handed: HandedDraft | undefined, deliveryId: string): Promise<void> {
+    this.settleHanded(handed);
+    this.update({ busy: true, sent: deliveryId });
+    if (handed && this.cfg.file) await this.request('POST', '/open', openRequest(this.cfg, this.sessionId, this.cwd)).catch(() => undefined);
   }
 
   /** Carries out a standalone press, or reports the artifact when there was none. */
@@ -318,6 +363,16 @@ export function runHws(bin: string, args: string[], options: { detached?: boolea
       else fail(new Error((parsed as { error?: string } | undefined)?.error ?? (err.trim() || `hws exited ${code}`)));
     });
   });
+}
+
+function readHanded(path: string): HandedDraft | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<HandedDraft>;
+    if (typeof raw.draftId !== 'string') return undefined;
+    return { draftId: raw.draftId, ...(typeof raw.draftRevision === 'number' ? { draftRevision: raw.draftRevision } : {}) };
+  } catch {
+    return undefined;
+  }
 }
 
 function parseJson(text: string): HwsResult | undefined {

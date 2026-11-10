@@ -321,6 +321,8 @@ export interface SurfaceState {
   busy?: boolean;
   delivered?: boolean;
   artifact?: string;
+  /** The last delivery `hws` took. The renderer then clears what that Send handed over. */
+  sent?: string;
   notice?: { text: string; error?: boolean };
 }
 
@@ -524,6 +526,8 @@ export interface CompanionApi extends BoardHost {
   init(): Promise<InitInfo>;
   /** Says what a standalone press wants done with the artifact the next Send makes. */
   surfaceWant(action: SurfaceAction): Promise<void>;
+  /** Runs the waiting press on the artifact already saved. False when there is none, so the caller says what is missing. */
+  surfaceRepeat(): Promise<boolean>;
   onSurface(fn: (state: SurfaceState) => void): Subscription;
   onSurfaceDoneKey(fn: () => void): Subscription;
   listBoardComments(): Promise<Record<string, BoardComments>>;
@@ -723,6 +727,7 @@ export const CH = {
   surface: 'surface:state',
   surfaceDoneKey: 'surface:done-key',
   surfaceWant: 'surface:want',
+  surfaceRepeat: 'surface:repeat',
   init: 'app:init',
   listBoards: 'boards:list',
   loadBoard: 'boards:load',
@@ -855,6 +860,7 @@ export type SendMethod = Exclude<ApiMethod, InvokeMethod | EventMethod>;
 export const IPC_INVOKE = {
   init: CH.init,
   surfaceWant: CH.surfaceWant,
+  surfaceRepeat: CH.surfaceRepeat,
   ipadSheetOpen: CH.ipadSheetOpen,
   ipadNewCode: CH.ipadNewCode,
   ipadSheetClose: CH.ipadSheetClose,

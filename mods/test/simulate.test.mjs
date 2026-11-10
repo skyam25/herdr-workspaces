@@ -1287,6 +1287,30 @@ test("artifact rows chip only a status worth noticing and fold superseded ones",
   assert.match(m.text(), /older \| superseded/);
 });
 
+const round = (id, createdAt, reviewOf, title = "Feedback on spec") => ({ id, type: "page", role: "feedback", title, path: `/art/${id}`, prompt: `/art/${id}/prompt.md`, file: "/w/spec.md", reviewOf, createdAt, status: "current" });
+const ROUNDS = { ...KEPT, artifacts: [...KEPT.artifacts, round("r1", 1600, "doc"), round("r2", 1700, "doc"), round("r3", 1800, null, "Feedback on loose.html")] };
+
+test("feedback rounds sort under the page they review, and an untracked page's round stands alone", () => {
+  const { under, loose } = ctx.feedbackRounds(ROUNDS.artifacts);
+  assert.deepEqual(under.doc.map((a) => a.id), ["r2", "r1"]);
+  assert.deepEqual(loose.map((a) => a.id), ["r3"]);
+  assert.deepEqual(ctx.roundFiles(ROUNDS.artifacts.at(-1)).at(0), "/art/r3/review.md");
+});
+
+test("a page row counts its feedback, unfolds the rounds and reads one in the panel", async () => {
+  kept({ files: { [NOTE_PATH]: NOTE, "/art/r2/review.md": "# Review of spec" } }, { list: [ROUNDS] });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /spec \| 2 feedback \| file.*Feedback on loose\.html/);
+  assert.equal(m.has("open-r1"), false);
+  assert.equal(m.has("round-r2"), false);
+  assert.equal(m.has("round-r3"), true);
+  await m.click("rounds-toggle-doc");
+  assert.equal(m.has("round-r1"), true);
+  await m.click("round-r2");
+  await m.settle();
+  assert.match(m.text(), /Back \| Feedback on spec.*# Review of spec/s);
+});
+
 test("Places shows a row per role and records an edit with hws set --place", async () => {
   const H = kept();
   const m = await mount("hws-panel", {});

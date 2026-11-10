@@ -10,7 +10,7 @@ import { tilde } from "./hws.js";
 import { revealLabel, showBoard } from "./cites.js";
 import { openArtifactMenu } from "./artifactmenu.js";
 import { openRowMenu, openStageMenu } from "./rowmenu.js";
-import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, freshness, isNote, linkCite, livePass, placeRows, recordedSessions, tasksLine, typeLabel } from "./context.js";
+import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, feedbackRounds, freshness, isNote, linkCite, livePass, placeRows, recordedSessions, roundFiles, tasksLine, typeLabel } from "./context.js";
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
 
@@ -319,25 +319,32 @@ export function sinceSection({ t, host, workspace, now }) {
 
 const smallButtonRow = (t, id, text, action) => h_flex().px(8).pt(2).child(smallButton(t, id, text, action));
 
+// A short row that opens something in the reader. A muted row brightens on hover.
+function readerRow(t, { id, label, detail, open, muted = false, indent = false }) {
+  return h_flex()
+    .id(id)
+    .flex_none()
+    .h(22)
+    .px(8)
+    .gap(8)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .when(muted, (el) => el.text_color(t.muted))
+    .hover((s) => (muted ? s.bg(t.hover).text_color(t.foreground) : s.bg(t.hover)))
+    .on_click(open)
+    .when(indent, (el) => el.child(div().flex_none().w(8)))
+    .child(div().flex_1().min_w(0).truncate().text_size(12).child(label))
+    .when(Boolean(detail), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(detail)));
+}
+
 // History
 
 // The decision log and update log a past pass left behind.
 export function historySection({ t, host, workspace }) {
   const record = isCurrentFor(host, workspace)?.status?.record;
   if (!record?.decisions && !record?.updates) return null;
-  const row = (id, title, detail, path) =>
-    h_flex()
-      .id(id)
-      .h(22)
-      .px(8)
-      .gap(8)
-      .items_center()
-      .rounded(6)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => host.openReader({ title, candidates: [path], reveal: path }, cx))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).child(title))
-      .when(Boolean(detail), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(detail)));
+  const row = (id, title, detail, path) => readerRow(t, { id, label: title, detail, open: (_e, cx) => host.openReader({ title, candidates: [path], reveal: path }, cx) });
   const { decisions, updates } = record;
   return v_flex()
     .flex_none()
@@ -349,11 +356,25 @@ export function historySection({ t, host, workspace }) {
 
 // Artifacts
 
+// A round of feedback is a message to the agent, so it reads in the panel and takes no comments.
+// `label` is its own title when it stands alone, and "Feedback" under the page it reviews.
+function roundRow(t, host, round, now, label) {
+  const open = (_e, cx) => host.openReader({ title: round.title || "Feedback", candidates: roundFiles(round), reveal: round.prompt ?? round.path }, cx);
+  return readerRow(t, { id: `round-${round.id}`, label: label ?? "Feedback", detail: ago(now - (round.createdAt ?? now)), open, muted: true, indent: !label });
+}
+
 // One line each. The title and Open go to the companion, and the menu holds the rest.
-function artifactRow(t, host, workspace, artifact, now) {
+// A page with feedback gains a count that unfolds its rounds beneath it.
+function artifactRow(t, host, workspace, artifact, now, rounds = []) {
   const { status } = artifact;
   const open = (_e, cx) => host.citeAction({ kind: "artifact", value: artifact.id }, workspace, cx);
-  return h_flex()
+  const unfolded = rounds.length > 0 && host.showRounds.has(artifact.id);
+  const toggle = (_e, cx) => {
+    if (unfolded) host.showRounds.delete(artifact.id);
+    else host.showRounds.add(artifact.id);
+    cx.notify();
+  };
+  const row = h_flex()
     .flex_none()
     .h(26)
     .px(8)
@@ -372,15 +393,31 @@ function artifactRow(t, host, workspace, artifact, now) {
         .child(artifact.title || artifact.id),
     )
     .when(Boolean(status) && status !== "current", (el) => el.child(pill(t, status, t[STATUS_COLOR[status]])))
+    .when(rounds.length > 0, (el) =>
+      el.child(
+        div()
+          .id(`rounds-toggle-${artifact.id}`)
+          .flex_none()
+          .text_size(11)
+          .text_color(unfolded ? t.foreground : t.dim)
+          .cursor_pointer()
+          .hover((s) => s.text_color(t.accent))
+          .on_click(toggle)
+          .child(`${rounds.length} feedback`),
+      ),
+    )
     .child(div().flex_none().text_size(11).text_color(t.dim).child(`${typeLabel(artifact.type)} · ${ago(now - (artifact.createdAt ?? now))}`))
     .child(smallButton(t, `open-${artifact.id}`, "Open", open))
     .child(smallButton(t, `more-${artifact.id}`, "···", () => openArtifactMenu(artifact)).tooltip("More ways to open"));
+  return unfolded ? [row, ...rounds.map((round) => roundRow(t, host, round, now))] : [row];
 }
 
 // Current and draft items, then one row that folds the superseded ones.
-function artifactRows(t, host, workspace, now, items, suffix = "") {
+// `rounds` maps an artifact's id to the feedback filed under it.
+function artifactRows(t, host, workspace, now, items, suffix = "", rounds = {}) {
   const { shown, superseded } = artifactGroups(items);
-  const rows = shown.map((a) => artifactRow(t, host, workspace, a, now));
+  const rowsOf = (list) => list.flatMap((a) => artifactRow(t, host, workspace, a, now, rounds[a.id]));
+  const rows = rowsOf(shown);
   if (superseded.length === 0) return rows;
   const fold = h_flex()
     .id(`superseded-toggle${suffix}`)
@@ -398,7 +435,7 @@ function artifactRows(t, host, workspace, now, items, suffix = "") {
       cx.notify();
     })
     .child(`${host.showSuperseded ? "Hide" : "Show"} ${superseded.length} superseded`);
-  return [...rows, fold, ...(host.showSuperseded ? superseded.map((a) => artifactRow(t, host, workspace, a, now)) : [])];
+  return [...rows, fold, ...(host.showSuperseded ? rowsOf(superseded) : [])];
 }
 
 // Notes have their own folder, so they get their own list when there are any.
@@ -409,13 +446,15 @@ export function notesSection({ t, host, workspace, now }) {
 }
 
 export function artifactsSection({ t, host, workspace, now }) {
-  const rows = artifactRows(t, host, workspace, now, (workspace.artifacts ?? []).filter((a) => !isNote(a) && a.role !== "tidy"));
+  const { under, loose } = feedbackRounds(workspace.artifacts);
+  const rows = artifactRows(t, host, workspace, now, (workspace.artifacts ?? []).filter((a) => !isNote(a) && !a.role), "", under);
   return v_flex()
     .flex_none()
     .gap(2)
     .child(sectionTitle(t, "Artifacts"))
-    .when(rows.length === 0, (el) => el.child(dimLine(t, "None yet.")))
-    .children(rows);
+    .when(rows.length + loose.length === 0, (el) => el.child(dimLine(t, "None yet.")))
+    .children(rows)
+    .children(loose.map((round) => roundRow(t, host, round, now, round.title || round.id)));
 }
 
 // Reader

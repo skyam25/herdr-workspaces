@@ -5,11 +5,11 @@ import { dirname } from 'node:path';
 import { callerSession, resumeArgv, sessionOfTerminal } from '../agent-session.js';
 import { agentArgv, agentTool } from '../agent-tools.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, listLive, sendText, startWorker, terminalInfo, windowStatus } from '../herdr.js';
+import { act, isTerminalAlive, keepingSelection, killTerminal, sendText, startWorker, terminalInfo, windowStatus } from '../herdr.js';
 import { withLock } from '../lock.js';
 import { manifestOfSpace, readManifest, writeJsonAtomic } from '../manifest.js';
 import { capturePath, todosPath } from '../paths.js';
-import { callerIsAgent, requireFlag, splitList } from '../resolve.js';
+import { callerIsAgent, requireFlag, spaceOfTerminal, splitList } from '../resolve.js';
 import { agentModels } from '../settings.js';
 import { workerPrompt } from '../worker-prompt.js';
 
@@ -18,22 +18,6 @@ const OWNERS = ['mine', 'unassigned', 'agent'];
 const ENDING_COLUMNS = ['waiting', 'done'];
 const REPORT_LIMIT = 8000;
 const ITEM_DEFAULTS = { worktree: false, note: '', addedBy: null, report: '', reportFrom: null, session: null, replies: [] };
-
-// A `where` label reads "<space name> / <tab name>". Space names can repeat, so only a single match counts.
-function spaceFromWhere(where, spaces) {
-  const matches = spaces.filter(({ name }) => where === name || where.startsWith(`${name} / `));
-  return matches.length === 1 ? matches[0].id : null;
-}
-
-// A flipped agent is missing from the listing, so its labels place it.
-export function spaceOfTerminal(terminal) {
-  const live = listLive();
-  const found = live && findTerminal(live, terminal);
-  if (found) return found.space.id;
-  const labels = terminalInfo(terminal)?.labels ?? {};
-  if (labels['herdr.space']) return labels['herdr.space'];
-  return live && labels.where ? spaceFromWhere(labels.where, live.spaces) : null;
-}
 
 // An agent's card must reach its own board, so a set terminal never falls back to the selected space.
 export function callerSpace(flags) {

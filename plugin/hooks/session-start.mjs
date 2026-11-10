@@ -14,6 +14,12 @@ const TASK_LIST = [
   "Run `~/.local/bin/hws` if `hws` is not on PATH.",
 ].join(" ");
 
+const REVIEW = [
+  "To show the person a page or document for comments, run `hws review FILE` with an .html or .md file, then end the turn.",
+  "It opens beside this agent, and their comments arrive as your next prompt.",
+  "Never open it with --standalone, because that pane has no agent to answer.",
+].join(" ");
+
 const NOTE_RULE = [
   "When the person asks to update the current note or the current state, or to catch up on where this work stands, load the herdr-workspaces:tidy skill before you read or write anything, and follow it.",
   "Never rewrite the current note yourself. Only a tidy pass may, because it records what the note covers.",
@@ -134,7 +140,7 @@ async function main() {
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, matchContext(match)].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

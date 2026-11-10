@@ -25,6 +25,25 @@
     "comment_in_review": true,
     "no_project_paths": true
   },
+  "page_reopen": {
+    "comment_saved_before_done": true,
+    "artifact": true,
+    "host_exited_on_hangup": true,
+    "delivered_comment_gone": true,
+    "marker_cleared": true,
+    "second_round": true,
+    "second_round_has_only_new_comment": true
+  },
+  "page_standalone": {
+    "copy_makes_artifact": true,
+    "copy_runs_link": true,
+    "delivered_comment_gone": true,
+    "still_open": true,
+    "nothing_new_copies_same_link": true,
+    "nothing_new_makes_no_artifact": true,
+    "second_round": true,
+    "second_round_has_only_new_comment": true
+  },
   "standalone": {
     "copy_makes_artifact": true,
     "copy_runs_link": true,

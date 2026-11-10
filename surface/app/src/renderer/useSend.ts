@@ -43,8 +43,19 @@ export interface SendDeps {
   targetSessionId?: string;
   notify: (text: string, kind?: ToastKind) => void;
   setChooserOpen: (open: boolean) => void;
-  /** On a surface the host reports the outcome, and the work stays until the pane closes. */
+  /** On a surface the host reports the outcome, and the work stays until `hws` takes it. */
   surface?: boolean;
+}
+
+/** What one Send hands over, and what its success clears. */
+interface Handover {
+  payload: Outgoing;
+  clearsBoard: boolean;
+  sent?: SentRevision;
+  annotated?: { id: string; sent: NoteAnnotations };
+  decided?: Decided;
+  pinned?: { board: string; sent: BoardComments };
+  onSent?: () => Promise<void>;
 }
 
 export interface PanelSend {
@@ -57,6 +68,8 @@ export interface PanelSend {
   handOffToIpad: (sessionId: string) => Promise<void>;
   /** Hands a running session what `build` makes, or says why `build` made nothing. */
   sendText: (sessionId: string, build: () => Promise<FixedSend | string>) => Promise<void>;
+  /** Clears what a surface's last Send handed over, once the host says `hws` took it. */
+  settleSurface: () => Promise<void>;
 }
 
 /** What a Send does with its draft: uses it up, or keeps it for Claude to revise and clears the comments it delivered. */
@@ -96,6 +109,8 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
   const slotsWarned = useRef<string>(undefined);
   /** True from the press of Send until main answers, so a second press cannot send twice. */
   const sending = useRef(false);
+  /** What a surface's Send handed over and still shows. */
+  const handed = useRef<Handover>(undefined);
 
   const checkSlots = (text: string): string | undefined => {
     const count = findSlots(text).length;
@@ -125,18 +140,7 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
    * Review mode sends the open review, or the decisions on the session's items.
    * Initiative mode sends the discover prompt.
    */
-  const outgoing = async (): Promise<
-    | {
-        payload: Outgoing;
-        clearsBoard: boolean;
-        sent?: SentRevision;
-        annotated?: { id: string; sent: NoteAnnotations };
-        decided?: Decided;
-        pinned?: { board: string; sent: BoardComments };
-        onSent?: () => Promise<void>;
-      }
-    | string
-  > => {
+  const outgoing = async (): Promise<Handover | string> => {
     if (modeRef.current === 'initiative') return { payload: { text: DISCOVER_PROMPT }, clearsBoard: false };
     if (modeRef.current === 'review') {
       const open = book.selected;
@@ -200,6 +204,31 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
     return typeof fixed === 'string' ? fixed : { payload: { text: fixed.text }, clearsBoard: false, onSent: fixed.onSent };
   };
 
+  /** Drops the comments, draft and decisions a Send delivered. Work added since stays. */
+  const clearSent = async (out: Handover) => {
+    if (out.pinned) {
+      const board = comments.consume(out.pinned.board, out.pinned.sent);
+      if (board && controller.board === board && !hasBoardComments(comments.of(board))) comments.setTool(false);
+    }
+    if (out.payload.draftId && out.sent) book.consume(out.payload.draftId, out.sent);
+    if (out.annotated) book.clearSent(out.annotated.id, out.annotated.sent);
+    if (out.decided) {
+      items.clear(out.decided.sessionId, out.decided.decisions);
+      void items.load(out.decided.sessionId).catch(() => undefined);
+    }
+    await Promise.all([book.flush(), comments.flush()]);
+  };
+
+  const settleSurface = async () => {
+    const out = handed.current;
+    handed.current = undefined;
+    if (!out) return;
+    try { await clearSent(out); }
+    catch (err) { notifyUnsaved(err); }
+  };
+
+  const notifyUnsaved = (err: unknown) => notify(`Sent, but could not save the remaining work: ${(err as Error).message}`, 'error');
+
   /** Builds the payload, or a fixed one, hands it over, and hides the panel once it went out. */
   const deliver = async (handOff: (payload: Outgoing) => Promise<SendResult>, fixed?: () => Promise<FixedSend | string>, before?: () => Promise<void>) => {
     if (sending.current) return;
@@ -211,11 +240,16 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
       // A picked session stays the target after a warning, so the next Send reaches it.
       await before?.();
       if (typeof out === 'string') {
+        // A standalone press with nothing new acts on the artifact the last Send saved.
+        if (surface && (await host.surfaceRepeat())) return;
         notify(out);
         return;
       }
       const result = await handOff(out.payload);
-      if (result.ok && surface) return;
+      if (result.ok && surface) {
+        handed.current = out;
+        return;
+      }
       // A follow-up that failed keeps the panel up, so the user sees what is left undone.
       if (result.ok && out.onSent) {
         const failed = await out.onSent().then(() => undefined, (err: Error) => err.message);
@@ -231,20 +265,10 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
           try { await controller.finishSend(out.payload, out.clearsBoard, (board) => !hasBoardComments(comments.of(board))); }
           catch (err) { cleanupError = err; }
         }
-        if (out.pinned) {
-          const board = comments.consume(out.pinned.board, out.pinned.sent);
-          if (board && controller.board === board && !hasBoardComments(comments.of(board))) comments.setTool(false);
-        }
-        if (out.payload.draftId && out.sent) book.consume(out.payload.draftId, out.sent);
-        if (out.annotated) book.clearSent(out.annotated.id, out.annotated.sent);
-        if (out.decided) {
-          items.clear(out.decided.sessionId, out.decided.decisions);
-          void items.load(out.decided.sessionId).catch(() => undefined);
-        }
-        try { await Promise.all([book.flush(), comments.flush()]); }
+        try { await clearSent(out); }
         catch (err) { cleanupError ??= err; }
         if (cleanupError) {
-          notify(`Sent, but could not save the remaining work: ${(cleanupError as Error).message}`, 'error');
+          notifyUnsaved(cleanupError);
           return;
         }
         host.hidePanel();
@@ -310,5 +334,5 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
     return !note || (!note.body.trim() && !note.board) ? 'Write something first.' : undefined;
   };
 
-  return { send, sendTo, sendNew, copyPrompt, openChooser, handOffToIpad, sendText };
+  return { send, sendTo, sendNew, copyPrompt, openChooser, handOffToIpad, sendText, settleSurface };
 }

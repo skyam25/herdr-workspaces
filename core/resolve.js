@@ -1,5 +1,5 @@
 import { HwsError, UsageError } from './errors.js';
-import { findTerminal, listLive } from './herdr.js';
+import { findTerminal, listLive, terminalInfo } from './herdr.js';
 import { listManifests, manifestOfSpace, readManifest } from './manifest.js';
 
 // Finds a terminal's workspace. The live window decides when it answers.
@@ -8,9 +8,40 @@ export function locateTerminal(terminal) {
   const live = listLive();
   const found = live && findTerminal(live, terminal);
   if (found) return { manifest: manifestOfSpace(found.space.id), tabId: found.tab.id };
-  const manifest = listManifests().find((item) => item.terminals.some((t) => t.terminal === terminal));
-  if (!manifest) return { manifest: null, tabId: null };
-  return { manifest, tabId: manifest.terminals.find((t) => t.terminal === terminal).tabId };
+  return recordedTerminal(terminal) ?? { manifest: null, tabId: null };
+}
+
+// The manifest that records a terminal, and the tab it was recorded in.
+function recordedTerminal(terminal) {
+  for (const manifest of listManifests()) {
+    const row = manifest.terminals.find((t) => t.terminal === terminal);
+    if (row) return { manifest, tabId: row.tabId };
+  }
+  return null;
+}
+
+// A `where` label reads "<space name> / <tab name>". Space names can repeat, so only a single match counts.
+function spaceFromWhere(where, spaces) {
+  const matches = spaces.filter(({ name }) => where === name || where.startsWith(`${name} / `));
+  return matches.length === 1 ? matches[0].id : null;
+}
+
+// The tab a terminal was recorded in still names its space after the terminal is parked.
+function spaceFromRecord(terminal, spaces) {
+  const tabId = recordedTerminal(terminal)?.tabId;
+  return (tabId && spaces.find((space) => (space.tabs ?? []).some((tab) => tab.id === tabId))?.id) || null;
+}
+
+// A flipped agent is missing from the listing, so its labels or its recorded tab place it.
+// A caller that already read the terminal's labels passes them.
+export function spaceOfTerminal(terminal, labels) {
+  const live = listLive();
+  const found = live && findTerminal(live, terminal);
+  if (found) return found.space.id;
+  labels ??= terminalInfo(terminal)?.labels ?? {};
+  if (labels['herdr.space']) return labels['herdr.space'];
+  if (!live) return null;
+  return (labels.where && spaceFromWhere(labels.where, live.spaces)) || spaceFromRecord(terminal, live.spaces);
 }
 
 export function workspaceOfTerminal(terminal) {

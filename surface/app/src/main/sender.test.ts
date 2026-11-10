@@ -75,3 +75,24 @@ it('consumes the saved draft when it is the revision that was sent', async () =>
   expect(await sender.send({ text: 'Text', draftId: 'd', draftRevision: 10 })).toMatchObject({ ok: true });
   expect(deps.drafts.remove).toHaveBeenCalledWith('d');
 });
+
+it('holds a surface draft until its delivery is settled, and keeps one edited since', async () => {
+  const { deps, roots, alpha } = setup();
+  roots.beta = alpha;
+  const sender = new Sender({ ...deps, keepsDrafts: true });
+  const drafts = deps.drafts as unknown as { get: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> };
+
+  expect(await sender.send({ text: 'Move the header', draftId: 'd1', draftRevision: 5 })).toMatchObject({ ok: true });
+  expect(drafts.remove).not.toHaveBeenCalled();
+  const handed = sender.handedOff('delivery');
+  expect(handed).toEqual({ draftId: 'd1', draftRevision: 5 });
+  expect(sender.handedOff('delivery')).toBeUndefined();
+
+  drafts.get.mockReturnValueOnce({ id: 'd1', updatedAt: 9 });
+  sender.settle(handed!);
+  expect(drafts.remove).not.toHaveBeenCalled();
+
+  drafts.get.mockReturnValueOnce({ id: 'd1', updatedAt: 5 });
+  sender.settle(handed!);
+  expect(drafts.remove).toHaveBeenCalledWith('d1');
+});

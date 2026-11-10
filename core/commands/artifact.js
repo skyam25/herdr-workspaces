@@ -1,28 +1,17 @@
-import { existsSync, realpathSync } from 'node:fs';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 
-import { findArtifact, linkFor, moveDir } from '../artifacts.js';
+import { artifactOfFile, findArtifact, isInside, linkFor, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, listLive } from '../herdr.js';
-import { listManifests, updateManifest } from '../manifest.js';
+import { listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
 import { isKept, placeOf, writablePlace } from '../places.js';
-import { requireFlag, resolveWorkspace, workspaceByRef } from '../resolve.js';
+import { requireCallingTerminal, requireFlag, resolveWorkspace, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { listRetired } from '../retired.js';
 import { scanWorkspace } from '../scan.js';
-import { newId } from './surface.js';
+import { newId, surfaceOpen } from './surface.js';
 
 export const ARTIFACT_STATUSES = ['draft', 'current', 'superseded'];
-
-// Follows symlinks where the path exists, so /tmp and /private/tmp compare equal.
-export function realOf(path) {
-  return existsSync(path) ? realpathSync(path) : resolve(path);
-}
-
-// True when child is parent or sits below it.
-export function isInside(parent, child) {
-  const rel = relative(realOf(parent), realOf(child));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-}
 
 export function assertStatus(status, field = '--status') {
   if (!ARTIFACT_STATUSES.includes(status)) throw new UsageError(`${field} must be one of ${ARTIFACT_STATUSES.join(', ')}`);
@@ -97,8 +86,10 @@ function pointerRecord(manifest, flags) {
   requireKept(manifest, '--in-place');
   const path = realOf(resolve(requireFlag(flags, 'file')));
   if (!existsSync(path)) throw new HwsError(`no file ${path}`);
-  return { type: 'file', path, prompt: path, inPlace: true, title: flags.title || basename(path) };
+  return inPlaceFields(path, flags.title);
 }
+
+const inPlaceFields = (path, title) => ({ type: 'file', path, prompt: path, inPlace: true, title: title || basename(path) });
 
 function record(fields) {
   return { id: newId('a'), ...fields, fromTerminal: process.env.HC_TERMINAL_ID || null, createdAt: Date.now(), status: 'current', supersedes: null };
@@ -137,6 +128,55 @@ export function artifactScan(flags) {
     ...(found.more ? [`and ${found.more} more`] : []),
   ];
   return { data: found, text: lines.join('\n') };
+}
+
+const REVIEWABLE = /\.(html?|md|markdown)$/i;
+
+// A path, or the id of an artifact that tracks or reviews a file.
+function reviewedFile(target) {
+  const path = resolve(target);
+  if (existsSync(path)) return realOf(path);
+  let artifact = null;
+  try {
+    ({ artifact } = findArtifact(target));
+  } catch {
+    // Not an artifact id, so the missing file is the problem to report.
+  }
+  const file = artifact?.file ?? (artifact?.type === 'file' ? artifact.path : null);
+  if (!file || !existsSync(file)) throw new HwsError(`no file ${path}`);
+  return realOf(file);
+}
+
+// A kept workspace tracks the file where it sits, so each round of feedback files under it.
+function trackReviewed(manifest, file, title) {
+  if (!manifest || !isKept(manifest)) return null;
+  const artifact = record(inPlaceFields(file, title));
+  updateManifest(manifest.id, (draft) => {
+    draft.artifacts.push(artifact);
+  });
+  return artifact;
+}
+
+function reviewText(file, terminal, surface) {
+  const name = basename(file);
+  if (!surface.focused) return `Opened ${name} beside ${terminal} for review. End the turn now. The person's comments arrive as your next prompt.`;
+  if (surface.terminal === terminal) return `${name} is already open for review. End the turn now. The person's comments arrive as your next prompt.`;
+  return `${name} is already open in a pane that ${surface.terminal ? `belongs to ${surface.terminal}` : 'has no agent attached'}, so its comments will not arrive here. Ask the person to close that pane, then run this again.`;
+}
+
+// Hands a page to the person for comments, in a pane beside the agent that asks.
+export function review(flags, [target]) {
+  const terminal = requireCallingTerminal(flags);
+  const file = reviewedFile(target);
+  if (!REVIEWABLE.test(file)) throw new HwsError('hws review opens .html and .md files');
+
+  const space = spaceOfTerminal(terminal);
+  const manifest = space ? manifestOfSpace(space) : null;
+  const tracked = manifest && artifactOfFile(manifest, file);
+  const title = flags.title ?? tracked?.title;
+  const { data: surface } = surfaceOpen({ type: 'page', file, terminal, ...(title ? { title } : {}) });
+  const artifact = tracked || trackReviewed(manifest, file, title);
+  return { data: { ...surface, file, artifact: artifact?.id ?? null }, text: reviewText(file, terminal, surface) };
 }
 
 export function link(_flags, [artifactId]) {

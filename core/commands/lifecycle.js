@@ -8,14 +8,13 @@ import { act, findTerminal, isIdleShell, killTerminal, listLive, requireLive, se
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
 import { STANDALONE, captureDir, expandFolder, terminalSessionDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
 import { applyPlaces, assertRole, assertStage, ensurePlace, isKept, parseAssignment, placeOf, writablePlace } from '../places.js';
-import { resolveWorkspace } from '../resolve.js';
+import { resolveWorkspace, spaceOfTerminal } from '../resolve.js';
 import { containsFile, isStored, lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
 import { requireFolder } from '../settings.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
 import { archive, archiveClosed } from './archive.js';
 import { KEPT_KINDS, keptFields, keptKind } from './new.js';
-import { spaceOfTerminal } from './todo.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 const THROWAWAY_IDLE_MS = 24 * HOUR_MS;

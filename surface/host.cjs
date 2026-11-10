@@ -11,6 +11,7 @@ const path = require('node:path');
 
 const realElectron = require('electron');
 const { guardCellZoom, startAtActualSize } = require('./zoom-guard.cjs');
+const { holdStill, reduceMotion, settleHover } = require('./still.cjs');
 const { app } = realElectron;
 
 // An uncaught error must not raise Electron's dialog in a headless pane.
@@ -42,9 +43,11 @@ const audioOnly = (kinds) => kinds.every((kind) => kind === 'audio');
 /*
  * Pixel emulates focus on the top page only. A review page runs in a cross-process frame, which
  * Chromium then treats as inactive and paints no caret, so each focus change is repeated to those frames.
+ * Every page is also told that the person prefers reduced motion.
  */
-function emulateFocusInFrames(contents) {
+function emulateInFrames(contents) {
   const FOCUS = 'Emulation.setFocusEmulationEnabled';
+  const MEDIA = 'Emulation.setEmulatedMedia';
   const cdp = contents.debugger;
   const send = cdp.sendCommand.bind(cdp);
   const frames = new Set();
@@ -56,12 +59,13 @@ function emulateFocusInFrames(contents) {
     if (method === 'Target.attachedToTarget' && params.targetInfo.type === 'iframe') {
       frames.add(params.sessionId);
       apply(params.sessionId);
+      send(MEDIA, reduceMotion(), params.sessionId).catch(() => {});
     } else if (method === 'Target.detachedFromTarget') {
       frames.delete(params.sessionId);
     }
   });
   cdp.sendCommand = (method, params, session) => {
-    const sent = send(method, params, session);
+    const sent = send(method, method === MEDIA && !session ? reduceMotion(params) : params, session);
     if (method === FOCUS && !session) {
       focused = params.enabled;
       frames.forEach(apply);
@@ -76,6 +80,7 @@ function emulateFocusInFrames(contents) {
 
 function adoptPanelWindow(options) {
   const { createRoot } = require('@zenbu-labs/pixel');
+  settleHover(require(path.join(__dirname, 'node_modules/@zenbu-labs/pixel/dist/web/input.js')).PageInput);
   const root = createRoot({
     name: 'Agent Brief',
     devtools: false,
@@ -109,7 +114,8 @@ function adoptPanelWindow(options) {
     onPermissionRequest: async (request) => request.permission === 'media' && request.origin === request.embedder && request.mediaTypes.length > 0 && audioOnly(request.mediaTypes),
   });
   startAtActualSize(handle.webContents);
-  emulateFocusInFrames(handle.webContents);
+  emulateInFrames(handle.webContents);
+  holdStill(handle.webContents);
   const win = realElectron.BrowserWindow.fromWebContents(handle.webContents);
 
   // The pane is the window, so show, hide and placement have nothing to do.

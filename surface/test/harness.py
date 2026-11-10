@@ -19,11 +19,14 @@ def scrubbed():
 
 
 class Surface:
-    def __init__(self, sid, root, surface_type='board', title='flow', file='', terminal='t1', mode='glued', close=False, folder=None, cols=240, rows=90):
+    def __init__(self, sid, root, surface_type='board', title='flow', file='', terminal='t1', mode='glued', close=False, folder=None, cols=240, rows=90, fresh=True):
         self.sid = sid
         self.root = os.path.join(root, sid)
-        shutil.rmtree(self.root, ignore_errors=True)
-        os.makedirs(self.root)
+
+        # A reopened surface keeps its data folder, as one file's surface does in a workspace.
+        if fresh:
+            shutil.rmtree(self.root, ignore_errors=True)
+        os.makedirs(self.root, exist_ok=True)
         self.data = os.path.join(self.root, 'data')
         self.fake = os.path.join(self.root, 'hws')
         self.clip = os.path.join(self.root, 'clipboard.txt')

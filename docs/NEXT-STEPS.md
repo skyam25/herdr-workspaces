@@ -139,6 +139,13 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 - [ ] Revisit a board inside the pane if Herdr ships a browser mod that can load a local app. Patching Herdr is ruled out.
 - [ ] Add the host address to the manifest through `hws`.
 
+Until then a pane's page holds still, through `surface/still.cjs`. Herdr 0.1.14 takes image bytes inline only, so Pixel resends the whole pane for each change, and Herdr shows the pane empty while the image arrives.
+
+- [x] Stop the caret blink, transitions and hover sweeps in a pane. In the pty an idle note went from 2 whole-pane resends a second to none.
+- [ ] Open a note and a page in the real window and confirm an idle pane no longer flickers. Only the pty has shown it.
+- [ ] Set `TERMINAL_BROWSER_PRESENT=patched` in `surface/run.sh` once Herdr fixes [#500](https://github.com/herdrdev/herdr-app/issues/500). Pixel then sends only the changed region, which cut typing from 2.4 MB/s to 0.01 MB/s in the pty. Herdr drops the pixel offset the patches are placed with, so they land up to a cell off today.
+- [ ] Watch Herdr [#508](https://github.com/herdrdev/herdr-app/pull/508) and [#704](https://github.com/herdrdev/herdr-app/pull/704). They keep the old image on screen during an update and take frames in shared memory, and Pixel uses both with no change here.
+
 ### 10. Test the new UI homes by hand
 
 `docs/CONTRACT.md` describes these under UI homes.
@@ -180,3 +187,15 @@ Built 2026-11-09 by four Opus workers against fakes, then installed. The lead sa
 - [ ] Press Archive done in Tasks and confirm.
 - [ ] Drag a space in Other spaces while workspace spaces are hidden.
 - [ ] Make the Tasks badge in the tab bar follow the workspace on screen. It shows the count from the last Tasks pane that drew.
+
+### 13. Test the review loop by hand
+
+Built 2026-11-09 against fakes. Nothing has run in the real window.
+
+- [ ] In a kept workspace, ask an agent in a Terminal pane to show an HTML page for review. `hws review FILE` should split the page beside it and add the file to Artifacts.
+- [ ] Flip the agent to Chat and ask again. The page should split beside the chat pane, with no new tab.
+- [ ] Pin a comment and press Done. The pane should close, and the prompt's last line should ask for `hws review` again.
+- [ ] Let the agent change the page and reopen it. The earlier comment should be gone.
+- [ ] Open the Workspace panel. The page's row should show `1 feedback`, unfold the round, and read it in the panel.
+- [ ] Open a page from the panel with no agent in the space, comment, and press Copy link twice. The comment should clear after the first press, and the second should copy the same link.
+- [ ] Confirm a parked agent keeps a `herdr.space` or `where` label. Without one, `hws` falls back to the tab the agent was recorded in.

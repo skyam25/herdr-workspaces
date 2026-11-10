@@ -206,7 +206,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   const boardList = useBoards(host, controller, briefs);
   const activeBriefRef = useRef(activeBrief);
   activeBriefRef.current = activeBrief;
-  const { send, sendTo, sendNew, copyPrompt, openChooser, handOffToIpad, sendText } = useSend({
+  const { send, sendTo, sendNew, copyPrompt, openChooser, handOffToIpad, sendText, settleSurface } = useSend({
     host,
     book,
     controller,
@@ -298,11 +298,20 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   const holder = mode === 'sketch' ? boardList.boards.find((b) => b.name === board)?.sessionId : book.selected?.sessionId;
   const surfaceDone = useRef(() => {});
   surfaceDone.current = () => void send();
+  const surfaceSettle = useRef(() => {});
+  surfaceSettle.current = () => void settleSurface();
+  const lastSent = useRef(info.surface?.sent);
   useEffect(() => {
     if (!info.surface) return;
     const off = [
       host.onSurface((state) => {
         setSurface(state);
+
+        // `hws` took the last Send, so what it delivered leaves the page.
+        if (state.sent && state.sent !== lastSent.current) {
+          lastSent.current = state.sent;
+          surfaceSettle.current();
+        }
         if (state.notice) notify(state.notice.text, state.notice.error ? 'error' : 'info');
       }),
       host.onSurfaceDoneKey(() => surfaceDone.current()),

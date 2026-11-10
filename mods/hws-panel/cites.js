@@ -3,7 +3,7 @@
 
 import { agents, exec, openOverlay, panes, readTextFile, run, terminals, window } from "herdr";
 import { hws } from "./hws.js";
-import { opensAsPage, resolvePath } from "./context.js";
+import { opensAsPage, resolvePath, roundFiles } from "./context.js";
 
 // The Board's card dialog, at the size the Board itself prefers.
 const CARD_DIALOG = { width: 920, height: 760 };
@@ -55,11 +55,11 @@ export async function revealPath(path) {
   return null;
 }
 
-// A Done bundle keeps its words in comments.md or prompt.md, so one of those opens.
+// A Done bundle keeps its words in comments.md, a review file or prompt.md, so one of those opens.
 async function bundleFile(artifact) {
 
   // A board's prompt is only file references, so a board with no comments shows its sketch.
-  const candidates = [`${artifact.path}/comments.md`, ...(artifact.type === "board" ? [] : [artifact.prompt])];
+  const candidates = artifact.type === "board" ? [`${artifact.path}/comments.md`] : roundFiles(artifact);
   for (const path of candidates) {
     if (path && typeof (await readTextFile(path).catch(() => null)) === "string") return path;
   }

@@ -31,8 +31,14 @@ export interface SenderDeps {
   terminals: Terminals;
   /** Scratch space for turning voice clips into text. */
   voiceDir: string;
-  /** Keeps a sent draft. A surface stays open on its work until its pane closes. */
+  /** Keeps a sent draft until `settle`. A surface's Send goes to `hws`, which may still refuse it. */
   keepsDrafts?: boolean;
+}
+
+/** The draft a Send handed over, at the revision that went out. */
+export interface HandedDraft {
+  draftId: string;
+  draftRevision?: number;
 }
 
 /** Puts these folders first in the recent projects a new session can start in. */
@@ -74,7 +80,22 @@ const sent = (input: DeliveryInput, id: string) => ({
 });
 
 export class Sender {
+  /** Drafts a surface sent and still holds, by delivery. */
+  private readonly handed = new Map<string, HandedDraft>();
+
   constructor(private readonly deps: SenderDeps) {}
+
+  /** The draft a delivery handed over, answered once. Undefined when it carried none. */
+  handedOff(deliveryId: string): HandedDraft | undefined {
+    const handed = this.handed.get(deliveryId);
+    this.handed.delete(deliveryId);
+    return handed;
+  }
+
+  /** Deletes a held draft once its delivery was taken. */
+  settle(handed: HandedDraft): void {
+    this.remove(handed.draftId, handed.draftRevision);
+  }
 
   /** A delivery from either mode. A written draft alone needs no voice work. */
   async compose(p: Outgoing): Promise<{ input: DeliveryInput; warnings: string[] }> {
@@ -132,6 +153,7 @@ export class Sender {
         { id: delivery.id, sentAt: delivery.createdAt, target, sessionId: delivery.sessionId, dir: delivery.dir, draft: delivery.draft, ...sent(input, delivery.id) },
         input,
       );
+      if (this.deps.keepsDrafts && payload.draftId) this.handed.set(delivery.id, { draftId: payload.draftId, draftRevision: payload.draftRevision });
       this.usedUp(payload);
       for (const w of warnings) console.warn(`[companion] ${w}`);
       const note = warnings.length ? ` (${warnings[0]})` : '';
@@ -231,11 +253,16 @@ export class Sender {
   /** Deletes the draft a successful Send used up. History keeps its text. The Send went out even if this fails. */
   private usedUp(payload: Outgoing): void {
     if (!payload.draftId || this.deps.keepsDrafts) return;
+    this.remove(payload.draftId, payload.draftRevision);
+  }
+
+  /** A draft edited after `revision` holds text that did not go out, so it stays. */
+  private remove(draftId: string, revision: number | undefined): void {
     try {
-      const stored = this.deps.drafts.get(payload.draftId);
-      if (payload.draftRevision !== undefined && stored && stored.updatedAt > payload.draftRevision) return;
-      this.deps.drafts.remove(payload.draftId);
-      this.deps.briefs.touched({ draftId: payload.draftId });
+      const stored = this.deps.drafts.get(draftId);
+      if (revision !== undefined && stored && stored.updatedAt > revision) return;
+      this.deps.drafts.remove(draftId);
+      this.deps.briefs.touched({ draftId });
     } catch (err) {
       console.warn(`[companion] could not delete the sent draft: ${(err as Error).message}`);
     }

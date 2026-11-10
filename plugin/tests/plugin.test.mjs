@@ -336,6 +336,14 @@ describe("session-start hook", () => {
     assertTaskList(context);
   });
 
+  it("teaches the review command after the task list in a Herdr app terminal", () => {
+    homeStub();
+    const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
+
+    assert.ok(context.endsWith("To show the person a page or document for comments, run `hws review FILE` with an .html or .md file, then end the turn. It opens beside this agent, and their comments arrive as your next prompt. Never open it with --standalone, because that pane has no agent to answer."));
+    assert.ok(!contextOf(run(HOOK)).includes("hws review"));
+  });
+
   it("stays silent about the task list outside a workspace in a Herdr app terminal", () => {
     homeStub({ current: ":" });
     assertSilent(run(HOOK, { bundle: HERDR_APP }));

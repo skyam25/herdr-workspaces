@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { rewritePaths } from '../artifacts.js';
 import { MAX_SEND_BYTES } from '../commands/surface.js';
-import { liveFixtures, sandbox } from './helpers.js';
+import { flipToChat, liveFixtures, sandbox } from './helpers.js';
 
 const { space, tab, terminal } = liveFixtures;
 const HOST = fileURLToPath(new URL('../../surface/run.sh', import.meta.url));
@@ -127,20 +127,6 @@ test('surface open rejects bad usage and unknown terminals', (t) => {
   assert.equal(box.hws(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', 't1', '--standalone']).code, 2);
   assert.equal(box.hws(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', 't404']).code, 1);
 });
-
-// Parks the owner behind a chat pane, so `ls` no longer lists it.
-function flipToChat(box, manifest, chatPane = 'pchat') {
-  const [{ terminal: owner, tabId }] = manifest.terminals;
-  const { spaces, hc } = box.state();
-  const ownerTab = spaces.flatMap((item) => item.tabs).find((item) => item.id === tabId);
-  ownerTab.terminals = ownerTab.terminals.filter((item) => item.terminal !== owner);
-  box.setState({
-    spaces,
-    chatPanes: { [chatPane]: tabId },
-    hc: { ...hc, [owner]: { labels: { 'herdr.chat': chatPane } } },
-  });
-  return { owner, chatPane };
-}
 
 test('surface open splits beside the chat pane of a flipped agent', (t) => {
   const box = sandbox(t);
@@ -341,8 +327,26 @@ test('done on a standalone surface records and prints the link', (t) => {
   assert.deepEqual(parsed, { standalone: true, artifact: artifact.id, link: `@${artifact.prompt}` });
   assert.equal(artifact.path, join(box.root, 'standalone', 'artifacts', artifact.id));
   assert.equal(artifact.fromTerminal, null);
-  assert.deepEqual(box.manifest('standalone').surfaces, []);
   assert.deepEqual(box.actions(), []);
+});
+
+test('a standalone pane keeps its record after done, so it can be found and sent again', (t) => {
+  const box = sandbox(t);
+  box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
+  const page = join(box.folder('pages'), 'plan.html');
+  writeFileSync(page, '<p>plan</p>');
+  const surface = box.json(['surface', 'open', '--type', 'page', '--file', page, '--standalone']);
+
+  box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('bundle-first')]);
+  assert.deepEqual(box.manifest('standalone').surfaces.map((item) => item.id), [surface.id]);
+
+  box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('bundle-second')]);
+  assert.equal(box.manifest('standalone').artifacts.length, 2);
+
+  box.clearCalls();
+  const again = box.json(['surface', 'open', '--type', 'page', '--file', page, '--standalone']);
+  assert.equal(again.focused, true);
+  assert.deepEqual(box.actions(), [['herdr-app', 'do', 'pane.focus', '--pane', surface.pane]]);
 });
 
 test('done sends a link in place of a very long prompt', (t) => {

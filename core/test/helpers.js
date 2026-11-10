@@ -21,6 +21,16 @@ function terminal(address, pane) {
 
 export const liveFixtures = { space, tab, terminal };
 
+// Parks the workspace's first terminal behind a chat pane, so `ls` no longer lists it.
+export function flipToChat(box, manifest, { chatPane = 'pchat', labels = {} } = {}) {
+  const [{ terminal: owner, tabId }] = manifest.terminals;
+  const { spaces, hc } = box.state();
+  const ownerTab = spaces.flatMap((item) => item.tabs).find((item) => item.id === tabId);
+  ownerTab.terminals = ownerTab.terminals.filter((item) => item.terminal !== owner);
+  box.setState({ spaces, chatPanes: { [chatPane]: tabId }, hc: { ...hc, [owner]: { labels: { 'herdr.chat': chatPane, ...labels } } } });
+  return { owner, chatPane };
+}
+
 // Builds a private sandbox with fake binaries and a temporary HWS_HOME.
 export function sandbox(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'hws-test-')));

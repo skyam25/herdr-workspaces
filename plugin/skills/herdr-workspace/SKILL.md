@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, or asks to sketch, draw, write or review something in a pane. Explains how to read the workspace, use the space's task list and ask the user for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane, or asks to look over, comment on or give feedback on a page or document. Explains how to read the workspace, use the space's task list, hand a page to the user for review and ask for input through a surface.
 ---
 
 # Herdr workspace
@@ -114,15 +114,38 @@ Sort the context by where it lives.
 - Point to what has a stable home, such as artifacts, docs and screenshots.
 - Leave out what a worker can find in the repo.
 
-## Ask the user through a surface
+## Hand a page to the user for review
 
-A surface is a sketch, note or page tied to this terminal. A sketch opens in its own window, and a note or page opens in a pane beside this terminal. Open one only when the user asks for it. Never open a surface unasked.
+Use this when the user wants to look over a page or document you wrote, and again after you change one they commented on.
 
 ```bash
-hws surface open --type board|note|page --title X --terminal $HC_TERMINAL_ID
+hws review FILE
 ```
 
-Pass `--file F` to open an existing file in a note or page.
+FILE is an `.html` or `.md` file, or the id of an artifact that tracks one. The page opens in a pane beside this terminal, or beside the chat when the user has flipped this agent to Chat. A kept workspace tracks the file as an artifact where it sits, so do not register it again.
+
+The round trip has four steps.
+
+1. Run `hws review FILE` and end the turn. Do not poll.
+2. The user pins comments and presses Done. The comments arrive as your next prompt, and the pane closes.
+3. Make the changes in the same file.
+4. Run `hws review FILE` again, as the prompt's last line asks. The page opens with the new version and none of the comments you already received.
+
+Each round of comments stays under the artifact in the Workspace panel.
+
+Review the local file, never its published copy. A claude.ai artifact opens in the browser and takes no comments in a pane, so register its link with `hws artifact add --url` and review the file it was published from.
+
+Never pass `--standalone` when you have a terminal. That pane has no agent attached, so the user's comments reach nobody. If `hws review` fails, show the user the error and stop.
+
+## Ask the user through a surface
+
+A surface is a sketch, note or page tied to this terminal. A sketch opens in its own window, and a note or page opens in a pane beside this terminal, or beside the chat for an agent flipped to Chat. Open one only when the user asks for it. Never open a surface unasked. The one exception is the last line of a review's comments, which asks you to run `hws review` again.
+
+```bash
+hws surface open --type board|note --title X --terminal $HC_TERMINAL_ID
+```
+
+Pass `--file F` to open an existing file in a note. Use `hws review` for a page.
 
 After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it. A user who closes a sketch early keeps it as a draft and resumes it from the pane header.
 

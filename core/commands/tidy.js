@@ -4,7 +4,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync } fr
 import { basename, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-import { freeName, moveDir } from '../artifacts.js';
+import { freeName, isInside, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, listLive, sendText } from '../herdr.js';
 import { withLock } from '../lock.js';
@@ -12,14 +12,14 @@ import { TIDY_ROLE, updateManifest, writeJsonAtomic, writeTextAtomic } from '../
 import { STANDALONE, transcriptPath, workspaceDir } from '../paths.js';
 import { ROLES, allPlaces, hasOwnHome, homeOf, isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { scanWorkspace } from '../scan.js';
-import { locateTerminal, requireFlag, resolveWorkspace, splitList, workspaceByRef } from '../resolve.js';
+import { locateTerminal, requireFlag, resolveWorkspace, spaceOfTerminal, splitList, workspaceByRef } from '../resolve.js';
 import { agentArgv } from '../agent-tools.js';
 import { agentModels } from '../settings.js';
 import { modifiedAt, typedPrompt } from '../retired.js';
 import { moveToTrash } from '../trash.js';
-import { assertStatus, assertSupersedes, isInside, realOf } from './artifact.js';
+import { assertStatus, assertSupersedes } from './artifact.js';
 import { checkDecisionShape, planDecisions, readDecisions, recordDecisions } from './decision.js';
-import { readTodos, spaceOfTerminal, updateTodos } from './todo.js';
+import { readTodos, updateTodos } from './todo.js';
 
 const TITLE_CHARS = 200;
 const CHUNK_BYTES = 256 * 1024;
@@ -126,7 +126,7 @@ function sessionsSince(manifest, through) {
 function artifactsSince(manifest, through) {
   const found = [];
   for (const { id, type, title, path, status, createdAt, role } of manifest.artifacts) {
-    if (role === TIDY_ROLE) continue;
+    if (role) continue;
     const isNew = through == null || (createdAt ?? 0) > through;
     const changed = isNew ? null : modifiedAt(path);
     const isEdited = changed !== null && changed > through;
@@ -139,7 +139,7 @@ function artifactsSince(manifest, through) {
 // Every artifact still in play, so a pass can catch one a newer fact contradicts.
 function liveArtifacts(manifest) {
   return manifest.artifacts
-    .filter((item) => item.role !== TIDY_ROLE && item.status !== 'superseded')
+    .filter((item) => !item.role && item.status !== 'superseded')
     .map(({ id, type, title, path, status, createdAt }) => ({ id, type: type ?? null, title: title ?? null, path, status: status ?? 'current', createdAt: createdAt ?? null, modifiedAt: modifiedAt(path) }));
 }
 

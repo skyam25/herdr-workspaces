@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-import { artifactAdd, artifactList, artifactScan, artifactSet, artifactTerminal, link } from './commands/artifact.js';
+import { artifactAdd, artifactList, artifactScan, artifactSet, artifactTerminal, link, review } from './commands/artifact.js';
 import { archive, unarchive } from './commands/archive.js';
 import { doctor } from './commands/doctor.js';
 import { update } from './commands/update.js';
@@ -87,6 +87,7 @@ const ROUTES = [
   { path: ['artifact', 'add'], run: artifactAdd, options: { file: text, url: text, 'in-place': flag, title: text, workspace: text } },
   { path: ['artifact', 'scan'], run: artifactScan, options: { workspace: text } },
   { path: ['link'], run: link, options: {}, positionals: 1 },
+  { path: ['review'], run: review, options: { title: text, terminal: text }, positionals: 1 },
   { path: ['todo', 'list'], run: todoList, options: { archived: flag, reports: flag, space: text } },
   {
     path: ['todo', 'add'],

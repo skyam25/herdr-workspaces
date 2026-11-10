@@ -139,6 +139,15 @@ def note_file():
     s.stop()
 
 
+def pin(s, text):
+    s.d.click(500, 330)
+    s.wait(1.5)
+    for ch in text:
+        s.d.key(ch)
+        s.d.pump(0.03)
+    s.wait(1.5)
+
+
 def page():
     name = 'page'
     folder = os.path.join(ROOT, 'proj-page')
@@ -151,12 +160,7 @@ def page():
     s = Surface('pg1', ROOT, surface_type='page', title='demo', file=path, folder=folder)
     s.wait(9)
     shot(s, 'page-review')
-    s.d.click(500, 330)
-    s.wait(1.5)
-    for ch in 'tighten this':
-        s.d.key(ch)
-        s.d.pump(0.03)
-    s.wait(1.5)
+    pin(s, 'tighten this')
     shot(s, 'page-pinned')
     s.d.key(CMD_ENTER)
     s.wait(5)
@@ -171,6 +175,79 @@ def page():
         print(files, read(os.path.join(art, 'prompt.md')), review, flush=True)
         check(name, 'comment_in_review', 'tighten this' in review)
         check(name, 'no_project_paths', '.feedback/' not in review)
+    s.stop()
+
+
+def demo_page(folder_name):
+    folder = os.path.join(ROOT, folder_name)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, 'demo.html')
+    with open(path, 'w') as f:
+        f.write('<!doctype html><body style="font:20px -apple-system;padding:40px"><h1>Review page</h1><p>Body text</p></body>')
+    return folder, path
+
+
+def drafts_text(s):
+    folder = os.path.join(s.data, 'drafts')
+    names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    return '\n'.join(read(os.path.join(folder, n)) for n in names if os.path.isfile(os.path.join(folder, n)))
+
+
+# A second comment files a second round that holds only the new comment.
+def check_second_round(name, s, press, wait):
+    pin(s, 'second look')
+    press()
+    s.wait(wait)
+    arts = s.artifacts()
+    check(name, 'second_round', len(arts) == 2, arts)
+    if len(arts) == 2:
+        review = read(os.path.join(s.artifact(arts[1]), 'review.md'))
+        check(name, 'second_round_has_only_new_comment', 'second look' in review and 'tighten this' not in review, review)
+
+
+def page_reopen():
+    name = 'page_reopen'
+    folder, path = demo_page('proj-reopen')
+    s = Surface('pr1', ROOT, surface_type='page', title='demo', file=path, folder=folder, close=True)
+    s.wait(9)
+    pin(s, 'tighten this')
+    check(name, 'comment_saved_before_done', 'tighten this' in drafts_text(s))
+    s.d.key(CMD_ENTER)
+    s.wait(6)
+    check(name, 'artifact', len(s.artifacts()) == 1, s.artifacts())
+    check(name, 'host_exited_on_hangup', s.d.exited)
+    s.d.stop()
+    again = Surface('pr1', ROOT, surface_type='page', title='demo', file=path, folder=folder, fresh=False)
+    again.wait(9)
+    shot(again, 'page-reopened')
+    check(name, 'delivered_comment_gone', 'tighten this' not in drafts_text(again), drafts_text(again)[:200])
+    check(name, 'marker_cleared', not os.path.exists(os.path.join(again.data, 'handed-off.json')))
+    check_second_round(name, again, lambda: again.d.key(CMD_ENTER), 5)
+    again.stop()
+
+
+def page_standalone():
+    name = 'page_standalone'
+    folder, path = demo_page('proj-solo')
+    s = Surface('ps1', ROOT, surface_type='page', title='demo', file=path, folder=folder, terminal='', mode='standalone')
+    s.wait(9)
+    pin(s, 'tighten this')
+    s.d.click(*DONE)
+    s.wait(6)
+    shot(s, 'page-standalone-after-copy')
+    log = s.log()
+    print(log, flush=True)
+    check(name, 'copy_makes_artifact', sum(l.startswith('surface done') for l in log) == 1)
+    check(name, 'copy_runs_link', sum(l.startswith('link a0') for l in log) == 1)
+    check(name, 'delivered_comment_gone', 'tighten this' not in drafts_text(s), drafts_text(s)[:200])
+    check(name, 'still_open', not s.d.exited)
+    s.d.click(*DONE)
+    s.wait(4)
+    log = s.log()
+    print(log, flush=True)
+    check(name, 'nothing_new_copies_same_link', sum(l.startswith('link a0') for l in log) == 2)
+    check(name, 'nothing_new_makes_no_artifact', sum(l.startswith('surface done') for l in log) == 1)
+    check_second_round(name, s, lambda: s.d.click(*DONE), 6)
     s.stop()
 
 
@@ -258,7 +335,7 @@ def two():
     b.stop()
 
 
-ALL = {f.__name__: f for f in [board_glued, note_new, note_file, page, standalone, terminal_ended, failing, two]}
+ALL = {f.__name__: f for f in [board_glued, note_new, note_file, page, page_reopen, page_standalone, standalone, terminal_ended, failing, two]}
 for key in sys.argv[1:] or list(ALL):
     ALL[key]()
 out = os.path.join(EVIDENCE, 'results.json')

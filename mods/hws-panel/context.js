@@ -184,6 +184,25 @@ export const livePass = (status) => (status?.live?.terminal ? status.live : null
 // Newest first, with superseded ones held apart so the section can fold them.
 export const isNote = (artifact) => artifact.type === "note";
 
+export const isFeedback = (artifact) => artifact.role === "feedback";
+
+// The files that hold a round's words, most useful first.
+export const roundFiles = (round) => [...["review.md", "annotations.md", "comments.md"].map((name) => `${round.path}/${name}`), round.prompt].filter(Boolean);
+
+// Sorts feedback rounds under the artifact each reviews, newest first.
+// A round whose page is not tracked, or is gone, stands alone.
+export function feedbackRounds(artifacts) {
+  const all = artifacts ?? [];
+  const pages = new Set(all.filter((a) => !a.role).map((a) => a.id));
+  const under = {};
+  const loose = [];
+  for (const round of all.filter(isFeedback).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))) {
+    if (pages.has(round.reviewOf)) (under[round.reviewOf] ??= []).push(round);
+    else loose.push(round);
+  }
+  return { under, loose };
+}
+
 export function artifactGroups(artifacts) {
   const sorted = [...(artifacts ?? [])].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   return { shown: sorted.filter((a) => a.status !== "superseded"), superseded: sorted.filter((a) => a.status === "superseded") };
