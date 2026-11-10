@@ -268,7 +268,7 @@ describe("session-start hook", () => {
     assert.equal(
       contextOf(run(HOOK, { bundle: HERDR_APP })),
       `${PHONE}\n\n` +
-      'This folder belongs to the Herdr workspace "checkout demo", but this space is not part of it, so its instructions and task list do not apply here. The person can add this space from the Workspace panel. Mention this to the person once, and do not act on it yourself.',
+      'This folder belongs to the Herdr workspace "checkout demo", but this space is not part of it, so its instructions and task list do not apply here. The person can add this space from the Workspace panel. Mention this only if the person asks about the workspace, its task list or its notes, and do not act on it yourself.',
     );
     assert.deepEqual(calls(), [REGISTER, "bin current --line", "bin space match --json"].sort());
   });

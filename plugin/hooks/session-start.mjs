@@ -119,7 +119,7 @@ function matchContext(match) {
   return [
     `${owner}, but this space is not part of ${candidates.length === 1 ? "it" : "any of them"}, so ${candidates.length === 1 ? "its" : "their"} instructions and task list do not apply here.`,
     "The person can add this space from the Workspace panel.",
-    "Mention this to the person once, and do not act on it yourself.",
+    "Mention this only if the person asks about the workspace, its task list or its notes, and do not act on it yourself.",
   ].join(" ");
 }
 

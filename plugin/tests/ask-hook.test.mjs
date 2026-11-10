@@ -143,7 +143,8 @@ beforeEach(() => {
   mkdirSync(nodeBin);
   symlinkSync(process.execPath, join(nodeBin, "node"));
 
-  writeFake(`#!/bin/sh\necho "$*" >> "$HC_LOG"\ncat "$HC_STATE"\n`);
+  // Logs after reading, so a logged call has already seen the current record.
+  writeFake(`#!/bin/sh\ncat "$HC_STATE"\necho "$*" >> "$HC_LOG"\n`);
   setTerminal(flipped());
 });
 

@@ -1,5 +1,5 @@
 {
   "name": "herdr-workspaces",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Makes each Claude session aware of its Herdr workspace and how to ask the user for input through a surface."
 }
