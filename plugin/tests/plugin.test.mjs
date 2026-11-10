@@ -34,7 +34,7 @@ function status({ places = PLACES, line = FRESHNESS } = {}) {
   return `echo '${JSON.stringify(body)}'`;
 }
 
-const REGISTER = "bin register --terminal t13 --session sess-1 --json";
+const REGISTER = `bin register --terminal t13 --session sess-1 --folder ${FOLDER} --json`;
 const WORKSPACE_CALLS = [REGISTER, "bin artifact scan --json", "bin current --line", "bin tidy status --json"].sort();
 const NOTE_RULE_TEXT = "load the herdr-workspaces:tidy skill";
 

@@ -7,6 +7,7 @@ import { update } from './commands/update.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, place, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
+import { outputs } from './commands/outputs.js';
 import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
 import { phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop } from './commands/phone.js';
 import { find, reopen } from './commands/retired.js';
@@ -54,7 +55,8 @@ const ROUTES = [
   { path: ['space', 'match'], run: spaceMatch, options: { space: text } },
   { path: ['current'], run: current, prunes: true, options: { terminal: text, line: flag } },
   { path: ['list'], run: list, prunes: true, options: { archived: flag } },
-  { path: ['register'], run: register, options: { terminal: text, session: text, role: text } },
+  { path: ['register'], run: register, options: { terminal: text, session: text, role: text, folder: text } },
+  { path: ['outputs'], run: outputs, options: { terminals: text } },
   {
     path: ['surface', 'open'],
     run: surfaceOpen,

@@ -90,8 +90,8 @@ async function openPage(agent, target, ref) {
 }
 
 // Resolves to null on success and to a message on failure.
-export async function openOutput(agent, session, ref) {
-  const target = outputTarget(ref, session.cwd);
+export async function openOutput(agent, folder, ref) {
+  const target = outputTarget(ref, folder);
   try {
     if (opensAsPage(ref)) return await openPage(agent, target, ref);
     const r = await exec(window()?.platform === "linux" ? "xdg-open" : "open", [target]);

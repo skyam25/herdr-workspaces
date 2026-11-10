@@ -44,11 +44,14 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Freshness | Counted from the stream against `current.covers`, never from the clock. Only non-draft artifacts, commits and Done cards move the ring, because sessions and drafts are exploring |
 | Decisions and history | The note holds what is true now. `decisions.md` keeps each decision and what replaced it. Each pass saves the old note and adds to `updates.md` |
 | Names | A person reads Tasks for the kanban and Sketch for a `board` surface. The CLI and manifest keep `board` and `todo` |
-| Tasks and Agent Brief | Tasks shows only `hws` cards and never runs `agent-brief`. Outputs still reads Agent Brief sessions |
+| Tasks and Agent Brief | Tasks shows only `hws` cards and never runs `agent-brief` |
 | Spaces list | `hws-spaces`, a copy of Herdr's `spaces`, hides the spaces a workspace already lists and titles the rest Other spaces |
 | Plain space on a workspace's folder | `hws space match` finds the workspace. The panel offers Add this space to NAME and session start tells the agent once |
 | Moving a space | A right-click on a space's sidebar row opens the space menu. Move to workspace… lists every open workspace and New workspace from this space…, which runs `hws new workspace --space S`. A drag between the two sidebar lists is left out, because they are separate mods |
 | Throwaway scratch | Shells start in `<state>/workspaces/<id>/scratch`. Keep moves it under `~/Documents/Herdr Workspaces/<name>/`, Trash and purge trash it |
+| Agent Brief panel | Herdr comes first. The Agent Brief Mac app stays as the path for terminals outside Herdr. In a Herdr terminal the Agent Brief plugin steps back to pictures, wireframes, Talk, output recording and its skills (plugin 0.6.31, on a branch in the agent-brief repo as of 2026-11-09) |
+| App copy | `surface/app` leads for the board, Write and Review inside Herdr. The agent-brief repo leads for the phone app (`companion/ios`) and the phone protocol (`companion/src/ipad`), and `surface/app/src/ipad` follows it |
+| Outputs | Read from `.feedback/outputs/<session>.json` through `hws`. The Agent Brief app is not needed |
 
 ## Next steps, in order
 
@@ -94,7 +97,7 @@ The audit found these from reading code.
 ### 4. Connect to the normal flow
 
 - [ ] Make `/sketch` and the band open a glued surface inside Herdr. They still open the old panel.
-- [ ] Decide what the plugin's Brief pane does when the `hws-brief` mod is available.
+- [x] Decide what the plugin's Brief pane does when the `hws-brief` mod is available. It steps back in a Herdr terminal, under Agent Brief panel in Decisions.
 - [x] Remove the leftover `Board` chip from the note footer. A surface in a pane hides it, and the Agent Brief panel keeps it.
 
 ### 5. Reduce the cost per surface
@@ -113,7 +116,8 @@ The audit found these from reading code.
 ### 7. Later
 
 - [x] Add an orchestrator that runs a space's board, using `hc run` children.
-- [ ] Decide whether this replaces the Agent Brief panel or runs beside it, including on the work Mac.
+- [x] Decide whether this replaces the Agent Brief panel or runs beside it. Decided for this Mac under Agent Brief panel in Decisions. The work Mac still needs the same installs.
+- [ ] Open Outputs in the real window with the Agent Brief app closed, and click a declared page. Only fakes have run `hws outputs`.
 
 ### 8. Finish the chat flip
 

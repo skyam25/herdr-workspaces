@@ -13,13 +13,18 @@ export function resumeArgv({ tool, id, model, effort }, message) {
 }
 
 // The SessionStart hook registers every Claude session against its terminal.
-function claudeSessionOfTerminal(terminal) {
+// Returns `{ id, folder }`, with a null folder for a record written before folders were kept.
+export function registeredSession(terminal) {
   try {
-    return JSON.parse(readFileSync(terminalSessionPath(terminal), 'utf8')).id ?? null;
+    const record = JSON.parse(readFileSync(terminalSessionPath(terminal), 'utf8'));
+    if (typeof record?.id !== 'string' || !record.id) return null;
+    return { id: record.id, folder: typeof record.folder === 'string' && record.folder ? record.folder : null };
   } catch {
     return null;
   }
 }
+
+const claudeSessionOfTerminal = (terminal) => registeredSession(terminal)?.id ?? null;
 
 // Codex names no process-to-session link, so one thread started here since the terminal opened must be it.
 function codexSessionInFolder(folder, since) {

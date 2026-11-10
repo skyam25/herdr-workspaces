@@ -17,31 +17,19 @@ const CHAT_LABEL = "herdr.chat";
 const isClaude = (x) => x.app === "claude-code" || x.program?.key === "claude";
 
 export const cleanPath = (p) => (p ?? "").replace(/\/+$/, "");
-export const feedbackDir = (session) => `${cleanPath(session.cwd)}/.feedback`;
+export const feedbackDir = (folder) => `${cleanPath(folder)}/.feedback`;
 export const lastTouched = (o) => Math.max(o.declaredAt ?? 0, o.lastWriteAt ?? 0);
 
 const lastFolder = (p) => cleanPath(p).split("/").pop() || p;
 const hasScheme = (ref) => /^[a-z][a-z0-9+.-]*:/i.test(ref);
 
 export const fileName = (ref) => ref.split("/").filter(Boolean).pop() ?? ref;
-export const agentName = (session) => session.name || session.title || lastFolder(session.cwd);
 
-// Same rules as companion/src/shared/output-file.ts.
-export function parseOutputs(text) {
-  let raw;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  if (raw?.version !== 1 || !Array.isArray(raw.outputs)) return [];
-  const seen = new Set();
-  return raw.outputs.filter((o) => {
-    if (typeof o?.ref !== "string" || !o.ref.trim() || !["declared", "detected"].includes(o.tier) || typeof o.kind !== "string" || seen.has(o.ref)) return false;
-    seen.add(o.ref);
-    return true;
-  });
-}
+// Claude puts a spinner or mark before its title, so leading symbols are dropped.
+const plainTitle = (title) => (title ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+
+// The agent's title in Herdr, else its folder's name.
+export const agentName = (agent, folder) => plainTitle(agent.title) || lastFolder(folder ?? "") || agent.address;
 
 export function ago(ms) {
   const minutes = Math.floor(Math.max(0, ms) / 60000);
@@ -76,7 +64,7 @@ export function roster(lists, members = []) {
   if (!active || active.machine) return [];
   return sharing(lists, active.id, members).flatMap((space) => agentsIn(space, lists)
     .filter((x) => isClaude(x.info))
-    .map(({ address, tab, chatPane }) => ({ address, tab, chatPane, space: space.id })));
+    .map(({ info, address, tab, chatPane }) => ({ address, tab, chatPane, space: space.id, title: info.title || info.name || "" })));
 }
 
 // The agents a to-do can be sent to, each named for the Send to list.
@@ -91,13 +79,6 @@ export function sendTargets(lists, spaceId, members = []) {
       flipped: Boolean(chatPane),
     };
   }));
-}
-
-// The newest session reporting exactly this terminal. A restart briefly leaves two.
-export function sessionFor(sessions, address) {
-  return (sessions ?? [])
-    .filter((s) => s.host?.hcTerminal === address)
-    .reduce((best, s) => (best === null || (s.lastSeen ?? 0) > (best.lastSeen ?? 0) ? s : best), null);
 }
 
 // Summaries are worked out once per load, because Tasks draws every card on each render.
@@ -248,16 +229,17 @@ export const modelsDialogHeight = () => shellHeight() + FORM.label + roleSection
 
 const newestFirst = (list) => [...list].sort((a, b) => lastTouched(b) - lastTouched(a));
 
-// Each agent's outputs, newest agent first and newest output first.
-export function outputGroups(bound, docs) {
+// Each agent's outputs from `hws outputs`, newest agent first and newest output first.
+export function outputGroups(agents, found) {
   const groups = [];
-  for (const { agent, session } of bound) {
-    const outputs = docs.get(session.sessionId)?.outputs ?? [];
+  for (const agent of agents) {
+    const entry = found.get(agent.address);
+    const outputs = Array.isArray(entry?.outputs) ? entry.outputs : [];
     if (outputs.length === 0) continue;
     groups.push({
       agent,
-      session,
-      name: agentName(session),
+      folder: entry.folder,
+      name: agentName(agent, entry.folder),
       newest: Math.max(...outputs.map(lastTouched)),
       declared: newestFirst(outputs.filter((o) => o.tier === "declared")),
       touched: newestFirst(outputs.filter((o) => o.tier === "detected")),

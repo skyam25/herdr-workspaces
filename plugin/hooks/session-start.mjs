@@ -131,9 +131,10 @@ async function main() {
   const terminal = process.env.HC_TERMINAL_ID;
   const folder = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
 
-  // A failed register only loses resume, so the session still learns its workspace.
+  // A failed register only loses resume and Outputs, so the session still learns its workspace.
+  // The folder tells Outputs where the Agent Brief plugin keeps this session's outputs file.
   const [, line] = await Promise.all([
-    hws(["register", "--terminal", terminal, "--session", sessionId, "--json"]),
+    hws(["register", "--terminal", terminal, "--session", sessionId, "--folder", folder, "--json"]),
     hws(["current", "--line"]),
   ]);
 

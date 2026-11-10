@@ -1,11 +1,11 @@
 // The Tasks tab and the right panel's Outputs, one copy per view, chosen by props().view.
 // A dialog copy with view "todo", "add-several" or "models" shows a form.
-// Outputs binds an agent to a session only by exact terminal, so this mod never guesses.
+// Outputs gets each agent's outputs from `hws outputs`, which binds agents only by exact terminal, so this mod never guesses.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, exec, home, layout, openOverlay, panes, props, readTextFile, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
-import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, agentName, cardSummary, cleanPath, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, ownerTag, parseOutputs, replyEnded, roster, sendTargets, sessionFor, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
+import { agents, home, layout, openOverlay, panes, props, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
+import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, cardSummary, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
 import { focusAgent, hws, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
@@ -15,6 +15,7 @@ const LANE_PX = 200;
 const BOARD_CHROME_PX = 42;
 const LANES_FIT_PX = 840;
 const LOADING = "Loading…";
+const NO_OUTPUTS = "No outputs recorded yet.";
 const TASKS_HINT = "Add a card, press Allow on it, then press Run.";
 const NEEDS_WORKSPACE = "Tasks only work inside a workspace. Add this space to a workspace to use them.";
 const STOP_QUESTION = "Stop orchestrator and its workers?";
@@ -63,17 +64,15 @@ export default class Work extends View {
       return;
     }
     this.kind = view === "outputs" ? "outputs" : "tasks";
-    this.sessions = null;
+    this.found = null;
     this.problem = null;
     this.note = null;
     this.width = 0;
     this.height = 0;
     this.doneOpen = false;
     this.touchedOpen = new Set();
-    this.docs = new Map();
     this.roster = [];
-    this.bound = [];
-    this.boundKey = "";
+    this.rosterKey = null;
     this.dirs = new Set();
     this.watching = new Set();
     this.remote = false;
@@ -106,7 +105,7 @@ export default class Work extends View {
   setMembers(members, cx) {
     if (JSON.stringify(members) === JSON.stringify(this.members)) return;
     this.members = members;
-    this.rebind(cx, true);
+    this.rebind(cx);
   }
 
   // The spaces whose agents this view covers: the active space's workspace, or none.
@@ -120,24 +119,31 @@ export default class Work extends View {
     this.members = listed?.spaces ?? [];
   }
 
+  // Asks hws for each agent's outputs. A call made while one runs waits for it, then runs once.
   poll(cx) {
-    if (this.fetching) return;
+    if (this.fetching) {
+      this.again = true;
+      return;
+    }
     this.fetching = true;
     cx.spawn(async (cx) => {
       try {
-        const [, brief] = await Promise.allSettled([this.loadMembers(), exec("agent-brief", ["sessions", "--json"])]);
-        if (brief.status === "rejected") throw brief.reason;
-        const r = brief.value;
-        if (r.code === 0) {
-          this.sessions = JSON.parse(r.stdout).sessions ?? [];
-          this.problem = null;
-        } else this.problem = r.stderr.trim().split("\n")[0] || "Agent Brief is not running.";
+        await this.loadMembers();
+        this.rebind(cx, false);
+        const addresses = this.roster.map((a) => a.address);
+        const listed = addresses.length > 0 ? await hws(["outputs", "--terminals", addresses.join(",")]) : null;
+        this.found = new Map((listed?.agents ?? []).map((entry) => [entry.terminal, entry]));
+        this.problem = null;
       } catch (e) {
-        this.problem = `Could not run agent-brief: ${e?.message ?? e}`;
+        this.problem = message(e);
       } finally {
         this.fetching = false;
-        this.rebind(cx, true);
+        this.watchFolders(cx);
         cx.notify();
+        if (this.again) {
+          this.again = false;
+          this.poll(cx);
+        }
       }
     });
   }
@@ -450,8 +456,8 @@ export default class Work extends View {
     cx.notify();
   }
 
-  // Tasks names the workspace's agents. Outputs binds them to sessions and loads files when they change.
-  rebind(cx, reload = false) {
+  // Tasks names the workspace's agents. Outputs lists them and asks hws again when they change.
+  rebind(cx, fetch = true) {
     const lists = { agents: agents(), panes: panes(), terminals: terminals(), spaces: spaces() };
     const active = lists.spaces.find((s) => s.active);
     if (this.kind === "tasks") {
@@ -460,29 +466,19 @@ export default class Work extends View {
     }
     this.remote = Boolean(active?.machine);
     this.roster = roster(lists, this.members);
-    this.bound = this.roster.map((agent) => ({ agent, session: sessionFor(this.sessions, agent.address) })).filter((b) => b.session);
-    const key = this.bound.map((b) => b.session.sessionId).join(" ");
-    if (!reload && key === this.boundKey) return;
-    this.boundKey = key;
-    const ids = new Set(this.bound.map((b) => b.session.sessionId));
-    for (const id of this.docs.keys()) if (!ids.has(id)) this.docs.delete(id);
-    this.dirs = new Set(this.bound.map((b) => feedbackDir(b.session)));
-    for (const { session } of this.bound) this.load(session, cx);
+    const key = this.roster.map((a) => a.address).join(" ");
+    if (key === this.rosterKey) return;
+    this.rosterKey = key;
+
+    // A poll already running reads the roster once its members load.
+    if (fetch && !this.fetching) this.poll(cx);
   }
 
-  load(session, cx) {
-    const id = session.sessionId;
-    const cwd = cleanPath(session.cwd);
-    const outputsPath = session.outputsPath ?? `${cwd}/.feedback/outputs/${id}.json`;
-    cx.spawn(async (cx) => {
-      const outputs = await readTextFile(outputsPath).catch(() => null);
-      if (!this.bound.some((b) => b.session.sessionId === id)) return;
-      this.docs.set(id, { outputs: outputs === null ? [] : parseOutputs(outputs) });
-
-      // A missing file has nothing to watch, so a later poll arms this.
-      if (outputs !== null) this.watch(feedbackDir(session), cx);
-      cx.notify();
-    });
+  // Watches the .feedback folder of each agent with outputs. An agent with none waits for the next poll.
+  watchFolders(cx) {
+    const folders = [...(this.found?.values() ?? [])].filter((entry) => entry.folder && entry.outputs?.length > 0).map((entry) => feedbackDir(entry.folder));
+    this.dirs = new Set(folders);
+    for (const dir of this.dirs) this.watch(dir, cx);
   }
 
   watch(dir, cx) {
@@ -492,7 +488,7 @@ export default class Work extends View {
       try {
         while (this.dirs.has(dir)) {
           await watchFolder(dir);
-          for (const { session } of this.bound) if (feedbackDir(session) === dir) this.load(session, cx);
+          this.poll(cx);
         }
       } catch {
         // The next poll watches again.
@@ -504,7 +500,7 @@ export default class Work extends View {
   open(group, output, cx) {
     this.note = null;
     cx.spawn(async (cx) => {
-      this.note = await openOutput(group.agent, group.session, output.ref);
+      this.note = await openOutput(group.agent, group.folder, output.ref);
       cx.notify();
     });
   }
@@ -512,11 +508,9 @@ export default class Work extends View {
   // Why Outputs has no agents to show, or null when it has.
   blocker() {
     if (this.problem) return this.problem;
-    if (this.sessions === null) return LOADING;
+    if (this.found === null) return LOADING;
     if (this.remote) return "This space runs on another machine. This panel only covers this Mac.";
     if (this.roster.length === 0) return "No Claude Code agents in this space.";
-    if (this.bound.length === 0) return "Agent Brief reports no session for the Claude Code agents in this space.";
-    if (!this.bound.every((b) => this.docs.has(b.session.sessionId))) return LOADING;
     return null;
   }
 
@@ -864,11 +858,11 @@ export default class Work extends View {
   }
 
   outputsBody(t, blocker) {
-    const groups = blocker === null ? outputGroups(this.bound, this.docs) : [];
+    const groups = blocker === null ? outputGroups(this.roster, this.found) : [];
     const count = groups.reduce((sum, g) => sum + g.declared.length + g.touched.length, 0);
     const header = this.header(t, "Outputs", blocker === null ? count : null);
     if (blocker !== null) return { header, content: this.message(t, blocker) };
-    if (count === 0) return { header, content: this.message(t, "No outputs yet. An output appears here when an agent declares a file or touches one.") };
+    if (count === 0) return { header, content: this.message(t, NO_OUTPUTS) };
     const now = Date.now();
     const content = v_flex()
       .id("outputs")
@@ -892,7 +886,7 @@ export default class Work extends View {
     return v_flex()
       .flex_none()
       .gap(1)
-      .when(labelled, (el) => el.child(div().id(`group-${group.agent.address}`).px(8).pb(3).text_size(11.5).font_medium().text_color(t.muted).child(agentName(group.session))))
+      .when(labelled, (el) => el.child(div().id(`group-${group.agent.address}`).px(8).pb(3).text_size(11.5).font_medium().text_color(t.muted).child(group.name)))
       .children(rows);
   }
 

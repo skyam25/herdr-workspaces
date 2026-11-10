@@ -39,7 +39,7 @@ export function list(flags) {
 export function register(flags) {
   const terminal = requireFlag(flags, 'terminal');
   const session = requireFlag(flags, 'session');
-  writeJsonAtomic(terminalSessionPath(terminal), { id: session });
+  writeJsonAtomic(terminalSessionPath(terminal), flags.folder ? { id: session, folder: flags.folder } : { id: session });
   const { manifest, tabId } = locateTerminal(terminal);
   if (!manifest) return { data: { registered: false }, text: `${terminal} is not in a workspace` };
   updateManifest(manifest.id, (draft) => {

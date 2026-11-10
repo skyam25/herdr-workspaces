@@ -2,25 +2,33 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { setup, mount, settle, hwsCalls, usedMethods } from "./harness.mjs";
-import { modelsLine, ago, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, mergeWaiting, orchestratorFolder, ownerTag, parseOutputs, replyEnded, roster, sendTargets, sessionFor, severalDialogHeight, storyHeight, todoColumns, todoDialogSize, todoLayout } from "../hws-work/data.js";
+import { modelsLine, agentName, ago, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, storyHeight, todoColumns, todoDialogSize, todoLayout } from "../hws-work/data.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const agent = (address, tab = "tb1", space = "spc1") => ({ address, pane: `p-${address}`, space, tab, status: "working", app: "claude-code", program: { key: "claude" } });
-const session = (id, terminal, extra = {}) => ({ sessionId: id, cwd: `/w/${id}`, name: `Agent ${id}`, host: { hcTerminal: terminal }, trackItems: true, itemsPath: `/w/${id}/i.md`, outputsPath: `/w/${id}/o.json`, ...extra });
 const SPACES = [
   { id: "spc1", active: true, machine: null, tabs: [{ id: "tb1", active: true }, { id: "tb2", active: false }] },
   { id: "spc2", active: false, machine: null, tabs: [{ id: "tb9", active: true }] },
 ];
 const panelLayout = (hidden, active) => ({ id: "root", children: [{ id: "panel", hidden, children: [{ id: "panel-body", active }] }] });
 
-const outputsFile = (outputs) => JSON.stringify({ version: 1, outputs });
 const decl = (ref, at, kind = "doc") => ({ ref, tier: "declared", kind, declaredAt: at });
 const seen = (ref, at, kind = "file") => ({ ref, tier: "detected", kind, lastWriteAt: at });
 
-function world({ agents = [agent("t1")], sessions = [session("s1", "t1")], files = {}, panes = [], terminals = [], layout, spaces = SPACES, sessionsResult } = {}) {
+// What `hws outputs` knows for one terminal: its session, folder and outputs.
+const rec = (id, outputs = []) => ({ session: id, folder: `/w/${id}`, outputs });
+
+// Answers `hws outputs --terminals a,b` from `found`, which a test may change between polls.
+const outputsAnswer = (found) => (args) => ({
+  agents: args[args.indexOf("--terminals") + 1].split(",").map((terminal) => ({ terminal, session: null, folder: null, file: null, outputs: [], ...found[terminal] })),
+});
+
+function world({ agents = [agent("t1")], found = { t1: rec("s1") }, files = {}, panes = [], terminals = [], layout, spaces = SPACES } = {}) {
   const reads = [];
   return setup({
+    found,
+    hws: { parent: { folder: "/Users/me/Projects" }, outputs: outputsAnswer(found) },
     agents,
     panes,
     terminals,
@@ -31,7 +39,6 @@ function world({ agents = [agent("t1")], sessions = [session("s1", "t1")], files
     sharedValues: {},
     sharedSets: [],
     notices: [],
-    other: sessionsResult ?? ((command, args) => (command === "agent-brief" && args[0] === "sessions" ? { code: 0, stdout: JSON.stringify({ sessions }), stderr: "" } : { code: 0, stdout: "", stderr: "" })),
   });
 }
 
@@ -77,11 +84,10 @@ async function release(m, ...ids) {
 
 // Parsing and binding
 
-test("parseOutputs keeps valid, unique refs and rejects bad documents", () => {
-  assert.deepEqual(parseOutputs("not json"), []);
-  assert.deepEqual(parseOutputs('{"version":2,"outputs":[]}'), []);
-  const good = outputsFile([decl("a.md", 1), decl("a.md", 2), { ref: "b", tier: "other", kind: "x" }, seen("c.png", 3)]);
-  assert.deepEqual(parseOutputs(good).map((o) => o.ref), ["a.md", "c.png"]);
+test("agentName uses the Herdr title without its spinner, then the folder", () => {
+  assert.equal(agentName({ address: "t1", title: "✳ Fix login" }, "/w/s1"), "Fix login");
+  assert.equal(agentName({ address: "t1", title: "" }, "/w/s1/"), "s1");
+  assert.equal(agentName({ address: "t1" }, null), "t1");
 });
 
 test("ago formats elapsed time", () => {
@@ -91,11 +97,10 @@ test("ago formats elapsed time", () => {
   assert.equal(ago(49 * 3600000), "2d ago");
 });
 
-test("sessionFor binds only by exact terminal and prefers the newest", () => {
-  const sessions = [{ sessionId: "old", host: { hcTerminal: "t1" }, lastSeen: 1 }, { sessionId: "new", host: { hcTerminal: "t1" }, lastSeen: 2 }, { sessionId: "other", host: { hcTerminal: "t2" } }];
-  assert.equal(sessionFor(sessions, "t1").sessionId, "new");
-  assert.equal(sessionFor(sessions, "t3"), null);
-  assert.equal(sessionFor(null, "t1"), null);
+test("outputGroups skips agents hws found nothing for and tolerates a missing outputs list", () => {
+  const agents = [{ address: "t1", title: "One" }, { address: "t2", title: "Two" }, { address: "t3", title: "Three" }];
+  const found = new Map([["t1", rec("s1", [decl("a.md", 1)])], ["t2", { terminal: "t2", folder: "/w/s2" }]]);
+  assert.deepEqual(outputGroups(agents, found).map((g) => [g.name, g.folder, g.declared.map((o) => o.ref)]), [["One", "/w/s1", ["a.md"]]]);
 });
 
 test("roster covers the active space and finds flipped agents through the chat pane", () => {
@@ -110,8 +115,8 @@ test("roster covers the active space and finds flipped agents through the chat p
     spaces: SPACES,
   };
   assert.deepEqual(roster(lists), [
-    { address: "t1", tab: "tb1", chatPane: null, space: "spc1" },
-    { address: "t5", tab: "tb2", chatPane: "chat1", space: "spc1" },
+    { address: "t1", tab: "tb1", chatPane: null, space: "spc1", title: "" },
+    { address: "t5", tab: "tb2", chatPane: "chat1", space: "spc1", title: "" },
   ]);
   assert.deepEqual(roster({ ...lists, spaces: [{ ...SPACES[0], machine: "vm" }] }), []);
 });
@@ -123,7 +128,7 @@ test("a flipped terminal already in agents() counts once, as flipped", () => {
     terminals: [{ address: "t5", state: "live", labels: { "herdr.chat": "chat1" }, program: { key: "claude" } }],
     spaces: SPACES,
   };
-  assert.deepEqual(roster(lists), [{ address: "t5", tab: "tb1", chatPane: "chat1", space: "spc1" }]);
+  assert.deepEqual(roster(lists), [{ address: "t5", tab: "tb1", chatPane: "chat1", space: "spc1", title: "" }]);
 });
 
 // Tasks view
@@ -167,6 +172,7 @@ test("Tasks shows only hws cards and never asks Agent Brief", async () => {
   const m = await mount("hws-work", { view: "tasks" });
   await m.fireTimer(10000);
   assert.equal(H.calls.some((c) => c.command === "agent-brief"), false);
+  assert.equal(hwsCalls(H).some((c) => c.args[0] === "outputs"), false);
   assert.equal(H.reads.length, 0);
   assert.equal(/Pick a name|#1/.test(m.text()), false);
   assert.equal(m.has("todo-a1"), true);
@@ -235,32 +241,46 @@ test("a failed reload keeps the count for the spaces the board last listed", asy
 });
 
 test("Outputs never touches the waiting count", async () => {
-  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("a.md", 1)]) } });
+  const H = world({ found: { t1: rec("s1", [decl("a.md", 1)]) } });
   const m = await mount("hws-work", { view: "outputs" });
   m.render();
   assert.deepEqual(H.sharedSets, []);
 });
 
-test("Outputs loads only the active space's agents", async () => {
+test("Outputs asks hws for only the active space's agents and never runs agent-brief", async () => {
   const H = world({
     agents: [agent("t1"), agent("t9", "tb9", "spc2")],
-    sessions: [session("s1", "t1"), session("s9", "t9")],
-    files: { "/w/s1/o.json": outputsFile([decl("a.md", 1)]), "/w/s9/o.json": outputsFile([decl("b.md", 1)]) },
+    found: { t1: rec("s1", [decl("a.md", 1)]), t9: rec("s9", [decl("b.md", 1)]) },
   });
   const m = await mount("hws-work", { view: "outputs" });
   m.render();
   await settle();
-  assert.equal(H.reads.includes("/w/s9/o.json"), false);
-  assert.equal(H.reads.includes("/w/s1/o.json"), true);
-  assert.equal(H.reads.some((r) => String(r).endsWith(".md")), false);
+  assert.deepEqual(hwsCalls(H).filter((c) => c.args[0] === "outputs").map((c) => c.args), [["outputs", "--terminals", "t1", "--json"]]);
+  assert.equal(m.has("output-t1-a.md"), true);
+  assert.equal(m.has("output-t9-b.md"), false);
+  assert.equal(H.calls.some((c) => c.command === "agent-brief"), false);
+  assert.deepEqual(H.reads, []);
   assert.deepEqual([...new Set(H.watches)], ["/w/s1/.feedback"]);
 });
 
-test("a folder match without the exact terminal does not bind", async () => {
-  world({ sessions: [{ ...session("s1", "t1"), host: { bundleId: "dev.herdr.app" } }], files: { "/w/s1/o.json": outputsFile([decl("a.md", 1)]) } });
+test("Outputs covers the agents in every space of the workspace", async () => {
+  const H = world({
+    agents: [agent("t1"), agent("t9", "tb9", "spc2")],
+    found: { t1: rec("s1", [decl("a.md", 1)]), t9: rec("s9", [decl("b.md", 2)]) },
+  });
+  H.hws["todo list"] = { items: [], spaces: ["spc1", "spc2"] };
   const m = await mount("hws-work", { view: "outputs" });
-  assert.equal(m.has("output-t1-a.md"), false);
-  assert.match(m.text(), /no session/);
+  await settle();
+  assert.deepEqual(hwsCalls(H).filter((c) => c.args[0] === "outputs").at(-1).args, ["outputs", "--terminals", "t1,t9", "--json"]);
+  assert.equal(m.has("output-t1-a.md"), true);
+  assert.equal(m.has("output-t9-b.md"), true);
+});
+
+test("an agent hws binds to no session shows the plain empty line", async () => {
+  world({ found: {} });
+  const m = await mount("hws-work", { view: "outputs" });
+  assert.match(m.text(), /No outputs recorded yet\./);
+  assert.equal(/Agent Brief/.test(m.text()), false);
 });
 
 // Quiet line
@@ -268,15 +288,11 @@ test("a folder match without the exact terminal does not bind", async () => {
 const quietOf = (m) => findNode(m, "quiet");
 const quietText = (m) => textOf(quietOf(m));
 
-test("agent-brief failing shows on Outputs", async () => {
-  world({ sessionsResult: () => { throw new Error("spawn ENOENT"); } });
-  const outputs = await mount("hws-work", { view: "outputs" });
-  assert.match(outputs.text(), /Could not run agent-brief: spawn ENOENT/);
-
-  world({ sessionsResult: () => ({ code: 1, stdout: "", stderr: "Agent Brief is not running. Start it.\nmore\n" }) });
-  const stopped = await mount("hws-work", { view: "outputs" });
-  assert.match(stopped.text(), /Agent Brief is not running\. Start it\./);
-  assert.equal(/\bmore\b/.test(stopped.text()), false);
+test("an hws outputs failure shows hws's message on Outputs", async () => {
+  const H = world();
+  H.hws.outputs = { fail: "unknown command: outputs" };
+  const m = await mount("hws-work", { view: "outputs" });
+  assert.match(m.text(), /unknown command: outputs/);
 });
 
 test("Outputs says when a space has no Claude agents or runs on another machine", async () => {
@@ -1883,16 +1899,16 @@ test("Add several shows a failure and stays open, and Esc closes it", async () =
   assert.deepEqual(H.closed, ["ov7"]);
 });
 
-test("Outputs says none yet when no agent has any", async () => {
+test("Outputs says none are recorded yet when no agent has any", async () => {
   world();
   const m = await mount("hws-work", { view: "outputs" });
-  assert.match(m.text(), /No outputs yet/);
+  assert.match(m.text(), /No outputs recorded yet\./);
 });
 
 // Outputs view
 
 test("Outputs shows declared rows first, with Touched collapsed, newest first", async () => {
-  world({ files: { "/w/s1/o.json": outputsFile([decl("a.md", 100), decl("b.md", 200), seen("c.png", 300)]) } });
+  world({ found: { t1: rec("s1", [decl("a.md", 100), decl("b.md", 200), seen("c.png", 300)]) } });
   const m = await mount("hws-work", { view: "outputs" });
   assert.match(m.text(), /b\.md \| doc.*a\.md \| doc.*Touched \(1\)/);
   assert.equal(m.has("output-t1-c.png"), false);
@@ -1904,23 +1920,22 @@ test("Outputs shows declared rows first, with Touched collapsed, newest first", 
 test("Outputs groups by agent when more than one has outputs, newest agent first", async () => {
   world({
     agents: [agent("t1"), agent("t2")],
-    sessions: [session("s1", "t1"), session("s2", "t2")],
-    files: { "/w/s1/o.json": outputsFile([decl("old.md", 1)]), "/w/s2/o.json": outputsFile([decl("new.md", 9)]) },
+    found: { t1: rec("s1", [decl("old.md", 1)]), t2: rec("s2", [decl("new.md", 9)]) },
   });
   const m = await mount("hws-work", { view: "outputs" });
-  assert.match(m.text(), /Agent s2 \| new\.md.*Agent s1 \| old\.md/);
+  assert.match(m.text(), /s2 \| new\.md.*s1 \| old\.md/);
   assert.equal(m.has("group-t1"), true);
 });
 
 test("a page output opens beside its agent with hws", async () => {
-  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("docs/plan.md", 1)]) } });
+  const H = world({ found: { t1: rec("s1", [decl("docs/plan.md", 1)]) } });
   const m = await mount("hws-work", { view: "outputs" });
   await m.click("output-t1-docs/plan.md");
   assert.deepEqual(hwsCalls(H).at(-1).args, ["surface", "open", "--type", "page", "--file", "/w/s1/docs/plan.md", "--terminal", "t1", "--json"]);
 });
 
 test("a page opened for an agent in another tab selects that tab and focuses the surface", async () => {
-  const H = world({ agents: [agent("t1", "tb2")], files: { "/w/s1/o.json": outputsFile([decl("hidden.md", 1)]) } });
+  const H = world({ agents: [agent("t1", "tb2")], found: { t1: rec("s1", [decl("hidden.md", 1)]) } });
   H.hws["surface open"] = { pane: "page1" };
   const m = await mount("hws-work", { view: "outputs" });
   await m.click("output-t1-hidden.md");
@@ -1928,7 +1943,7 @@ test("a page opened for an agent in another tab selects that tab and focuses the
 });
 
 test("a second click returns to the open surface instead of opening another", async () => {
-  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("again.md", 1)]) } });
+  const H = world({ found: { t1: rec("s1", [decl("again.md", 1)]) } });
   H.hws["surface open"] = { pane: "page2" };
   const m = await mount("hws-work", { view: "outputs" });
   await m.click("output-t1-again.md");
@@ -1939,7 +1954,7 @@ test("a second click returns to the open surface instead of opening another", as
 });
 
 test("a closed surface opens again", async () => {
-  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("closed.md", 1)]) } });
+  const H = world({ found: { t1: rec("s1", [decl("closed.md", 1)]) } });
   H.hws["surface open"] = { pane: "page3" };
   const m = await mount("hws-work", { view: "outputs" });
   await m.click("output-t1-closed.md");
@@ -1952,8 +1967,7 @@ test("a flipped agent's page opens beside its chat pane", async () => {
     agents: [],
     panes: [{ pane: "chat1", mod: "hws-chat", tab: "tb1" }],
     terminals: [{ address: "t5", state: "live", labels: { "herdr.chat": "chat1" }, program: { key: "claude" } }],
-    sessions: [session("s5", "t5")],
-    files: { "/w/s5/o.json": outputsFile([decl("page.html", 1)]) },
+    found: { t5: rec("s5", [decl("page.html", 1)]) },
   });
   const m = await mount("hws-work", { view: "outputs" });
   await m.click("output-t5-page.html");
@@ -1961,17 +1975,17 @@ test("a flipped agent's page opens beside its chat pane", async () => {
 });
 
 test("anything other than a local page goes to macOS open", async () => {
-  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("data.csv", 2), decl("http://localhost:3000/a.html", 1)]) } });
+  const H = world({ found: { t1: rec("s1", [decl("data.csv", 2), decl("http://localhost:3000/a.html", 1)]) } });
   const m = await mount("hws-work", { view: "outputs" });
   await m.click("output-t1-data.csv");
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["/w/s1/data.csv"] });
   await m.click("output-t1-http://localhost:3000/a.html");
   assert.deepEqual(H.calls.at(-1), { command: "open", args: ["http://localhost:3000/a.html"] });
-  assert.equal(hwsCalls(H).filter((c) => c.args[0] !== "todo").length, 0);
+  assert.equal(hwsCalls(H).filter((c) => c.args[0] === "surface").length, 0);
 });
 
 test("an open failure shows in the panel", async () => {
-  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("plan.md", 1)]) } });
+  const H = world({ found: { t1: rec("s1", [decl("plan.md", 1)]) } });
   H.hws["surface open"] = { fail: "terminal t1 is gone" };
   const m = await mount("hws-work", { view: "outputs" });
   await m.click("output-t1-plan.md");
@@ -1981,7 +1995,7 @@ test("an open failure shows in the panel", async () => {
 
 // Polling
 
-const sessionsPolls = (H) => H.calls.filter((c) => c.command === "agent-brief" && c.args[0] === "sessions").length;
+const sessionsPolls = (H) => hwsCalls(H).filter((c) => c.args[0] === "outputs").length;
 
 test("Tasks lists its cards every 10 seconds and keeps listing while hidden", async () => {
   const H = world({ layout: panelLayout(true, "files") });
@@ -2006,11 +2020,11 @@ test("Outputs polls only while it is showing", async () => {
 
 test("a .feedback change reloads Outputs", async () => {
   let fire;
-  const H = world({ files: { "/w/s1/o.json": outputsFile([decl("one.md", 1)]) } });
+  const H = world({ found: { t1: rec("s1", [decl("one.md", 1)]) } });
   H.watchResult = () => new Promise((resolve) => { fire = resolve; });
   const m = await mount("hws-work", { view: "outputs" });
   assert.equal(m.has("output-t1-two.md"), false);
-  H.files["/w/s1/o.json"] = outputsFile([decl("one.md", 1), decl("two.md", 2)]);
+  H.found.t1 = rec("s1", [decl("one.md", 1), decl("two.md", 2)]);
   fire(["/w/s1/.feedback"]);
   await settle();
   assert.equal(m.has("output-t1-two.md"), true);

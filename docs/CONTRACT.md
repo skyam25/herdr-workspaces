@@ -189,7 +189,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws new throwaway [--name N]` | Creates a throwaway with one tab running `claude` in its scratch folder. The space opens on a shell in the parent folder, which closes once the tab is open |
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list [--archived]` | Every open manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest. `--archived` lists only archived workspaces |
-| `hws register --terminal T --session S [--role R]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal |
+| `hws register --terminal T --session S [--role R] [--folder F]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal. The terminal's record is `{ id, folder }`, and `folder` is left out when `--folder` is not given |
+| `hws outputs --terminals T1,T2` | Read-only. Prints `{ agents }`, one `{ terminal, session, folder, file, outputs }` per terminal in the order given. See Outputs under Right panel |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. A file already open in a pane gets the focus, and the result has `focused: true` |
 | `hws review FILE\|ARTIFACT [--title X] [--terminal T]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T` does. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane with no agent attached. Never opens standalone |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
@@ -928,9 +929,20 @@ The header shows `Models  <orchestrator model> → <worker model>`, which opens 
 
 ### Right panel: `hws-work`
 
-`panel-body` has three children: `files`, `changes` and `outputs`. Outputs runs `hws-work` with `{"view":"outputs"}`. It reads the active space's Claude agents, flipped ones included, and binds each to its session by `host.hcTerminal` from `agent-brief sessions --json`.
+`panel-body` has three children: `files`, `changes` and `outputs`. Outputs runs `hws-work` with `{"view":"outputs"}`. It reads the active space's Claude agents, flipped ones included, from every space of its workspace, and runs `hws outputs --terminals T1,T2 --json` with their addresses. The Agent Brief app does not need to run.
 
-Outputs lists each agent's outputs, newest first. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. The click shows the agent's tab and focuses the surface. A second click on the same output returns to that surface while its pane lives. Anything else goes to macOS `open`.
+`hws outputs` binds each terminal to the session the session-start hook registered for it, and never guesses.
+
+| Field | Value |
+|---|---|
+| `session` | The registered Claude session id, or null when the terminal has none |
+| `folder` | The `--folder` given to `hws register`, else the folder the terminal's program runs in, else null |
+| `file` | `<folder>/.feedback/outputs/<session>.json`, which the Agent Brief plugin writes for each session, or null |
+| `outputs` | That file's records, one per `ref`, each `{ ref, kind, tier }` with `url`, `title`, `status`, `origin`, `declaredAt`, `firstWriteAt`, `lastWriteAt` and `writes` when well formed |
+
+A missing folder or file, malformed JSON, a file whose `version` is not 1, or a session id that is not a plain file name gives an empty `outputs`. A record without a `ref`, a `kind`, or a `tier` of `declared` or `detected` is dropped, and unknown fields are left out. Any `kind` string is kept. The command exits 0 in each of these cases.
+
+Outputs lists each agent's outputs, newest first, under the agent's Herdr title or its folder's name. With none it says `No outputs recorded yet.` An `hws outputs` failure shows hws's message. Outputs watches the `.feedback` folder of each agent with outputs and runs `hws outputs` again on a change. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. The click shows the agent's tab and focuses the surface. A second click on the same output returns to that surface while its pane lives. Anything else goes to macOS `open`.
 
 `mod.open:hws-brief` shows or hides Outputs in the right panel.
 
@@ -1018,7 +1030,7 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 `plugin/hooks/guard-note.sh` runs on `PreToolUse` for `Write`. It denies a write to the current note when `hws` owns that place and tells the agent to run a tidy pass. `Edit` stays allowed so an agent can add one dated decision line. It exits 0 on every path, so a failed lookup allows the write.
 
-1. Runs `hws register --terminal T --session S --json` and `hws current --line` in parallel.
+1. Runs `hws register --terminal T --session S --folder F --json` and `hws current --line` in parallel. F is the hook's `cwd`, so Outputs finds the session's outputs file.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
 3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE` and rules out `--standalone`. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws phone send FILE --prompt X` and says Agent Brief's Outputs panel does not reach the phone.
 
