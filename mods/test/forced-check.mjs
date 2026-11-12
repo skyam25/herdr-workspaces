@@ -127,7 +127,12 @@ const PHONES = [
 ];
 const HANDOFFS = Array.from({ length: 7 }, (_, i) => `{ id: "h${i}", sessionId: "p${i}", sessionLabel: "demo · Claude Code", page: "docs/page-${i}.html", boardName: "ipad-h${i}", createdAt: 1, state: "open" }`);
 const phonesFile = (patch = (s) => s) => ({ "phones.js": { header: "", patch } });
-const phonesState = (status, extra = "", more = (s) => s) => phonesFile((s) => more(s).replace("this.status = null;", `this.status = ${status};`).replace("this.seq = 0;", `this.seq = 0; ${extra}`).replace("async load() {", "async load() { return;"));
+const PHONES_STATUS_ANCHOR = "this.status = status ? { ...status, devices: status.devices ?? [], handoffs: status.handoffs ?? [] } : null;";
+function forcePhones(s, status, extra) {
+  if (!s.includes(PHONES_STATUS_ANCHOR)) throw new Error("hws-footer/phones.js has no status line to force a state on");
+  return s.replace(PHONES_STATUS_ANCHOR, `this.status = ${status};`).replace("this.seq = 0;", `this.seq = 0; ${extra}`).replace("async load() {", "async load() { return;");
+}
+const phonesState = (status, extra = "", more = (s) => s) => phonesFile((s) => forcePhones(more(s), status, extra));
 const footerPaired = (s) => s.replace("this.devices = null;", `this.devices = [${PHONES[0]}];`);
 const POPUP_PROPS = { view: "phones", overlay: "o" };
 const FOOTER_VARIANTS = [

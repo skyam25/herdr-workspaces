@@ -572,7 +572,7 @@ test("the footer keeps Settings and Add machine and offers Pair phone when none 
 test("the footer names the paired phone", async () => {
   world({ hws: { "phone status": IPHONE } });
   const m = await mount("hws-footer", undefined);
-  assert.equal(m.text(), "Settings | Add machine | iPhone");
+  assert.match(m.text(), /^Settings \| Add machine \| iPhone \| (Active|Idle)$/);
 });
 
 test("Pair phone opens the pairing tab and stops checking once a phone pairs", async () => {
@@ -581,12 +581,13 @@ test("Pair phone opens the pairing tab and stops checking once a phone pairs", a
   const m = await mount("hws-footer", undefined);
   await m.click("phone");
   assert.ok(openArgs(H).some((args) => args.join(" ") === "phone pair --json"));
-  assert.equal(m.timers.length, 1);
+  const pairing = () => m.timers.filter((t) => t.ms === 3000);
+  assert.equal(pairing().length, 1);
 
   answer = IPHONE;
   await m.fireTimer(3000);
-  assert.equal(m.text(), "Settings | Add machine | iPhone");
-  assert.equal(m.timers[0].cancelled, true);
+  assert.match(m.text(), /^Settings \| Add machine \| iPhone \| /);
+  assert.equal(pairing()[0].cancelled, true);
 });
 
 test("the + menu no longer pairs a phone", () => {

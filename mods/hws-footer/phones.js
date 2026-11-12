@@ -13,22 +13,24 @@ export const PAIR_KEY = "hws-footer.pair";
 
 export const STATUS_POLL_MS = 3000;
 
-// The listener updates lastSeen on each request from the phone but writes it at most once a
-// minute, so a phone in use is never more than about a minute behind.
+// A phone talks to this Mac only while Agent Brief is open on it, and sends wait in its inbox
+// until then. Active means a request in the last two minutes. The listener writes lastSeen at
+// most once a minute, so a phone in use is never more than about a minute behind.
 const CONNECTED_MS = 2 * 60_000;
 
 const HANDOFFS_SHOWN = 5;
 const STATUS_PROBLEM = "Couldn't read the phone status.";
 
-const WIDTH = 300;
+const WIDTH = 320;
 const MAX_HEIGHT = 440;
 const PAD = 6;
 const TITLE_H = 28;
-const DEVICE_H = 46;
+const DEVICE_H = 60;
 const LINE_H = 24;
 const HANDOFF_H = 22;
 const DIVIDER_H = 9;
 const PAIR_H = 30;
+const HINT_H = 28;
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -48,9 +50,9 @@ export async function hws(args) {
   return null;
 }
 
-// Sets the shared list only when an id or name changes, because every set redraws every mod.
-export function publishDevices(devices) {
-  const list = (devices ?? []).map(({ id, name }) => ({ id, name }));
+// Sets the shared list only when a name or connection changes, because every set redraws every mod.
+export function publishDevices(devices, now = Date.now()) {
+  const list = (devices ?? []).map((d) => ({ id: d.id, name: d.name, connected: isConnected(d, now) }));
   if (JSON.stringify(shared(DEVICES_KEY)) === JSON.stringify(list)) return;
   setShared(DEVICES_KEY, list);
 }
@@ -89,10 +91,17 @@ export function pairedText(ms, now) {
   return `Paired ${dateText(ms, now)}`;
 }
 
-function deviceDetail(device, now) {
-  const seen = isConnected(device, now) ? "Connected" : typeof device.lastSeen === "number" ? seenText(device.lastSeen, now) : null;
-  const paired = typeof device.pairedAt === "number" ? pairedText(device.pairedAt, now) : null;
-  return [seen, paired].filter(Boolean).join(" · ");
+function stateText(device, now) {
+  if (isConnected(device, now)) return "Active now";
+  if (typeof device.lastSeen !== "number") return "Idle · never opened";
+  return `Idle · last active ${seenText(device.lastSeen, now).replace(/^Seen /, "")}`;
+}
+
+// The footer row and the popup title both say how many paired phones are active.
+export function activeSummary(devices) {
+  const on = devices.filter((d) => d.connected).length;
+  if (!on) return "Idle";
+  return on === devices.length ? "Active" : `${on} of ${devices.length} active`;
 }
 
 // A page hand-off names its file, and a board hand-off names the board it starts from.
@@ -102,24 +111,38 @@ function handoffLabel(h) {
 }
 
 function listenerLine(status) {
-  if (!status.running) return "Listener not running";
+  if (!status.running) return "This Mac isn't listening for phones";
   const waiting = status.handoffs?.length ?? 0;
-  return `Listener running · ${waiting ? `${waiting} waiting on the phone` : "Nothing waiting"}`;
+  return waiting ? `${plural(waiting, "page")} waiting on the phone` : "Nothing waiting on the phone";
 }
 
-// The popup cannot grow once open, so it sizes for the last status and its body scrolls.
-export function popupSize(status) {
-  const devices = Math.max(1, status?.devices?.length ?? 1);
-  const waiting = status?.handoffs?.length ?? 0;
+const noneConnected = (status, now) => status.devices.length > 0 && !status.devices.some((d) => isConnected(d, now));
+
+const CHROME_H = PAD * 2 + TITLE_H + DIVIDER_H + PAIR_H;
+
+// Herdr sizes a popup to its content, so the body takes this height and scrolls past it.
+// Without a status yet, the body holds one line.
+export function bodyHeight(status, problem = null, now = Date.now()) {
+  const problemH = problem ? LINE_H : 0;
+  if (!status) return problemH || LINE_H;
+  const devices = Math.max(1, status.devices?.length ?? 0);
+  const waiting = status.handoffs?.length ?? 0;
   const handoffRows = Math.min(waiting, HANDOFFS_SHOWN) + (waiting > HANDOFFS_SHOWN ? 1 : 0);
-  const height = PAD * 2 + TITLE_H + devices * DEVICE_H + DIVIDER_H + LINE_H + handoffRows * HANDOFF_H + DIVIDER_H + PAIR_H;
-  return { width: WIDTH, height: Math.min(MAX_HEIGHT, height) };
+  const hint = status.devices && noneConnected(status, now) ? HINT_H : 0;
+  const px = devices * DEVICE_H + hint + problemH + DIVIDER_H + LINE_H + handoffRows * HANDOFF_H;
+  return Math.min(MAX_HEIGHT - CHROME_H, px);
+}
+
+// The footer places the popup above its row by this height.
+export function popupSize(status, now = Date.now()) {
+  return { width: WIDTH, height: CHROME_H + bodyHeight(status ? { devices: [], handoffs: [], ...status } : null, null, now) };
 }
 
 export class PhonesPopup {
-  constructor(overlay, cx) {
+  // The footer passes its last status, so the popup opens at the size it was placed for.
+  constructor(overlay, cx, status = null) {
     this.overlay = overlay;
-    this.status = null;
+    this.status = status ? { ...status, devices: status.devices ?? [], handoffs: status.handoffs ?? [] } : null;
     this.problem = null;
     this.confirming = null;
     this.forgetting = null;
@@ -213,14 +236,16 @@ export class PhonesPopup {
     const row = h_flex().id(`phone-${device.id}`).h(DEVICE_H).flex_none().px(8).gap(9).items_center().child(div().w(14).flex_none().flex().justify_center().child(dot));
     if (this.confirming === device.id) return row.child(this.confirmRow(t, device));
     const forgetting = this.forgetting === device.id;
+    const paired = typeof device.pairedAt === "number" ? pairedText(device.pairedAt, now) : null;
     return row
       .child(
         v_flex()
           .flex_1()
           .min_w(0)
-          .gap(2)
+          .gap(1)
           .child(div().truncate().child(device.name))
-          .child(div().truncate().text_size(11.5).text_color(t.dim).child(deviceDetail(device, now))),
+          .child(div().truncate().text_size(12).text_color(connected ? t.done : t.dim).child(stateText(device, now)))
+          .when(Boolean(paired), (el) => el.child(div().truncate().text_size(11.5).text_color(t.dim).child(paired))),
       )
       .when(forgetting, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child("Forgetting…")))
       .when(!forgetting && !this.forgetting, (el) => el.child(this.button(t, `forget-${device.id}`, "Forget", (_e, cx) => this.ask(device.id, cx))));
@@ -228,6 +253,11 @@ export class PhonesPopup {
 
   line(t, id, text, color = t.muted, height = LINE_H) {
     return div().id(id).h(height).flex_none().px(8).flex().items_center().text_size(12).text_color(color).child(div().truncate().child(text));
+  }
+
+  // A paired phone connects when the Agent Brief app is open on it.
+  hint(t) {
+    return this.line(t, "phones-hint", "Sends wait on the phone until Agent Brief opens.", t.muted, HINT_H);
   }
 
   divider(t) {
@@ -239,10 +269,16 @@ export class PhonesPopup {
     const problem = this.problem ? [this.line(t, "phones-problem", this.problem, t.blocked)] : [];
     if (!status) return problem.length ? problem : [this.line(t, "phones-reading", "Reading…", t.dim)];
     const devices = status.devices.length ? status.devices.map((d) => this.deviceRow(t, d, now)) : [this.line(t, "phones-none", "No phone is paired.", t.dim, DEVICE_H)];
+    const hint = noneConnected(status, now) ? [this.hint(t)] : [];
     const waiting = status.handoffs;
     const shown = waiting.slice(0, HANDOFFS_SHOWN).map((h, i) => this.line(t, `handoff-${h.id ?? i}`, handoffLabel(h), t.foreground, HANDOFF_H));
     const more = waiting.length > HANDOFFS_SHOWN ? [this.line(t, "handoffs-more", `${waiting.length - HANDOFFS_SHOWN} more`, t.dim, HANDOFF_H)] : [];
-    return [...devices, ...problem, this.divider(t), this.line(t, "phones-listener", listenerLine(status)), ...shown, ...more];
+    return [...devices, ...hint, ...problem, this.divider(t), this.line(t, "phones-listener", listenerLine(status)), ...shown, ...more];
+  }
+
+  connection() {
+    const now = Date.now();
+    return (this.status?.devices ?? []).map((d) => ({ connected: isConnected(d, now) }));
   }
 
   render() {
@@ -255,8 +291,17 @@ export class PhonesPopup {
       .bg(t.popover)
       .text_size(13)
       .text_color(t.foreground)
-      .child(h_flex().h(TITLE_H).flex_none().px(8).items_center().font_semibold().child("Phones"))
-      .child(v_flex().id("phones-body").flex_1().min_h(0).overflow_y_scrollbar().children(this.bodyRows(t, Date.now())))
+      .child(
+        h_flex()
+          .h(TITLE_H)
+          .flex_none()
+          .px(8)
+          .gap(8)
+          .items_center()
+          .child(div().flex_1().font_semibold().child("Phones"))
+          .when((this.status?.devices.length ?? 0) > 1, (el) => el.child(div().flex_none().text_size(12).text_color(t.dim).child(activeSummary(this.connection())))),
+      )
+      .child(v_flex().id("phones-body").h(bodyHeight(this.status, this.problem)).flex_none().overflow_y_scrollbar().children(this.bodyRows(t, Date.now())))
       .child(this.divider(t))
       .child(
         h_flex()

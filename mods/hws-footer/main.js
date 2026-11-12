@@ -1,15 +1,18 @@
 // The sidebar footer. It keeps workspace-chrome's Settings and Add machine rows and adds Phone,
 // which pairs the phone app with this Mac for the whole Herdr window.
-// Props: none for the footer, or { view: "phones", overlay } for the Phones popup in phones.js.
+// Props: none for the footer, or { view: "phones", status, overlay } for the Phones popup in phones.js.
 
 import { View, svg, div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { theme, run, layout, updates, props, shared, openOverlay } from "herdr";
-import { hws, publishDevices, popupSize, PhonesPopup, DEVICES_KEY, PAIR_KEY } from "./phones.js";
+import { hws, publishDevices, popupSize, activeSummary, isConnected, PhonesPopup, DEVICES_KEY, PAIR_KEY } from "./phones.js";
 
 // A pairing code lasts 10 minutes, so the row checks for a new phone that long after Pair.
 const PAIR_POLL_MS = 3000;
 const PAIR_POLLS = 200;
+
+// A phone counts as active for two minutes after its last request, so the row checks once a minute.
+const STATE_POLL_MS = 60_000;
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -33,7 +36,7 @@ function anchor(bounds, size, collapsed) {
 export default class Footer extends View {
   init(_props, cx) {
     if (props()?.view === "phones") {
-      this.popup = new PhonesPopup(props().overlay, cx);
+      this.popup = new PhonesPopup(props().overlay, cx, props().status);
       return;
     }
     this.devices = null;
@@ -42,6 +45,11 @@ export default class Footer extends View {
     this.rowBounds = null;
     this.pairAsked = shared(PAIR_KEY)?.at ?? 0;
     cx.spawn(async (cx) => {
+      await this.refresh();
+      cx.notify();
+    });
+    cx.timer.every(STATE_POLL_MS, async (cx) => {
+      if (!this.paired().length) return;
       await this.refresh();
       cx.notify();
     });
@@ -60,7 +68,8 @@ export default class Footer extends View {
 
   // The Phones popup writes the shared list, so a Forget there updates this row.
   paired() {
-    return shared(DEVICES_KEY) ?? this.devices ?? [];
+    const now = Date.now();
+    return shared(DEVICES_KEY) ?? (this.devices ?? []).map((d) => ({ id: d.id, name: d.name, connected: isConnected(d, now) }));
   }
 
   // The Pair phone tab shows the QR code. The row updates once the new phone appears.
@@ -92,7 +101,7 @@ export default class Footer extends View {
       return;
     }
     const size = popupSize(this.status);
-    openOverlay({ mod: "hws-footer", kind: "popup", ...size, at: anchor(this.rowBounds, size, narrow()), props: { view: "phones" } });
+    openOverlay({ mod: "hws-footer", kind: "popup", ...size, at: anchor(this.rowBounds, size, narrow()), props: { view: "phones", status: this.status } });
   }
 
   phoneLabel() {
@@ -102,8 +111,10 @@ export default class Footer extends View {
   }
 
   phoneTip() {
-    if (!this.paired().length) return "Pair the Agent Brief app on your iPhone or iPad with this Mac";
-    return `${this.phoneLabel()} paired. Click to see your paired phones`;
+    const devices = this.paired();
+    if (!devices.length) return "Pair the Agent Brief app on your iPhone or iPad with this Mac";
+    const state = activeSummary(devices).toLowerCase();
+    return `${this.phoneLabel()}: ${state}. Sends wait on the phone until Agent Brief opens. Click for details`;
   }
 
   render(cx) {
@@ -111,7 +122,11 @@ export default class Footer extends View {
     this.takePairRequest(cx);
     const t = theme();
     const collapsed = narrow();
-    const paired = this.paired().length > 0;
+    const devices = this.paired();
+    const paired = devices.length > 0;
+    const connected = devices.some((d) => d.connected);
+    const dot = () => div().size(6).rounded_full().flex_none().when(connected, (el) => el.bg(t.done)).when(!connected, (el) => el.border(1).border_color(t.dim));
+    const state = h_flex().flex_none().gap(6).items_center().text_size(11.5).text_color(connected ? t.done : t.dim).child(dot()).child(activeSummary(devices));
     const row = (id, icon, label, dim, action, tip = label) => h_flex().id(id).h(28).px(8).gap(9).items_center().rounded(8)
       .when(collapsed, el => el.relative().w(32).px(0).justify_center())
       .tooltip(tip)
@@ -126,6 +141,7 @@ export default class Footer extends View {
       .child(row("machine", "mods/workspace-chrome/plus.svg", "Add machine", true, () => run("mod.open", { name: "machine-add" })))
       .child(row("phone", "mods/hws-footer/phone.svg", this.phoneLabel(), !paired, (_e, cx) => this.clickPhone(cx), this.phoneTip())
         .on_mouse_down("left", (e) => { if (e.bounds) this.rowBounds = e.bounds; })
-        .when(paired && !collapsed, el => el.child(div().size(6).rounded_full().bg(t.done))));
+        .when(paired && !collapsed, el => el.child(state))
+        .when(paired && collapsed, el => el.child(dot().absolute().top(5).right(6))));
   }
 }

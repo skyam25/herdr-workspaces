@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { setup, mount, hwsCalls, textOf } from "./harness.mjs";
-import { seenText, pairedText, popupSize } from "../hws-footer/phones.js";
+import { seenText, pairedText, popupSize, bodyHeight } from "../hws-footer/phones.js";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -49,14 +49,15 @@ test("with no phone paired a click opens the Pair phone tab and no popup", async
 });
 
 test("with a phone paired a click opens the Phones popup above the row", async () => {
-  const H = world({ hws: { "phone status": status([device("d1", "iPhone", 30_000)]) } });
+  const answer = status([device("d1", "iPhone", 30_000)]);
+  const H = world({ hws: { "phone status": answer } });
   const m = await mount("hws-footer", undefined);
   findNode(m.render(), "phone").handlers.on_mouse_down_left({ bounds: { x: 8, y: 700, width: 200, height: 28 } });
   await m.click("phone");
   assert.equal(args(H).includes("phone pair --json"), false);
   const size = popupSize(status([device("d1", "iPhone", 0)]));
-  assert.deepEqual(H.overlays, [{ mod: "hws-footer", kind: "popup", ...size, at: { x: 8, y: 700 - size.height - 4 }, props: { view: "phones" } }]);
-  assert.equal(m.view.phoneTip(), "iPhone paired. Click to see your paired phones");
+  assert.deepEqual(H.overlays, [{ mod: "hws-footer", kind: "popup", ...size, at: { x: 8, y: 700 - size.height - 4 }, props: { view: "phones", status: answer } }]);
+  assert.equal(m.view.phoneTip(), "iPhone: active. Sends wait on the phone until Agent Brief opens. Click for details");
 });
 
 test("the collapsed rail opens the same popup beside the rail", async () => {
@@ -80,31 +81,75 @@ test("a click before the row has painted opens the popup at the pointer", async 
   assert.equal(H.overlays[0].at, "pointer");
 });
 
+test("a phone gone quiet reads Idle on the row, with a ring in place of the dot", async () => {
+  world({ hws: { "phone status": status([device("d1", "iPhone", 4 * 60 * MINUTE)]) } });
+  const m = await mount("hws-footer", undefined);
+  assert.equal(m.text(), "Settings | Add machine | iPhone | Idle");
+  assert.equal(m.view.phoneTip(), "iPhone: idle. Sends wait on the phone until Agent Brief opens. Click for details");
+});
+
+test("the row reads status once a minute, so it notices the phone come back", async () => {
+  let answer = status([device("d1", "iPhone", 4 * 60 * MINUTE)]);
+  const H = world({ hws: { "phone status": () => answer } });
+  const m = await mount("hws-footer", undefined);
+  assert.match(m.text(), /Idle$/);
+  answer = status([device("d1", "iPhone", 10_000)]);
+  await m.fireTimer(60_000);
+  assert.match(m.text(), /iPhone \| Active$/);
+  assert.equal(args(H).filter((a) => a === "phone status --json").length, 2);
+});
+
+test("with no phone paired the minute check runs no hws", async () => {
+  const H = world({ hws: { "phone status": NO_PHONE } });
+  const m = await mount("hws-footer", undefined);
+  await m.fireTimer(60_000);
+  assert.equal(args(H).filter((a) => a === "phone status --json").length, 1);
+});
+
 // The Phones popup
 
-test("one connected phone shows Connected, when it paired and the done dot", async () => {
+test("an active phone shows Active now, when it paired and the done dot", async () => {
   world({ hws: { "phone status": status([device("d1", "iPhone", 30_000, 3 * DAY)]) } });
   const m = await mount("hws-footer", POPUP);
   const text = m.text();
-  assert.match(text, /^Phones \| iPhone \| Connected · Paired \w{3} \d+/);
-  assert.match(text, /Listener running · Nothing waiting \| Pair another phone or iPad$/);
+  assert.match(text, /^Phones \| iPhone \| Active now \| Paired \w{3} \d+ \| Forget/);
+  assert.match(text, /Forget \| Nothing waiting on the phone \| Pair another phone or iPad$/);
+  assert.doesNotMatch(text, /Sends wait on the phone/);
   const dot = findNode(m.render(), "phone-d1").children[0].node.children[0].node;
   assert.equal(dot.bg, "color:done");
   assert.ok(m.clickable("forget-d1"));
 });
 
-test("a phone seen long ago shows its seen time and no done dot", async () => {
+test("a phone seen long ago says Idle, when it was last active and that sends wait for it", async () => {
   world({ hws: { "phone status": status([device("d1", "iPad", 10 * MINUTE, 0)]) } });
   const m = await mount("hws-footer", POPUP);
-  assert.match(m.text(), /iPad \| Seen 10 minutes ago · Paired today/);
+  assert.match(m.text(), /^Phones \| iPad \| Idle · last active 10 minutes ago \| Paired today \| Forget \| Sends wait on the phone until Agent Brief opens\./);
   const dot = findNode(m.render(), "phone-d1").children[0].node.children[0].node;
   assert.equal(dot.bg, undefined);
+});
+
+test("the body has a fixed height, because Herdr sizes a popup to its content", async () => {
+  const answer = status([device("d1", "iPhone", 4 * 60 * MINUTE)]);
+  world({ hws: { "phone status": answer } });
+  const m = await mount("hws-footer", { ...POPUP, status: answer });
+  const body = findNode(m.render(), "phones-body");
+  assert.ok(body.h > 0);
+  assert.equal(body.h, bodyHeight(answer, null));
+  assert.equal(popupSize(answer).height - body.h, popupSize(status([])).height - bodyHeight(status([]), null), "the popup's height is its chrome plus the body");
+});
+
+test("the popup opens on the footer's status, so it never starts at Reading", async () => {
+  const answer = status([device("d1", "iPhone", 30_000)]);
+  world({ hws: { "phone status": { fail: "slow" } } });
+  const m = await mount("hws-footer", { ...POPUP, status: answer });
+  assert.match(m.text(), /^Phones \| iPhone \| Active now/);
 });
 
 test("two phones each get a row and a Forget", async () => {
   world({ hws: { "phone status": status([device("d1", "iPhone", 30_000), device("d2", "iPad", 2 * DAY)]) } });
   const m = await mount("hws-footer", POPUP);
-  assert.match(m.text(), /iPhone \| Connected · .* \| iPad \| Seen (2 days ago|yesterday) · /);
+  assert.match(m.text(), /^Phones \| 1 of 2 active \| iPhone \| Active now \| .* \| iPad \| Idle · last active (2 days ago|yesterday) \| /);
+  assert.doesNotMatch(m.text(), /Sends wait on the phone/, "the hint shows only when no phone is active");
   assert.ok(m.clickable("forget-d1") && m.clickable("forget-d2"));
 });
 
@@ -120,7 +165,7 @@ test("Forget asks in place, and only Forget runs hws phone forget", async () => 
     },
   });
   const footer = await mount("hws-footer", undefined);
-  assert.equal(footer.text(), "Settings | Add machine | iPhone, iPad");
+  assert.equal(footer.text(), "Settings | Add machine | iPhone, iPad | 1 of 2 active");
   const m = await mount("hws-footer", POPUP);
   await m.click("forget-d2");
   assert.match(m.text(), /Forget iPad\? \| Cancel \| Forget/);
@@ -138,7 +183,7 @@ test("Forget asks in place, and only Forget runs hws phone forget", async () => 
   assert.ok(args(H).includes("phone forget d2 --json"));
   assert.equal(args(H).at(-1), "phone status --json", "the popup reloads after Forget");
   assert.equal(m.has("phone-d2"), false);
-  assert.equal(footer.text(), "Settings | Add machine | iPhone", "the footer row follows the popup's reload");
+  assert.equal(footer.text(), "Settings | Add machine | iPhone | Active", "the footer row follows the popup's reload");
 });
 
 test("a failed Forget says so and keeps the phone", async () => {
@@ -150,13 +195,13 @@ test("a failed Forget says so and keeps the phone", async () => {
   assert.ok(m.has("phone-d1"));
 });
 
-test("waiting hand-offs show under the listener line, five at most", async () => {
+test("waiting hand-offs show under the waiting line, five at most", async () => {
   const handoffs = Array.from({ length: 7 }, (_, i) => ({ id: `h${i}`, sessionId: `p${i}`, sessionLabel: "demo · Claude Code", page: `docs/page-${i}.html`, boardName: `ipad-h${i}`, createdAt: 1, state: "open" }));
   handoffs[1] = { id: "h1", sessionId: "p1", sessionLabel: "api · Codex", fromBoard: "flow", boardName: "ipad-h1", createdAt: 1, state: "open" };
   world({ hws: { "phone status": status([device("d1", "iPhone", 30_000)], handoffs) } });
   const m = await mount("hws-footer", POPUP);
   const text = m.text();
-  assert.match(text, /Listener running · 7 waiting on the phone \| page-0\.html · demo · Claude Code \| flow · api · Codex \| page-2\.html/);
+  assert.match(text, /7 pages waiting on the phone \| page-0\.html · demo · Claude Code \| flow · api · Codex \| page-2\.html/);
   assert.match(text, /page-4\.html · demo · Claude Code \| 2 more \| Pair another/);
   assert.doesNotMatch(text, /page-5/);
   assert.ok(popupSize(status([device("d1", "iPhone", 0)], handoffs)).height > popupSize(status([device("d1", "iPhone", 0)])).height);
@@ -165,7 +210,7 @@ test("waiting hand-offs show under the listener line, five at most", async () =>
 test("no phone paired reads plainly and offers Pair a phone", async () => {
   world({ hws: { "phone status": NO_PHONE } });
   const m = await mount("hws-footer", POPUP);
-  assert.equal(m.text(), "Phones | No phone is paired. | Listener not running | Pair a phone or iPad");
+  assert.equal(m.text(), "Phones | No phone is paired. | This Mac isn't listening for phones | Pair a phone or iPad");
 });
 
 test("a failed status call says so, and the next poll recovers", async () => {
@@ -176,7 +221,7 @@ test("a failed status call says so, and the next poll recovers", async () => {
 
   answer = status([device("d1", "iPhone", 30_000)]);
   await m.fireTimer(3000);
-  assert.match(m.text(), /^Phones \| iPhone \| Connected/);
+  assert.match(m.text(), /^Phones \| iPhone \| Active now/);
   assert.doesNotMatch(m.text(), /Couldn't read/);
 });
 
@@ -208,14 +253,14 @@ test("Pair another closes the popup and the footer pairs with its usual polling"
 
   answer = status([device("d1", "iPhone", 30_000), device("d2", "iPad", 0, 0)]);
   await footer.fireTimer(3000);
-  assert.equal(footer.text(), "Settings | Add machine | iPhone, iPad");
+  assert.equal(footer.text(), "Settings | Add machine | iPhone, iPad | Active");
   assert.equal(footer.timers.find((t) => t.ms === 3000).cancelled, true);
 });
 
 test("the footer keeps its three rows and the popup draws no footer rows", async () => {
   world({ hws: { "phone status": status([device("d1", "iPhone", 30_000)]) } });
   const footer = await mount("hws-footer", undefined);
-  assert.equal(footer.text(), "Settings | Add machine | iPhone");
+  assert.equal(footer.text(), "Settings | Add machine | iPhone | Active");
   const popup = await mount("hws-footer", POPUP);
   assert.equal(textOf(popup.render()).includes("Settings"), false);
 });
