@@ -205,6 +205,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws phone status` | Prints `{running,paired,devices,handoffs}`, each device `{id,name,lastSeen,pairedAt}`. Starts the listener when a phone is paired, and never otherwise |
 | `hws phone forget NAME\|ID` | Revokes one paired phone |
 | `hws phone stop` | Quits the listener |
+| `hws phone targets` | Lists the terminals that run an agent now, as `{targets:[{id,label}]}`. The listener runs it when a phone asks where a whiteboard can go |
+| `hws phone accept --terminal T [--space S]` | Called by the listener. Opens a send of type `board` and title `Whiteboard` for a whiteboard the phone started, tied to T. Fails when T sits at a shell or has ended |
 | `hws phone deliver --send P --bundle DIR` | Called by the listener. Files DIR as an artifact and delivers it. See [Phone](#phone) |
 | `hws artifact list [--workspace W]` | Artifacts, including those of retired throwaways when W is absent |
 | `hws artifact set ID [--status draft\|current\|superseded] [--supersedes ID]` | Changes an artifact in an open workspace and prints its record. Needs one of the two flags. `--supersedes` must name another artifact of the same workspace, and an empty value clears it |
@@ -557,9 +559,9 @@ Herdr resends a pane's whole image for each change to the page, so a surface in 
 | `prefers-reduced-motion` reads `reduce` | The app's page and every review page |
 | A hover reaches the page after the pointer rests for 90 ms. A press, a drag and a wheel turn arrive at once | Every page |
 | The note footer's Board chip and Open board are hidden, because a surface has no boards of its own | Notes |
+| The page draws at most 30 times a second, set by `PIXEL_FPS` in `surface/run.sh` | Every page |
 
 ## Own window
-| The page draws at most 30 times a second, set by `PIXEL_FPS` in `surface/run.sh` | Every page |
 
 `hws surface open` shows a board or a note in an ordinary window that other windows can cover, and a page too with `--window`. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The window draws the page directly, with no Pixel stream. The surface record has `pane: null`, `host`, that terminal's address, and `file` when the surface shows one.
 
@@ -644,7 +646,7 @@ The Agent Brief app on an iPad or iPhone pairs with Herdr as one more host. `sur
 | `POST /forget` | Body `{id}` |
 | `POST /stop` | Quits |
 
-A send has an id `p<hex>` and a record at `<root>/phone/sends/<id>.json` with its workspace, terminal, type and file. Records and board copies older than 90 days go when a later send runs.
+A send has an id `p<hex>` and a record at `<root>/phone/sends/<id>.json` with its workspace, terminal, type and file. A send that `hws phone accept` opened for a whiteboard has no file. Records and board copies older than 90 days go when a later send runs.
 
 | Sent | Phone shows | Root |
 |---|---|---|
@@ -653,6 +655,8 @@ A send has an id `p<hex>` and a record at `<root>/phone/sends/<id>.json` with it
 | Artifact id | The artifact's file, or its `board.excalidraw`, `index.html` or only `.html` | As above |
 
 The listener never serves a path with a segment starting with a dot. The phone cannot open Markdown, so render a note to HTML first.
+
+A whiteboard starts on the phone with nothing sent from the Mac. Send on the phone asks each paired host `GET /v1/targets`, the person picks a session, and the phone opens a hand-off for it with `POST /v1/handoffs {target,prompt?}`. On Herdr the listener runs `hws phone targets` and `hws phone accept --terminal T` for those, so the hand-off's session is a send id as for `hws phone send`. Only the phone that opened such a hand-off lists it. From there the answer follows the steps below, and its prompt starts `From the phone, a new whiteboard.`
 
 An answer from the phone follows these steps.
 

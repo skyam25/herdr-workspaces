@@ -10,7 +10,7 @@ import { contentType, injectOverlay, resolveReviewPath } from '../main/review-pr
 import { cleanReview, isReviewable } from '../shared/review';
 import type { Handoff, HandoffRequest, IpadStatus } from '../protocol';
 import type { IpadSheetStatus, Outgoing, SendPayload, TextPayload } from '../shared/ipc';
-import { IPAD_LAN_PORT, pairUrl, type IpadDelivery, type IpadDeliveryResult, type IpadPageDelivery, type LanHandoffDetail } from '../shared/ipad';
+import { IPAD_LAN_PORT, pairUrl, type IpadDelivery, type IpadDeliveryResult, type IpadPageDelivery, type LanHandoffDetail, type LanOpenRequest, type LanTarget } from '../shared/ipad';
 import { ensureCert, type LanCert } from './cert';
 import { boardMark, HandoffStore, publicHandoff, type StoredHandoff } from './handoffs';
 import { lanAddresses, macNames, networkLabel, type Interfaces } from './lan';
@@ -19,6 +19,7 @@ import { PairingStore } from './pairing';
 
 export const NO_LAN = "This Mac isn't on a private network. Join the same Wi-Fi as the iPad, then try again.";
 export const NOT_PAIRED = 'No iPad is paired. On the Mac, choose Pair iPad… from the File menu.';
+export const NO_TARGETS = 'This Mac cannot take a whiteboard from the device. Update it.';
 const UNPAIR_STOP_DELAY_MS = 500;
 
 export interface IpadDeps {
@@ -47,6 +48,10 @@ export interface IpadDeps {
   sessionRoot?(sessionId: string): string | undefined;
   /** Keeps a page review whose session has ended, as a note under that session. */
   fileReview?(sessionId: string, payload: TextPayload): void;
+  /** Live sessions a whiteboard started on the device may go to. Absent, the device is told this Mac cannot take one. */
+  targets?(): Promise<LanTarget[]> | LanTarget[];
+  /** Opens a target for a device's whiteboard and names the session the answer goes to. Throws `not_found` for a target that is gone. */
+  accept?(target: string): Promise<{ sessionId: string; label?: string }> | { sessionId: string; label?: string };
   /** Fires when the sheet's content changes. */
   onStatus?(status: IpadSheetStatus): void;
   /** Fires when an iPad is paired or forgotten. */
@@ -130,7 +135,9 @@ export class Ipad {
             this.publish();
             return { credential: redeemed.credential, macName: this.names().computer };
           },
-          handoffs: () => ({ handoffs: this.handoffs.list({ open: true }).map(publicHandoff) }),
+          handoffs: (deviceId) => ({ handoffs: this.handoffs.list({ open: true, device: deviceId }).map(publicHandoff) }),
+          targets: async () => ({ targets: this.deps.targets ? await this.deps.targets() : [] }),
+          open: (req, deviceId) => this.openForDevice(req, deviceId),
           detail: (id) => this.detail(id),
           page: (id, path) => this.page(id, path),
           deliver: (id, deviceId, delivery) => this.deliver(id, deviceId, delivery),
@@ -251,6 +258,20 @@ export class Ipad {
         ...(req.prompt ? { prompt: req.prompt } : {}),
         page,
         pageRoot: root,
+      }),
+    );
+  }
+
+  /** A blank hand-off for a whiteboard the device started, tied to the session `target` names. */
+  private async openForDevice(req: LanOpenRequest, deviceId: string): Promise<Handoff> {
+    if (!this.deps.accept) throw new BoardError('conflict', NO_TARGETS);
+    const { sessionId, label } = await this.deps.accept(req.target);
+    return publicHandoff(
+      this.handoffs.create({
+        sessionId,
+        sessionLabel: label ?? this.deps.sessionLabel(sessionId),
+        ...(req.prompt ? { prompt: req.prompt } : {}),
+        device: deviceId,
       }),
     );
   }

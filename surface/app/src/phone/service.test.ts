@@ -17,7 +17,7 @@ let exits: number;
 let service: PhoneService;
 let fingerprint = '';
 
-/** Records each call with what the bundle held, then answers as hws would. */
+/** Records each call with what the bundle held, then answers as hws would. Targets and accept answer for one agent terminal, t1. */
 function fakeHws(behaviour = "console.log(JSON.stringify({ message: 'Sent to agent' }));"): string {
   const path = join(dir, 'fake-hws');
   writeFileSync(
@@ -25,8 +25,20 @@ function fakeHws(behaviour = "console.log(JSON.stringify({ message: 'Sent to age
     `#!/usr/bin/env node
 const fs = require('fs');
 const args = process.argv.slice(2);
+const log = (entry) => fs.appendFileSync(${JSON.stringify(join(dir, 'hws.log'))}, JSON.stringify(entry) + '\\n');
+if (args[1] === 'targets') {
+  log({ args });
+  console.log(JSON.stringify({ targets: [{ id: 't1', label: 'demo · Claude Code · t1' }] }));
+  process.exit(0);
+}
+if (args[1] === 'accept') {
+  log({ args });
+  if (args[3] !== 't1') { console.log(JSON.stringify({ error: 'terminal ' + args[3] + ' does not run an agent' })); process.exit(1); }
+  console.log(JSON.stringify({ send: 'p7', label: 'demo · Claude Code · t1', terminal: 't1' }));
+  process.exit(0);
+}
 const bundle = args[args.indexOf('--bundle') + 1];
-fs.appendFileSync(${JSON.stringify(join(dir, 'hws.log'))}, JSON.stringify({ args, files: fs.readdirSync(bundle).sort(), prompt: fs.readFileSync(bundle + '/prompt.md', 'utf8') }) + '\\n');
+log({ args, files: fs.readdirSync(bundle).sort(), prompt: fs.readFileSync(bundle + '/prompt.md', 'utf8') });
 ${behaviour}
 `,
   );
@@ -154,6 +166,37 @@ describe('phone listener', () => {
     const [call] = hwsCalls();
     expect(call.files).toEqual(['board.excalidraw', 'notes.md', 'prompt.md', 'sketch.png']);
     expect(call.prompt).toContain('sketch.png');
+  });
+
+  it('opens a whiteboard the phone starts through hws phone accept, and delivers it to that send', async () => {
+    await begin();
+    const credential = await pair();
+
+    expect(JSON.parse((await phone('GET', '/v1/targets', credential)).text)).toEqual({ targets: [{ id: 't1', label: 'demo · Claude Code · t1' }] });
+    const gone = await phone('POST', '/v1/handoffs', credential, { target: 't9' });
+    expect(gone.status).toBe(404);
+    expect(JSON.parse(gone.text).error).toBe('terminal t9 does not run an agent');
+
+    const opened = await phone('POST', '/v1/handoffs', credential, { target: 't1' });
+    expect(opened.status).toBe(200);
+    const handoff = JSON.parse(opened.text);
+    expect(handoff).toMatchObject({ sessionId: 'p7', sessionLabel: 'demo · Claude Code · t1', state: 'open' });
+    expect((await control('GET', '/status')).json.handoffs.map((h: { id: string }) => h.id)).toEqual([handoff.id]);
+
+    const answer = await phone('POST', `/v1/handoffs/${handoff.id}/deliver`, credential, {
+      pngBase64: PNG,
+      scene: { elements: [] },
+      notes: 'the plan',
+      strokes: [],
+      utterances: [],
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+    });
+    expect(JSON.parse(answer.text).message).toBe('Sent to agent');
+
+    const calls = hwsCalls();
+    expect(calls.map((call: { args: string[] }) => call.args.slice(0, 2))).toEqual([['phone', 'targets'], ['phone', 'accept'], ['phone', 'accept'], ['phone', 'deliver']]);
+    expect(calls.at(-1).args.slice(0, 4)).toEqual(['phone', 'deliver', '--send', 'p7']);
+    expect(calls.at(-1).files).toEqual(['board.excalidraw', 'notes.md', 'prompt.md', 'sketch.png']);
   });
 
   it('tells the phone to retry when hws fails, and keeps no bundle', async () => {

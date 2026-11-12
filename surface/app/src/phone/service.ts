@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import QRCode from 'qrcode';
 import { notFound } from '../board/errors';
 import { Ipad, type IpadDeps } from '../ipad';
+import type { LanTarget } from '../shared/ipad';
 import { macNames } from '../ipad/lan';
 import { readJson } from '../ipad/lan-server';
 import { prepareBundle, runHws } from '../main/surface';
@@ -136,6 +137,22 @@ export function createPhoneService(opts: PhoneOptions): PhoneService {
     },
     send: deliver,
     sessionRoot: (id) => roots.get(id),
+
+    // A whiteboard the phone starts gets a send record from hws, so its answer delivers as any other.
+    targets: async () => {
+      const result = (await runHws(opts.hws, ['phone', 'targets', '--json'])) as unknown as { targets?: LanTarget[] };
+      return result.targets ?? [];
+    },
+    accept: async (target) => {
+      let opened: { send: string; label: string };
+      try {
+        opened = (await runHws(opts.hws, ['phone', 'accept', '--terminal', target, '--json'])) as unknown as typeof opened;
+      } catch (err) {
+        throw notFound((err as Error).message);
+      }
+      labels.set(opened.send, opened.label);
+      return { sessionId: opened.send, label: opened.label };
+    },
     onPairedChange: () => setTimeout(stopIfIdle, SETTLE_MS),
     ...(opts.host ? { host: opts.host } : {}),
     port: opts.port ?? PHONE_LAN_PORT,

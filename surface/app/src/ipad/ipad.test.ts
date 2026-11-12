@@ -9,7 +9,8 @@ import type { Handoff } from '../protocol';
 import { IPAD_MAX_BODY_BYTES, parsePairUrl, type IpadDelivery, type PairLink } from '../shared/ipad';
 import type { SendPayload } from '../shared/ipc';
 import { boardMark } from './handoffs';
-import { Ipad, NOT_PAIRED, NO_LAN, type IpadDeps } from './index';
+import { notFound } from '../board/errors';
+import { Ipad, NOT_PAIRED, NO_LAN, NO_TARGETS, type IpadDeps } from './index';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
 
@@ -508,5 +509,61 @@ describe('page hand-offs', () => {
     expect(reply.body.message).toContain('waits on the Mac as a note');
     expect(sends).toHaveLength(0);
     expect(filed[0]).toMatchObject(['s1', { review: { path: 'site/plan.html' } }]);
+  });
+});
+
+describe('whiteboards started on the device', () => {
+  const withTargets = (over: Partial<IpadDeps> = {}) =>
+    paired({
+      targets: () => [{ id: 's1', label: 'label s1' }],
+      accept: (target) => {
+        if (target !== 's1') throw notFound(`no target ${target}`);
+        return { sessionId: 's1' };
+      },
+      ...over,
+    });
+
+  it('lists the targets the Mac offers', async () => {
+    const { link, credential } = await withTargets();
+    expect((await call(link, 'GET', '/v1/targets', { credential })).body).toEqual({ targets: [{ id: 's1', label: 'label s1' }] });
+    expect((await call(link, 'GET', '/v1/targets')).status).toBe(401);
+  });
+
+  it('offers no targets from a Mac without them, and refuses to open', async () => {
+    const { link, credential } = await paired();
+    expect((await call(link, 'GET', '/v1/targets', { credential })).body).toEqual({ targets: [] });
+    const reply = await call(link, 'POST', '/v1/handoffs', { body: { target: 's1' }, credential });
+    expect(reply.status).toBe(409);
+    expect(reply.body.error).toBe(NO_TARGETS);
+  });
+
+  it('opens a blank hand-off for a target that only the opening device lists, and delivers it as any other', async () => {
+    const { ipad, link, credential, sends } = await withTargets();
+    const opened = await call(link, 'POST', '/v1/handoffs', { body: { target: 's1', prompt: 'from my notes' }, credential });
+    expect(opened.status).toBe(200);
+    const h = opened.body as Handoff;
+    expect(h).toMatchObject({ sessionId: 's1', sessionLabel: 'label s1', prompt: 'from my notes', state: 'open' });
+    expect(h).not.toHaveProperty('device');
+    expect(h).not.toHaveProperty('fromBoard');
+    expect((await call(link, 'GET', '/v1/handoffs', { credential })).body.handoffs).toEqual([h]);
+    expect((await call(link, 'GET', `/v1/handoffs/${h.id}`, { credential })).body.scene).toBeNull();
+
+    const other = await call(link, 'POST', '/v1/pair', { body: { code: parsePairUrl((await ipad.newCode()).url!)!.code, deviceName: 'iPhone' } });
+    expect((await call(link, 'GET', '/v1/handoffs', { credential: other.body.credential })).body.handoffs).toEqual([]);
+    expect(ipad.listHandoffs('s1')).toEqual([h]);
+
+    const reply = await call(link, 'POST', `/v1/handoffs/${h.id}/deliver`, { body: delivery(), credential });
+    expect(reply.body).toEqual({ ok: true, state: 'delivered', message: 'Sent to s1' });
+    expect(sends[0][1]).toBe('s1');
+  });
+
+  it('takes the label the host gives, and refuses a target that is gone or a bad body', async () => {
+    const { link, credential } = await withTargets({ accept: () => ({ sessionId: 'p1', label: 'demo · Claude Code · t1' }) });
+    const h = (await call(link, 'POST', '/v1/handoffs', { body: { target: 't1' }, credential })).body as Handoff;
+    expect(h).toMatchObject({ sessionId: 'p1', sessionLabel: 'demo · Claude Code · t1' });
+    const gone = await withTargets();
+    expect((await call(gone.link, 'POST', '/v1/handoffs', { body: { target: 's9' }, credential: gone.credential })).status).toBe(404);
+    expect((await call(gone.link, 'POST', '/v1/handoffs', { body: { prompt: 'x' }, credential: gone.credential })).status).toBe(400);
+    expect((await call(gone.link, 'POST', '/v1/handoffs', { body: { target: 's1', prompt: 1 }, credential: gone.credential })).status).toBe(400);
   });
 });

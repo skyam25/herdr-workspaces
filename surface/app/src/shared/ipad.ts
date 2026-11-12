@@ -8,6 +8,8 @@
  * GET  /v1/handoffs/:id/page/*  → a file of a page hand-off's project, as is. HTML gets the review overlay.
  * POST /v1/handoffs/:id/deliver  IpadDelivery or IpadPageDelivery → IpadDeliveryResult
  * DELETE /v1/handoffs/:id        → LanRemoveResponse. Removes the hand-off from the Mac and every device.
+ * GET  /v1/targets               → LanTargetsResponse. Live sessions a whiteboard started on the device may go to.
+ * POST /v1/handoffs              LanOpenRequest → Handoff. Opens a blank hand-off for a target. Only the device that opened it lists it.
  * POST /v1/unpair                → UnpairResponse. Removes the calling iPad from this Mac.
  *
  * Other routes send `Authorization: Bearer <credential>`. A bad credential answers 401.
@@ -92,6 +94,23 @@ export interface LanHandoffsResponse {
 export interface LanRemoveResponse {
   /** False when the Mac had no such hand-off, which leaves the same result. */
   removed: boolean;
+}
+
+/** A live session a whiteboard started on the device may be sent to. */
+export interface LanTarget {
+  id: string;
+  label: string;
+}
+
+export interface LanTargetsResponse {
+  /** Empty when nothing on the Mac can take a whiteboard now. */
+  targets: LanTarget[];
+}
+
+/** A blank board the device started on its own, to send to `target`. */
+export interface LanOpenRequest {
+  target: string;
+  prompt?: string;
 }
 
 export interface LanHandoffDetail {

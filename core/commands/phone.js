@@ -5,7 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { findArtifact, freeName, isInside, linkFor, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, findTerminal, isIdleShell, isTerminalAlive, listLive, requireLive, runDetached, sendText, terminalInfo, windowStatus } from '../herdr.js';
+import { act, findTerminal, isAgentTerminal, isIdleShell, isTerminalAlive, listLive, requireLive, runDetached, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { ensureStandaloneManifest, manifestOfSpace, readManifest, writeJsonAtomic } from '../manifest.js';
 import { HWS_BIN, PHONE_HOST, home, phoneDir, phoneSocket, stateRoot } from '../paths.js';
 import { requireCallingTerminal, requireFlag } from '../resolve.js';
@@ -160,6 +160,36 @@ export async function phoneSend(flags, [ref]) {
   return { data: { ...handoff, send: id, type: target.type, file: target.file }, text: `${title} is on your phone. Send there returns to terminal ${terminal}.` };
 }
 
+// Terminals that run an agent now, for a whiteboard the phone starts. Each costs one hc get.
+export function phoneTargets() {
+  const live = requireLive();
+  const targets = [];
+  for (const space of live.spaces) {
+    for (const tab of space.tabs ?? []) {
+      for (const record of tab.terminals ?? []) {
+        if (!isAgentTerminal(terminalInfo(record.terminal))) continue;
+        targets.push({ id: record.terminal, label: windowOwnerLabel(live, record.terminal, { space: space.id }) });
+      }
+    }
+  }
+  return { data: { targets }, text: targets.length ? targets.map((item) => `${item.id}  ${item.label}`).join('\n') : 'No terminal runs an agent.' };
+}
+
+// Opens a send for a whiteboard the phone starts, as phone send does for a file. The listener calls this.
+export function phoneAccept(flags) {
+  const terminal = requireFlag(flags, 'terminal');
+  const live = requireLive();
+  if (!isAgentTerminal(terminalInfo(terminal))) throw new HwsError(`terminal ${terminal} does not run an agent`);
+  const space = flags.space ?? findTerminal(live, terminal)?.space.id;
+  const workspace = (space && manifestOfSpace(space)) ?? ensureStandaloneManifest();
+
+  pruneOld('sends');
+  const id = newId('p');
+  const label = windowOwnerLabel(live, terminal, { space });
+  writeJsonAtomic(sendRecord(id), { id, workspace: workspace.id, terminal, label, type: 'board', title: 'Whiteboard', createdAt: Date.now() });
+  return { data: { send: id, label, terminal }, text: `Whiteboard ${id} answers to terminal ${terminal}.` };
+}
+
 function savedAnswer(artifact, why) {
   return { data: { delivered: false, artifact: artifact.id, link: linkFor(artifact.prompt), message: `Saved as artifact ${artifact.id}, because ${why}.` } };
 }
@@ -173,7 +203,8 @@ export function phoneDeliver(flags) {
   assertBundle(bundle);
 
   const promptFile = join(bundle, 'prompt.md');
-  writeFileSync(promptFile, `From the phone, about ${send.file}.\n\n${readFileSync(promptFile, 'utf8')}`);
+  const about = send.file ? `about ${send.file}` : 'a new whiteboard';
+  writeFileSync(promptFile, `From the phone, ${about}.\n\n${readFileSync(promptFile, 'utf8')}`);
   const manifest = readManifest(send.workspace) ?? ensureStandaloneManifest();
   const artifact = archiveBundle({ manifest, surface: { id: send.id, type: send.type, title: `Phone: ${send.title}`, terminal: send.terminal } }, bundle);
 

@@ -140,6 +140,7 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 - [ ] Serve page surfaces, which load from the Electron-only review scheme today.
 - [ ] Test notes, Talk and the microphone in WebKit.
 - [ ] Scan the pairing code with a real iPhone and iPad, then send a page and a board and press Send on the device.
+- [ ] Start a whiteboard on the phone, press Send, pick a Herdr terminal and check the prompt lands there. Only the listener test and the simulator test have run it. `hws phone targets` lists `herdr-app ls` terminals, so a flipped agent is not offered yet.
 - [ ] Replace the remaining Electron APIs in `src/main`, so the host is a plain Node process.
 - [ ] Revisit a board inside the pane if Herdr ships a browser mod that can load a local app. Patching Herdr is ruled out.
 - [ ] Add the host address to the manifest through `hws`.
@@ -163,8 +164,8 @@ Measured on 2026-11-12 in a separate Herdr 0.1.15 window of 1994 by 1211 points,
 
 - [x] Stop the caret blink, transitions and hover sweeps in a pane. In the pty an idle note went from 2 whole-pane resends a second to none.
 - [ ] Open a note and a page in the real window and confirm an idle pane no longer flickers. Only the pty has shown it.
-- [ ] Set `TERMINAL_BROWSER_PRESENT=patched` in `surface/run.sh` once Herdr fixes [#500](https://github.com/herdrdev/herdr-app/issues/500). Pixel then sends only the changed region, which cut typing from 2.4 MB/s to 0.01 MB/s in the pty. Herdr drops the pixel offset the patches are placed with, so they land up to a cell off today.
 - [x] Draw the page at 30 frames a second in a pane, through `PIXEL_FPS` in `surface/run.sh`. Pixel's CPU use fell from 54% of a core to 28% while a page scrolled, and the pane showed the same 5 frames a second.
+- [ ] Set `TERMINAL_BROWSER_PRESENT=patched` in `surface/run.sh` once Herdr fixes [#500](https://github.com/herdrdev/herdr-app/issues/500). Pixel then sends only the changed region, which cut typing from 2.4 MB/s to 0.01 MB/s in the pty. Herdr drops the pixel offset the patches are placed with, so they land up to a cell off today.
 - [ ] Watch Herdr [#508](https://github.com/herdrdev/herdr-app/pull/508) and [#704](https://github.com/herdrdev/herdr-app/pull/704). They keep the old image on screen during an update and take frames in shared memory, and Pixel uses both with no change here.
 
 ### 10. Test the new UI homes by hand

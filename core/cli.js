@@ -9,7 +9,7 @@ import { close, place, promote, prune, resume, setWorkspace } from './commands/l
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
 import { outputs } from './commands/outputs.js';
 import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
-import { phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop } from './commands/phone.js';
+import { phoneAccept, phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop, phoneTargets } from './commands/phone.js';
 import { find, reopen } from './commands/retired.js';
 import { decisionAdd, decisionList } from './commands/decision.js';
 import { tidyApply, tidyStart, tidyStatus, tidyStop } from './commands/tidy.js';
@@ -82,6 +82,8 @@ const ROUTES = [
   { path: ['phone', 'pair'], run: phonePair, options: { tab: flag } },
   { path: ['phone', 'send'], run: phoneSend, options: { prompt: text, terminal: text, space: text }, positionals: 1 },
   { path: ['phone', 'status'], run: phoneStatus, options: {} },
+  { path: ['phone', 'targets'], run: phoneTargets, options: {} },
+  { path: ['phone', 'accept'], run: phoneAccept, options: { terminal: text, space: text } },
   { path: ['phone', 'forget'], run: phoneForget, options: {}, positionals: 1 },
   { path: ['phone', 'stop'], run: phoneStop, options: {} },
   { path: ['phone', 'deliver'], run: phoneDeliver, options: { send: text, bundle: text } },

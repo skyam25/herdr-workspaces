@@ -339,3 +339,52 @@ test('phone pair reports the reason the listener gives no code', async (t) => {
   assert.equal(result.code, 1);
   assert.match(result.stderr, /pairing is busy/);
 });
+
+test('phone targets lists the terminals that run an agent, with their labels', async (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const terminal = manifest.terminals[0].terminal;
+  const empty = box.json(['phone', 'targets']);
+  assert.deepEqual(empty.targets, []);
+
+  box.setState({ hc: { [terminal]: { foreground: { name: 'claude', argv: ['claude'] } } } });
+  const { targets } = box.json(['phone', 'targets']);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, terminal);
+  assert.match(targets[0].label, new RegExp(`^demo · .*${terminal}$`));
+});
+
+test('phone accept opens a send for a whiteboard, and its answer names the whiteboard', async (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const terminal = manifest.terminals[0].terminal;
+  box.setState({ hc: { [terminal]: { foreground: { name: 'claude', argv: ['claude'] } } } });
+
+  const opened = box.json(['phone', 'accept', '--terminal', terminal]);
+  assert.match(opened.send, /^p[0-9a-f]{6}$/);
+  assert.equal(sendRecord(box, opened.send).terminal, terminal);
+  assert.equal(sendRecord(box, opened.send).workspace, manifest.id);
+  assert.equal(sendRecord(box, opened.send).file, undefined);
+  box.clearCalls();
+
+  const bundle = box.bundle('answer', 'Look at the board.\n');
+  const result = box.json(['phone', 'deliver', '--send', opened.send, '--bundle', bundle]);
+  const sends = box.actions().filter((call) => call[1] === 'send');
+
+  assert.equal(result.delivered, true);
+  assert.match(sends[0][3], /^From the phone, a new whiteboard\./);
+  const artifact = box.manifest(manifest.id).artifacts.at(-1);
+  assert.equal(artifact.title, 'Phone: Whiteboard');
+  assert.equal(artifact.type, 'board');
+});
+
+test('phone accept refuses a terminal that sits at a shell', async (t) => {
+  const box = sandbox(t);
+  const terminal = box.app().terminals[0].terminal;
+
+  const result = box.hws(['phone', 'accept', '--terminal', terminal]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /does not run an agent/);
+});

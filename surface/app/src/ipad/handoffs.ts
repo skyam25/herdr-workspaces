@@ -18,6 +18,8 @@ export interface StoredHandoff extends Handoff {
   baseMark?: string;
   /** The project folder a page hand-off's files load from. */
   pageRoot?: string;
+  /** The device that opened it for a whiteboard of its own. Other devices never list it. */
+  device?: string;
   /** Each iPad's answer, by device id. */
   results?: Record<string, IpadDeliveryResult>;
   settledAt?: number;
@@ -38,7 +40,7 @@ export function boardMark(board: { scene: string | null; notes: string }): strin
 }
 
 export function publicHandoff(h: StoredHandoff): Handoff {
-  const { baseBoard: _base, baseMark: _mark, pageRoot: _root, results: _results, settledAt: _settled, ...rest } = h;
+  const { baseBoard: _base, baseMark: _mark, pageRoot: _root, device: _device, results: _results, settledAt: _settled, ...rest } = h;
   return rest;
 }
 
@@ -61,7 +63,7 @@ export class HandoffStore {
     if (this.prune()) this.save();
   }
 
-  create(fields: { sessionId: string; sessionLabel: string; prompt?: string; baseBoard?: string; baseMark?: string; page?: string; pageRoot?: string }): StoredHandoff {
+  create(fields: { sessionId: string; sessionLabel: string; prompt?: string; baseBoard?: string; baseMark?: string; page?: string; pageRoot?: string; device?: string }): StoredHandoff {
     const id = randomBytes(4).toString('hex');
     const handoff: StoredHandoff = {
       id,
@@ -75,6 +77,7 @@ export class HandoffStore {
       ...(fields.baseBoard ? { baseBoard: fields.baseBoard } : {}),
       ...(fields.baseMark ? { baseMark: fields.baseMark } : {}),
       ...(fields.page && fields.pageRoot ? { page: fields.page, pageRoot: fields.pageRoot } : {}),
+      ...(fields.device ? { device: fields.device } : {}),
     };
     this.items.set(id, handoff);
     this.save();
@@ -85,10 +88,11 @@ export class HandoffStore {
     return this.items.get(id);
   }
 
-  /** Newest first. */
-  list(filter: { sessionId?: string; open?: boolean } = {}): StoredHandoff[] {
+  /** Newest first. With `device`, leaves out whiteboards other devices opened. */
+  list(filter: { sessionId?: string; open?: boolean; device?: string } = {}): StoredHandoff[] {
     return [...this.items.values()]
       .filter((h) => (filter.sessionId === undefined || h.sessionId === filter.sessionId) && (!filter.open || h.state === 'open'))
+      .filter((h) => filter.device === undefined || !h.device || h.device === filter.device)
       .sort((a, b) => b.createdAt - a.createdAt);
   }
 

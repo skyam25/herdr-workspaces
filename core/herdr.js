@@ -164,6 +164,11 @@ export function isLiveChild(terminal, parent) {
   return isLive(info) && info.parent === parent;
 }
 
+// A live terminal whose foreground program is not a shell.
+export function isAgentTerminal(info) {
+  return isLive(info) && !isIdleShell(info);
+}
+
 export function isIdleShell(info) {
   if (!isLive(info)) return false;
   const program = info.foreground?.name ?? info.foreground?.argv?.[0] ?? info.argv?.[0] ?? '';

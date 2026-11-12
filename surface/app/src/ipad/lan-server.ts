@@ -6,7 +6,8 @@ import type { AddressInfo } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import type { ErrorBody } from '../protocol';
 import type { StrokeEvent } from '../voice/types';
-import { IPAD_MAX_BODY_BYTES, IPAD_PAGE_SEGMENT, type IpadDelivery, type IpadDeliveryResult, type IpadPageDelivery, type LanHandoffDetail, type LanHandoffsResponse, type PairResponse } from '../shared/ipad';
+import { IPAD_MAX_BODY_BYTES, IPAD_PAGE_SEGMENT, type IpadDelivery, type IpadDeliveryResult, type IpadPageDelivery, type LanHandoffDetail, type LanHandoffsResponse, type LanOpenRequest, type LanTargetsResponse, type PairResponse } from '../shared/ipad';
+import type { Handoff } from '../protocol';
 import type { LanCert } from './cert';
 import { isLocalPeer, stripMapped, type Interfaces } from './lan';
 import { DELIVER_RATE, MAX_SMALL_BODY_BYTES, PAIR_RATE, RateLimiter, REQUEST_RATE } from './limits';
@@ -16,7 +17,11 @@ export interface LanBackend {
   verify(credential: string | undefined): { id: string } | undefined;
   /** Undefined for a used or expired code. */
   pair(code: string, deviceName: string, installId?: string): PairResponse | undefined;
-  handoffs(): LanHandoffsResponse;
+  /** The hand-offs this device may see. */
+  handoffs(deviceId: string): LanHandoffsResponse;
+  targets(): Promise<LanTargetsResponse> | LanTargetsResponse;
+  /** Opens a blank hand-off for a whiteboard the device started. Throws `not_found` for a target that is gone. */
+  open(req: LanOpenRequest, deviceId: string): Promise<Handoff>;
   /** Throws a `not_found` error for an unknown hand-off. */
   detail(id: string): LanHandoffDetail;
   deliver(id: string, deviceId: string, delivery: IpadDelivery | IpadPageDelivery): Promise<IpadDeliveryResult>;
@@ -174,7 +179,14 @@ export function createLanServer(opts: LanServerOptions): LanServer {
       backend.unpair(device.id);
       return { ok: true };
     }
-    if (root === 'handoffs' && parts.length === 2 && method === 'GET') return backend.handoffs();
+    if (root === 'handoffs' && parts.length === 2 && method === 'GET') return backend.handoffs(device.id);
+    if (root === 'targets' && parts.length === 2 && method === 'GET') return backend.targets();
+    if (root === 'handoffs' && parts.length === 2 && method === 'POST') {
+      const body = await readJson(req, MAX_SMALL_BODY_BYTES);
+      if (!isRecord(body) || typeof body.target !== 'string' || !body.target) throw bad('body.target is required');
+      if (body.prompt !== undefined && typeof body.prompt !== 'string') throw bad('prompt must be a string');
+      return backend.open({ target: body.target, ...(body.prompt ? { prompt: body.prompt } : {}) }, device.id);
+    }
     if (root === 'handoffs' && parts.length === 3 && method === 'GET') return backend.detail(id);
     if (root === 'handoffs' && parts.length === 3 && method === 'DELETE') return { removed: backend.remove(id) };
     if (root === 'handoffs' && parts.length >= 5 && verb === IPAD_PAGE_SEGMENT && method === 'GET') {
