@@ -138,7 +138,8 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 
 - [x] Serve board surfaces over loopback behind `HWS_SURFACE_WEB=1`. `node scripts/verify-web.mjs` in `surface/app` checks WebKit and Chromium.
 - [ ] Ask on [#853](https://github.com/herdrdev/herdr-app/issues/853) whether the official browser mod can load a local app. This decides the host. #218 was closed as not planned on 2026-11-05.
-- [ ] Serve page surfaces, which load from the Electron-only review scheme today.
+- [x] Serve page surfaces over loopback, one port per project folder. `node scripts/verify-web.mjs` pins a comment in WebKit and Chromium and checks the review and its picture.
+- [ ] Give a dev server's page the overlay in a web view, and give feedback workspace snapshots a picture there.
 - [ ] Test notes, Talk and the microphone in WebKit.
 - [ ] Scan the pairing code with a real iPhone and iPad, then send a page and a board and press Send on the device.
 - [ ] Start a whiteboard on the phone, press Send, pick a Herdr terminal and check the prompt lands there. Only the listener test and the simulator test have run it. `hws phone targets` offers agents flipped to Chat too, tested with fakes only.

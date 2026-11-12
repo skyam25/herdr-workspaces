@@ -34,7 +34,7 @@ export interface SessionFilesDeps {
   send: (channel: string, ...args: unknown[]) => void;
   opener: Opener;
   /** The review pane's address for an HTML file in `cwd`. */
-  reviewUrlFor: (cwd: string, path: string) => string;
+  reviewUrlFor: (cwd: string, path: string) => string | Promise<string>;
 }
 
 /** Undo steps kept per file. */
@@ -288,7 +288,7 @@ export class SessionFiles {
   }
 
   /** The address the review pane loads, after the same checks as opening the file. */
-  reviewUrl(sessionId: string, path: unknown): string {
+  async reviewUrl(sessionId: string, path: unknown): Promise<string> {
     // A dev server's page loads as it is. Main adds the overlay once it loads.
     if (typeof path === 'string' && isLocalUrl(path)) {
       this.cwd(sessionId);

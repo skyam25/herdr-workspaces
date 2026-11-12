@@ -114,11 +114,16 @@ export async function serveReview(roots: ReviewRoots, overlayFile: string, reque
   const url = new URL(request.url);
   const root = roots.root(url.hostname);
   if (!root) return notFound();
+  return serveReviewPath(root, overlayFile, url.pathname);
+}
+
+/** Answers a GET for `pathname` under the project at `root`, with the overlay in HTML pages. */
+export async function serveReviewPath(root: string, overlayFile: string, pathname: string): Promise<Response> {
   const headers = { 'cache-control': 'no-store' };
-  if (url.pathname === OVERLAY_PATH) {
+  if (pathname === OVERLAY_PATH) {
     return new Response(new Uint8Array(await readFile(overlayFile)), { headers: { ...headers, 'content-type': TYPES['.js']! } });
   }
-  const file = resolveReviewPath(root, url.pathname);
+  const file = resolveReviewPath(root, pathname);
   if (!file) return notFound();
   let data: Buffer;
   try {

@@ -1,4 +1,4 @@
-// Proves a surface works in a plain web view, against the fake hws.
+// Proves a board and a review page work in a plain web view, against the fake hws.
 //
 //   node scripts/verify-web.mjs [webkit] [chromium]
 //
@@ -6,7 +6,7 @@
 // Exits nonzero when a check fails.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from '@playwright/test';
@@ -35,7 +35,7 @@ async function until(test, timeoutMs, what) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-function startSurface(id) {
+function startSurface(id, { type = 'board', title = 'flow', file = () => '' } = {}) {
   const root = join(ROOT, id);
   rmSync(root, { recursive: true, force: true });
   mkdirSync(join(root, 'data'), { recursive: true });
@@ -48,9 +48,9 @@ function startSurface(id) {
     HWS_SURFACE_ID: id,
     HWS_WORKSPACE_ID: 'spc1',
     HWS_TERMINAL: 't1',
-    HWS_SURFACE_TYPE: 'board',
-    HWS_SURFACE_TITLE: 'flow',
-    HWS_SURFACE_FILE: '',
+    HWS_SURFACE_TYPE: type,
+    HWS_SURFACE_TITLE: title,
+    HWS_SURFACE_FILE: file(root),
     HWS_FOLDER: root,
     COMPANION_SOCKET: `/tmp/hws-w-${id}.sock`,
     COMPANION_DATA_DIR: join(root, 'data'),
@@ -151,7 +151,73 @@ async function runEngine(name) {
   }
 }
 
-for (const name of process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(ENGINES)) await runEngine(name);
+// A review page in the surface's frame, served over loopback with the overlay.
+function demoPage(root) {
+  const folder = join(root, 'proj');
+  mkdirSync(folder, { recursive: true });
+  const file = join(folder, 'demo.html');
+  writeFileSync(
+    file,
+    '<!doctype html><body style="font:20px -apple-system;padding:40px"><h1>Review page</h1>' +
+      '<p id="p"></p><script>document.getElementById("p").textContent = "companion: " + typeof window.companion;</script></body>',
+  );
+  return file;
+}
+
+async function runPage(name) {
+  const surface = startSurface(`${name}page`, { type: 'page', title: 'demo', file: demoPage });
+  const browser = await ENGINES[name].launch();
+  const errors = [];
+  try {
+    const url = await until(() => existsSync(surface.urlFile) && readFileSync(surface.urlFile, 'utf8'), 30000, 'the web url');
+    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2 });
+    page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+    page.on('console', (message) => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    await page.goto(url);
+    const frameElement = await page.waitForSelector('[data-testid="review-frame"]', { timeout: 30000 });
+    const frame = await until(async () => {
+      const found = await frameElement.contentFrame();
+      return found && found.url().startsWith('http://127.0.0.1:') ? found : null;
+    }, 15000, 'the review frame');
+    check(name, 'page_over_loopback', new URL(frame.url()).origin !== new URL(url).origin, frame.url());
+    await frame.waitForSelector('h1', { timeout: 15000 });
+    check(name, 'page_renders', (await frame.textContent('h1')) === 'Review page');
+    await until(() => frame.evaluate(() => !!document.querySelector('agent-brief-overlay')), 10000, 'the overlay').catch(() => false);
+    check(name, 'overlay_loaded', await frame.evaluate(() => !!document.querySelector('agent-brief-overlay')));
+    check(name, 'page_has_no_bridge', (await frame.textContent('#p')) === 'companion: undefined', await frame.textContent('#p'));
+
+    // A box inside a frame is already in page coordinates.
+    const heading = await frame.locator('h1').boundingBox();
+    await page.mouse.click(heading.x + 40, heading.y + heading.height / 2);
+    await page.waitForTimeout(800);
+    await page.keyboard.type('tighten this', { delay: 20 });
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: join(surface.root, 'page-pinned.png') });
+    await page.keyboard.press('Meta+Enter');
+
+    const artifact = join(surface.fake, 'artifacts/a0');
+    await until(() => existsSync(join(artifact, 'review.md')), 20000, 'the review').catch(() => {});
+    const review = existsSync(join(artifact, 'review.md')) ? readFileSync(join(artifact, 'review.md'), 'utf8') : '';
+    check(name, 'comment_in_review', review.includes('tighten this'), review.split('\n').slice(0, 6).join(' | '));
+    const images = existsSync(join(artifact, 'images')) ? readdirSync(join(artifact, 'images')) : [];
+    check(name, 'comment_picture', review.includes('- Picture:') && images.length === 1, images.join(' '));
+
+    const real = errors.filter((text) => !/favicon|Failed to load resource/.test(text));
+    check(name, 'no_page_errors_on_page', real.length === 0, real.slice(0, 4).join(' | ').slice(0, 400));
+  } finally {
+    await browser.close();
+    try {
+      process.kill(-surface.child.pid, 'SIGTERM');
+    } catch {}
+  }
+}
+
+for (const name of process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(ENGINES)) {
+  await runEngine(name);
+  await runPage(name);
+}
 const failed = results.filter((ok) => !ok).length;
 console.log(`${results.length - failed} of ${results.length} checks passed`);
 process.exit(failed ? 1 : 0);

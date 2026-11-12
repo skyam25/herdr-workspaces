@@ -92,7 +92,7 @@ describe('SessionFiles', () => {
   it('opens a dev server on this Mac in the review pane, and serves its own address there', async () => {
     expect(await files.openDocument('s1', 'http://localhost:5173')).toBe('review');
     expect(last(CH.newNote)).toMatchObject({ sessionId: 's1', review: { path: 'http://localhost:5173/', comments: [] } });
-    expect(files.reviewUrl('s1', 'http://localhost:5173/')).toBe('http://localhost:5173/');
+    await expect(files.reviewUrl('s1', 'http://localhost:5173/')).resolves.toBe('http://localhost:5173/');
     await files.openElsewhere('s1', 'http://localhost:5173/');
     expect(opened).toEqual(['http://localhost:5173/']);
     await expect(files.openDocument('nope', 'http://localhost:5173')).rejects.toThrow('does not know session');
@@ -148,7 +148,7 @@ describe('SessionFiles', () => {
   it('refuses files outside the project and links that are not http', async () => {
     await expect(files.openOutput('s1', '../escape.md')).rejects.toThrow('outside the project');
     await expect(files.openOutput('s1', 'file:///etc/hosts')).rejects.toThrow('only http and https');
-    expect(() => files.reviewUrl('s1', 'missing.html')).toThrow('does not exist yet');
+    await expect(files.reviewUrl('s1', 'missing.html')).rejects.toThrow('does not exist yet');
   });
 
   it('opens a Markdown or HTML document for POST /open and says where', async () => {

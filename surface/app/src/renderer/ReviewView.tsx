@@ -457,6 +457,9 @@ export function ReviewView(props: {
     [host, book, reload, props.onError],
   );
 
+  /** The page and element a crop shows, for a host that captures from the file. */
+  const elementOf = useCallback((selector: string) => (pageHref.current ? { url: pageHref.current, selector } : undefined), []);
+
   const addPin = useCallback(
     async (anchor: ReviewAnchor, view: ReviewRect, matches?: string[], clickedAt = Date.now()) => {
       const box = frame.current?.getBoundingClientRect();
@@ -467,7 +470,7 @@ export function ReviewView(props: {
       const feedback = live.current.items.length && onPage ? (picked !== undefined ? [picked] : itemsAt(matches)) : undefined;
       setPicked(undefined);
       const room = Object.keys(current.attachments ?? {}).length < MAX_PICTURES;
-      const picture = room ? await host.capturePanel(cropRect(box, view)).catch(() => undefined) : undefined;
+      const picture = room ? await host.capturePanel(cropRect(box, view), elementOf(anchor.selector)).catch(() => undefined) : undefined;
       const comment: ReviewComment = { id: newCommentId(), text: '', anchor: onPage ? anchor : { ...anchor, page: shownPage }, createdAt: Date.now(), ...(picture ? { picture: newPictureId() } : {}), ...(feedback ? { feedback } : {}) };
       book.addComment(current.id, comment, picture);
       if (live.current.queue) setCommentsOpen(true);
@@ -475,7 +478,7 @@ export function ReviewView(props: {
       // The crop above takes a moment, so the voice moves to the pin from the click.
       select(comment.id, true, clickedAt);
     },
-    [book, host, select, itemsAt, pickSide],
+    [book, host, select, itemsAt, pickSide, elementOf],
   );
 
   /** A marker dragged onto another element: the comment keeps its words and takes the new anchor and picture. */
@@ -484,11 +487,11 @@ export function ReviewView(props: {
       const box = frame.current?.getBoundingClientRect();
       const current = book.get(live.current.draftId);
       if (!box || !current?.review?.comments.some((c) => c.id === id)) return;
-      const data = await host.capturePanel(cropRect(box, view)).catch(() => undefined);
+      const data = await host.capturePanel(cropRect(box, view), elementOf(anchor.selector)).catch(() => undefined);
       book.moveComment(current.id, id, anchor, data ? { id: newPictureId(), data } : undefined);
       select(id, true);
     },
-    [book, host, select],
+    [book, host, select, elementOf],
   );
 
   useEffect(() => {

@@ -18,6 +18,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  nativeImage,
   nativeTheme,
   powerMonitor,
   protocol,
@@ -68,9 +69,10 @@ import { createInstalls } from './installs';
 import { ItemsWatcher } from './items-watch';
 import { trayMenuTemplate } from './menus';
 import { OutputWatch } from './output-watch';
-import { Panel } from './panel';
+import { cropDataUrl, Panel } from './panel';
 import { Quitter } from './quit';
 import { overlayFileFrom, REVIEW_SCHEME, ReviewRoots, serveReview } from './review-protocol';
+import { ReviewWebServer } from './review-web';
 import { rememberProjects, Sender } from './sender';
 import { unfiledBoardChoice } from './session-briefs';
 import { SessionNames } from './session-names';
@@ -199,6 +201,10 @@ async function start(): Promise<void> {
   // The review pane: project files over their own scheme, or a dev server on this Mac, and a frame that stays on them.
   const reviewRoots = new ReviewRoots();
   protocol.handle(REVIEW_SCHEME, (request) => serveReview(reviewRoots, overlayFileFrom(__dirname), request));
+
+  // A web view cannot load the review scheme, so its review pages come over loopback.
+  const reviewWeb = webHost && new ReviewWebServer({ overlayFile: overlayFileFrom(__dirname), frameAncestor: () => new URL(webHost.url()).origin });
+  const reviewUrlFor = (cwd: string, path: string) => (reviewWeb ? reviewWeb.urlFor(cwd, path) : reviewRoots.urlFor(cwd, path));
   panel.win.webContents.on('will-frame-navigate', (e) => {
     if (!e.isMainFrame && !e.url.startsWith(`${REVIEW_SCHEME}://`) && !isLocalUrl(e.url) && e.url !== 'about:blank') e.preventDefault();
   });
@@ -317,13 +323,24 @@ async function start(): Promise<void> {
     projectChanged(CH.outlineChanged, root, path);
   }, undefined, join(dataDir, 'outline-changes'));
   const captures = captureSession(session.fromPartition('feedback-capture'), (request) => serveReview(reviewRoots, overlayFileFrom(__dirname), request));
-  const feedbackSnaps = new FeedbackSnaps({ store: feedback, urlFor: (cwd, path) => reviewRoots.urlFor(cwd, path), capture: offscreenCapture(BrowserWindow, captures) });
+  const capturePage = offscreenCapture(BrowserWindow, captures);
+  const feedbackSnaps = new FeedbackSnaps({ store: feedback, urlFor: (cwd, path) => reviewRoots.urlFor(cwd, path), capture: capturePage });
+
+  // A web view cannot be captured, so a pin's picture comes from the file in an offscreen window.
+  const captureFromFile = async (element: unknown): Promise<string | undefined> => {
+    const hint = element as { url?: unknown; selector?: unknown } | undefined;
+    if (typeof hint?.url !== 'string' || typeof hint.selector !== 'string') return undefined;
+    const page = reviewWeb?.pageOf(hint.url);
+    if (!page) return undefined;
+    const { png } = await capturePage(reviewRoots.urlFor(page.root, page.path), hint.selector);
+    return cropDataUrl(nativeImage.createFromBuffer(png));
+  };
   const behaviorRoot = (sessionId: string) => {
     const cwd = briefs.cwdOf(sessionId);
     if (!cwd) throw new Error('Unknown session');
     return cwd;
   };
-  const files = new SessionFiles({ briefs, drafts, send, opener, reviewUrlFor: (cwd, path) => reviewRoots.urlFor(cwd, path) });
+  const files = new SessionFiles({ briefs, drafts, send, opener, reviewUrlFor });
   const terminals = new Terminals({ testMode, writeClipboard: (text) => clipboard.writeText(text) });
   // Each live session's mode. The mod sets it over PATCH /sessions/:id; the app only shows it.
   const modes = new SessionModes();
@@ -694,7 +711,7 @@ async function start(): Promise<void> {
   ipc.handle('getUpdate', () => updater.current());
   ipc.handle('updateNow', () => updater.update());
   ipc.handle('installUpdate', () => updater.install());
-  ipc.handle('capturePanel', (rect: unknown) => panel.capture(rect));
+  ipc.handle('capturePanel', (rect: unknown, element?: unknown) => (reviewWeb ? captureFromFile(element) : panel.capture(rect)));
   ipc.handle('transcribeClip', (clip: { data?: unknown; mimeType?: unknown }) => transcribeClip(clip, voiceDir));
   ipc.handle('startDictation', async () => {
     // One mic listener at a time. The one it replaces still sends its last phrase and its end.
@@ -983,6 +1000,7 @@ async function start(): Promise<void> {
   app.on('before-quit', (e) => quitter.beforeQuit(e));
   app.on('will-quit', () => {
     surfaceHost?.stop();
+    void reviewWeb?.close();
     endDictations();
     dictator.dispose();
     globalShortcut.unregisterAll();

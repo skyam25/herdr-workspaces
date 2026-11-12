@@ -698,8 +698,12 @@ export interface CompanionApi extends BoardHost {
   reviewEdit(sessionId: string, path: string, version: string, edit: ReviewEdit): Promise<EditResult>;
   reviewUndo(sessionId: string, path: string): Promise<HistoryResult>;
   reviewRedo(sessionId: string, path: string): Promise<HistoryResult>;
-  /** A JPEG data URL of part of the panel, in window pixels. Undefined when nothing was captured. */
-  capturePanel(rect: ReviewRect): Promise<string | undefined>;
+  /**
+   * A JPEG data URL of part of the panel, in window pixels. Undefined when nothing was captured.
+   * `element` names the review page and element the rect shows. A web view cannot be captured,
+   * so its host captures that element from the file instead.
+   */
+  capturePanel(rect: ReviewRect, element?: { url: string; selector: string }): Promise<string | undefined>;
   /** Transcribes one voice clip with ffmpeg and yap. */
   transcribeClip(clip: { data: Uint8Array; mimeType: string }): Promise<{ text: string } | { error: string }>;
   /** Starts dictating from the microphone. Its words arrive through `onDictation`. One runs at a time. */

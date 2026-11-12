@@ -1,6 +1,6 @@
 /** The panel: one window, created hidden and kept alive. */
 
-import { app, BrowserWindow, Menu, screen, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Menu, screen, type MenuItemConstructorOptions, type NativeImage } from 'electron';
 import { areaUnder, centredBounds, reachable } from './placement';
 import { textMenuTemplate } from './text-menu';
 import { OFFSCREEN, panelWindow } from './window-options';
@@ -146,11 +146,15 @@ export class Panel {
     const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : 0);
     const rect = { x: Math.max(0, n(r?.x)), y: Math.max(0, n(r?.y)), width: n(r?.width), height: n(r?.height) };
     if (rect.width < 4 || rect.height < 4) return undefined;
-    let image = await this.win.webContents.capturePage(rect);
-    if (image.isEmpty()) return undefined;
-    const { width, height } = image.getSize();
-    const scale = LONGEST_CROP / Math.max(width, height);
-    if (scale < 1) image = image.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'good' });
-    return `data:image/jpeg;base64,${image.toJPEG(82).toString('base64')}`;
+    return cropDataUrl(await this.win.webContents.capturePage(rect));
   }
+}
+
+/** A crop as a JPEG data URL, long edge 900 px or less. Undefined for an empty image. */
+export function cropDataUrl(image: NativeImage): string | undefined {
+  if (image.isEmpty()) return undefined;
+  const { width, height } = image.getSize();
+  const scale = LONGEST_CROP / Math.max(width, height);
+  const fitted = scale < 1 ? image.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'good' }) : image;
+  return `data:image/jpeg;base64,${fitted.toJPEG(82).toString('base64')}`;
 }

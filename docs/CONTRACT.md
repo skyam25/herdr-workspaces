@@ -621,7 +621,17 @@ Setting `HWS_SURFACE_WEB=1` shows a surface in any web view in place of Pixel. W
 | `GET /api/events` | Server-sent events, each `{channel, args}` |
 | Encoding | `shared/web-wire.ts`, which keeps bytes and undefined arguments |
 
-Page surfaces do not work in this mode yet, because reviews load from an Electron-only scheme.
+A review page loads in a frame from a second loopback server, because a web view cannot load the Electron review scheme. `src/main/review-web.ts` holds it.
+
+| Item | Behaviour |
+|---|---|
+| Listener | `127.0.0.1` on a free port per project folder, so each folder is its own origin. The first review of a folder starts its port |
+| Address | `http://127.0.0.1:<port>/<path>`. HTML gets the overlay script, as on the scheme. Dot segments and paths outside the folder answer 404 |
+| Every request | Must name this server in `Host`. A `Sec-Fetch-Site: cross-site` request answers 403. Only GET and HEAD |
+| Framing | `frame-ancestors` names the surface's own origin, and `Cross-Origin-Resource-Policy` is `same-site`. Open the surface at the `127.0.0.1` address it writes, because `localhost` is another site |
+| Pictures | A web view cannot be captured, so a pinned or moved comment's picture comes from the file, loaded fresh in an offscreen window at 1280 by 800 and cropped around the element |
+
+A dev server's page loads as it is, with no overlay and no pictures, because main cannot reach into a web view's frames. A feedback item's workspace snapshot has no picture in a web view.
 
 ## Phone
 
