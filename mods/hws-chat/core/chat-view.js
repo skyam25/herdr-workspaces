@@ -45,6 +45,8 @@ export const WORDS = {
   restarting: "Restarting the agent…",
   agentEnded: "This agent has ended",
   taskEnded: "This task's agent has ended",
+  agentQuit: "This agent quit",
+  agentQuitBody: "Its terminal is back at the shell. Open it to see what the agent left there.",
   unsupported: "No chat for this agent",
   unsupportedBody: "Chat reads Claude Code's and Codex's own session logs. This agent works in its terminal only.",
   notFound: "Can't find this conversation",

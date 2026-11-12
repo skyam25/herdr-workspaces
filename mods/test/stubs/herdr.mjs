@@ -17,7 +17,7 @@ export const watchFolder = (dir) => { H().watches.push(dir); return H().watchRes
 export const nextCommand = () => new Promise(() => {});
 export const terminals = () => H().terminals ?? [];
 export const machines = () => H().machines ?? [];
-export const hc = (args) => { H().hcCalls?.push(args); return Promise.resolve({ code: 0, stdout: "{}", stderr: "" }); };
+export const hc = (args) => { H().hcCalls?.push(args); return Promise.resolve(H().hc?.(args) ?? { code: 0, stdout: "{}", stderr: "" }); };
 export const shared = (key) => H().sharedValues?.[key];
 export const setShared = (key, value) => { H().sharedSets?.push({ key, value }); return null; };
 export const appHome = () => "/Users/me/.config/herdr-app";

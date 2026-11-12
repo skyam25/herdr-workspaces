@@ -2184,3 +2184,50 @@ test("the measurer stays empty and at the measured width during a drag", async (
   assert.equal(el.node.w, 700);
   assert.equal(el.node.children[0].node.children.length, 0);
 });
+
+// Chat: an agent that quits or clears
+
+async function chatAt(fg, extra = {}) {
+  const { default: Chat } = await import("../hws-chat/main.js");
+  const H = setup({ runs: [], hcCalls: [], terminals: [{ address: "t13", state: "live", labels: { "herdr.chat": "p7" } }],
+    panes: [{ pane: "p7", terminal: null, tab: "tb1", mod: "hws-chat" }] });
+  H.hc = (a) => (a[0] === "get" ? { code: 0, stdout: JSON.stringify({ state: "live", labels: { "herdr.chat": "p7" }, ...fg }), stderr: "" } : null);
+  const self = Object.assign(Object.create(Chat.prototype), { addr: "t13", machine: null, phase: "ready", kind: "claude", path: "/logs/old.jsonl",
+    lostTried: new Set(["t13"]), thread: null, inner: null, role: null }, extra);
+  return { H, self, cx: { notify() {}, spawn() {} } };
+}
+
+test("/exit and /quit are the commands that end the agent", async () => {
+  const { quits } = await import("../hws-chat/core/slash.js");
+  assert.equal(quits("/exit"), true);
+  assert.equal(quits(" /quit "), true);
+  assert.equal(quits("/exit now"), false);
+  assert.equal(quits("/clear"), false);
+});
+
+test("an agent quit from the chat ends its terminal and closes the chat", async () => {
+  const { H, self, cx } = await chatAt({ foreground: { name: "zsh", pid: 9 } }, { exiting: Date.now() });
+  await self.locate(cx);
+  assert.deepEqual(H.runs, [{ name: "terminal.kill", args: { terminal: "t13" } }, { name: "pane.close", args: { pane: "p7" } }]);
+});
+
+test("an agent that quit some other way says so instead of No chat", async () => {
+  const { H, self, cx } = await chatAt({ foreground: { name: "-zsh", pid: 9 } });
+  await self.locate(cx);
+  assert.equal(self.phase, "quit");
+  assert.deepEqual(H.runs, []);
+
+  const never = await chatAt({ foreground: { name: "zsh", pid: 9 } }, { kind: undefined, path: null, phase: "finding" });
+  await never.self.locate(never.cx);
+  assert.equal(never.self.phase, "unsupported");
+});
+
+test("after /clear the chat drops the old conversation before the new log exists", async () => {
+  const { H, self, cx } = await chatAt({ status: { app: "claude-code" }, foreground: { name: "2.1.322", pid: 9 } }, { dfltFor: "claude|9", records: [{ id: "old" }] });
+  H.other = () => ({ code: 0, stdout: "pending\n", stderr: "" });
+  await self.locate(cx);
+  assert.equal(self.path, null);
+  assert.deepEqual(self.records, []);
+  assert.equal(self.phase, "ready");
+  assert.ok(self.conv);
+});

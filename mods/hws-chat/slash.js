@@ -6,7 +6,7 @@ import { exec } from "herdr";
 
 // The lists and the scan are core/slash.js, shared with the web app.
 import { SCAN, scanned, commandList } from "./core/slash.js";
-export { opensMenu, typing, match } from "./core/slash.js";
+export { opensMenu, quits, typing, match } from "./core/slash.js";
 
 const cache = new Map();
 // Every command this agent knows: [{ name, about }], built-in first. Cached per machine and folder.

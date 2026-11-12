@@ -122,6 +122,7 @@ The audit found these from reading code.
 ### 8. Finish the chat flip
 
 - [ ] Test the composer, Send and the model picker with a real keyboard and pointer.
+- [ ] Type `/exit` in a real chat and check the chat and its terminal close. Type `/clear` and check the old conversation goes at once. Only the simulator has run them.
 - [x] Add the `PermissionRequest` hook so permissions and questions arrive as cards.
 - [ ] Confirm a real Claude session fires that hook and honours a card's answer. Only fakes have run it.
 - [ ] Press Cmd+V on a real screenshot and confirm the tile appears. The clipboard reader is tested, the keypress is not.

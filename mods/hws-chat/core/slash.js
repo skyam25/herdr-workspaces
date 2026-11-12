@@ -7,7 +7,7 @@ export const CLAUDE = [
   ["add-dir", "Add a working folder"], ["agents", "Manage subagents"], ["clear", "Start a new conversation"],
   ["compact", "Summarize the conversation to free context"], ["config", "Open settings"], ["context", "Show context use"],
   ["cost", "Show this session's cost"], ["doctor", "Check the installation"], ["effort", "Set the effort level"],
-  ["export", "Export the conversation"], ["fast", "Turn fast mode on or off"], ["help", "Show help"], ["hooks", "Manage hooks"],
+  ["exit", "End the agent and close this chat"], ["export", "Export the conversation"], ["fast", "Turn fast mode on or off"], ["help", "Show help"], ["hooks", "Manage hooks"],
   ["init", "Write a CLAUDE.md for this project"], ["login", "Sign in"], ["logout", "Sign out"], ["mcp", "Manage MCP servers"],
   ["memory", "Edit memory files"], ["model", "Choose the model"], ["permissions", "Manage tool permissions"],
   ["plugin", "Manage plugins"], ["resume", "Resume another conversation"], ["review", "Review a pull request"],
@@ -19,7 +19,7 @@ export const CODEX = [
   ["new", "Start a new conversation"], ["init", "Write an AGENTS.md for this project"], ["compact", "Summarize the conversation to free context"],
   ["diff", "Show the git diff"], ["mention", "Mention a file"], ["status", "Show session settings and usage"],
   ["mcp", "List MCP tools"], ["resume", "Resume another conversation"], ["fork", "Fork this conversation"],
-  ["logout", "Sign out"], ["quit", "Exit Codex"],
+  ["logout", "Sign out"], ["quit", "End Codex and close this chat"],
 ];
 // Commands that open a menu in the CLI when given no arguments.
 export const MENU = {
@@ -65,6 +65,11 @@ export function match(list, word) {
   const starts = list.filter((c) => c.name.toLowerCase().startsWith(w));
   const has = list.filter((c) => !c.name.toLowerCase().startsWith(w) && c.name.toLowerCase().includes(w));
   return [...starts, ...has].slice(0, 8);
+}
+
+// /exit and /quit end the agent, so the chat closes with it.
+export function quits(text) {
+  return /^\/(exit|quit)\s*$/i.test(String(text ?? "").trim());
 }
 
 export function opensMenu(kind, text) {

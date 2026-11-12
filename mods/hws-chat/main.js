@@ -97,6 +97,12 @@ const CLI_STATUS_FIRST_FOR_MS = 15000;
 const lastCliStatus = new Map();
 const lastPick = new Map();
 const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
+
+// The terminal's foreground is a shell again (its agent quit).
+const SHELLS = /^-?(sh|bash|zsh|fish|dash|ksh|tcsh|nu)$/;
+function atShell(t) {
+  return SHELLS.test(String(t?.foreground?.name ?? t?.foreground?.argv?.[0] ?? "").split("/").pop());
+}
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 // The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
 const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
@@ -1183,8 +1189,17 @@ export default class Chat extends View {
     if (!this.thread && !this.inner && !this.swapping && !t.labels?.["herdr.chat"] && pane && !panes().some((p) => p.terminal === this.addr)
       && panes().some((p) => p.pane === pane && p.mod === "hws-chat")) await hc(["label", this.addr, `herdr.chat=${pane}`]);
     const kind = KINDS[t.status?.app] ?? KINDS[t.foreground?.name];
-    // Back at its shell because the session it resumed is gone: a new agent starts there.
-    if (!kind) { if (!(await this.checkLost(this.addr, cx, t))) this.set("unsupported", cx); return; }
+    if (!kind) {
+      // Quit from here (/exit): the chat goes with it.
+      if (this.quitting()) { this.exited(cx); return; }
+
+      // Back at its shell because the session it resumed is gone: a new agent starts there.
+      if (await this.checkLost(this.addr, cx, t)) return;
+
+      // Quit some other way (a crash): its terminal holds what it left.
+      this.set(this.kind && atShell(t) && !this.thread ? "quit" : "unsupported", cx);
+      return;
+    }
     this.t = t;
     this.loadFirst(cx, t.labels);
     this.argv = t.foreground?.argv ?? t.argv ?? null;
@@ -1205,8 +1220,9 @@ export default class Chat extends View {
     // shows as a card under an empty chat.
     if (!path && starting(t)) path = "pending";
     if (path === "pending") {
-      // A Claude Code that hasn't written its first line yet has no file: an empty chat.
-      if (this.phase === "finding") { this.kind = kind; this.conv = new Conversation(kind); this.start = 0; this.set("ready", cx); }
+      // A Claude Code that hasn't written its first line yet has no file: an empty chat. After
+      // /clear that is the new session, so the old conversation goes now.
+      if (this.phase === "finding" || this.path) { this.path = null; this.reset(); this.kind = kind; this.conv = new Conversation(kind); this.start = 0; this.set("ready", cx); }
       return;
     }
     if (!path) { if (this.phase !== "ready") this.set("none", cx); return; }
@@ -1366,7 +1382,7 @@ export default class Chat extends View {
     let last = 0;
     for (;;) {
       try {
-        if (!this.path || Date.now() - last > 4000) { last = Date.now(); await this.locate(cx); }
+        if (!this.path || this.quitting() || Date.now() - last > 4000) { last = Date.now(); await this.locate(cx); }
         if (this.phase === "ended" && !this.swapping) {
           // A thread stays open on its notice; ✕ closes it.
           if (this.thread) return;
@@ -1483,6 +1499,7 @@ export default class Chat extends View {
       this.cards.replyWith(this.asks[0], msg.text, cx);
       return;
     }
+    if (!msg.files?.length && slash.quits(msg.text) && !this.thread) this.exiting = Date.now();
     // Herdr tag lines before the words: the message it replies to, the tasks it mentions.
     let body = messageBody({ text: msg.text, quote: msg.quote?.text ?? null, tags: this.taskTags(msg.text) });
     const p = { id: `pending-${msg.id}`, text: msg.text, replyTo: msg.quote ? excerpt(msg.quote.text, 80) : null, files: msg.files.filter((f) => !f.image).map((f) => f.name),
@@ -2149,6 +2166,20 @@ export default class Chat extends View {
     if (!mine) return;
     run("pane.focus", { pane: mine });
     run("hws-pane.toggle");
+  }
+
+  // A /exit sent in the last minute.
+  quitting() {
+    return Date.now() - (this.exiting ?? 0) < 60000;
+  }
+
+  // The agent quit from here (/exit): its terminal ends and the chat closes, as when its own pane
+  // closes. A Coordinator tab's chat stays, empty again.
+  exited(cx) {
+    this.exiting = null;
+    run("terminal.kill", { terminal: this.addr });
+    if (this.role) { this.addr = null; this.path = null; this.reset(); this.phase = "fresh"; cx.notify(); return; }
+    this.closeSelf();
   }
 
   // The agent ended: its pane would have closed, so this one does.
@@ -4390,6 +4421,8 @@ export default class Chat extends View {
     if (this.phase === "ended" && !this.swapping) return root.child(this.notice(t, WORDS.agentEnded, null, [
       this.button("chat-close", "Close chat", null, "secondary", t, () => this.closeSelf())]));
     const open = this.button("chat-open-terminal", WORDS.openTerminal,"mods/workspace-chrome/terminal.svg", "primary", t, () => this.toTerminal());
+    if (this.phase === "quit") return root.child(this.notice(t, WORDS.agentQuit, WORDS.agentQuitBody, [open,
+      this.button("chat-close", "Close chat", null, "secondary", t, (cx) => this.exited(cx))]));
     if (this.phase === "unsupported") return root.child(this.notice(t, WORDS.unsupported, WORDS.unsupportedBody, [open]));
     if (this.phase === "none") return root.child(this.notice(t, WORDS.notFound, WORDS.notFoundBody, [open]));
     if ((this.phase === "finding" && !starting) || this.phase === "ended") return root.child(this.notice(t, this.swapping ? WORDS.restarting : WORDS.opening, null));
