@@ -116,6 +116,17 @@ const endedDialog = (s) => useLinked(s).replaceAll("props()", "__props()").repla
 
 const SPACE_MENU = { view: "space-menu", space: "spc3", workspace: "spc1", workspaceName: "checkout demo", canLeave: true, overlay: "o" };
 const MOVE_SPACE = { view: "move-space", id: "spc2", name: "a space with a name long enough to truncate in the heading", folder: "/w/docs", overlay: "o" };
+const unfiledFile = (viewProps) => ({ "unfiled.js": { header: `const __props = () => (${JSON.stringify(viewProps)});\n`, patch: (s) => s.replaceAll("props()", "__props()") } });
+const UNFILED = { view: "unfiled", overlay: "o" };
+const UNFILED_ITEMS = {
+  surfaces: [
+    { id: "s1", type: "board", title: "Untitled sketch", state: "open" },
+    { id: "s2", type: "note", title: "a note with a title long enough to truncate in its row", state: "draft" },
+    { id: "s3", type: "page", title: "spec.html", state: "pane" },
+  ],
+  artifacts: [{ id: "a1", type: "board", title: "Login flow", path: "/a1", createdAt: 1 }],
+};
+const MOVE_ITEM = { view: "move-item", kind: "surface", id: "s1", title: "Untitled sketch", from: "standalone", overlay: "o" };
 const DESTINATIONS = [{ id: "w1", name: "docs", kind: "app" }, { id: "w2", name: "a workspace with a name long enough to truncate in its row", kind: "general" }, { id: "w3", name: "scrap", kind: "throwaway" }];
 const spaceMenuFile = (menuProps) => ({ "spacemenu.js": { header: `const __props = () => (${JSON.stringify(menuProps)});\n`, patch: (s) => s.replaceAll("props()", "__props()") } });
 
@@ -193,6 +204,8 @@ const VARIANTS = [
   { mod: "hws-panel", name: "panel-record", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", `this.manifests = [${JSON.stringify(withSession)}];`).replace("this.context = null;", `this.context = ${JSON.stringify(RECORD)}; this.showSuperseded = true;`) },
   { mod: "hws-panel", name: "sidebar-fresh", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify(KEPT)}, __MANIFEST], problem: null, folded: new Set(), ahead: {}, fresh: { spc1: { level: "stale", title: "Current is 9 sessions behind" } } };`) },
   { mod: "hws-panel", name: "sidebar-tasks", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify({ ...KEPT, spaces: ["spc1", "spb"] })}], problem: null, folded: new Set(), ahead: {}, fresh: { spc1: { level: "unwritten", title: "No current note yet" } } };`), files: { "sidebar.js": { header: 'const __spaces = () => [{ id: "spc1", name: "api", active: true, status: "idle", tabs: [] }, { id: "spb", name: "Board", active: false, status: null, tabs: [] }];\n', patch: (s) => s.replaceAll("spaces()", "__spaces()") } } },
+  { mod: "hws-panel", name: "sidebar-unfiled", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify({ ...KEPT, spaces: ["spc1"] })}], problem: null, folded: new Set(), ahead: {}, fresh: {}, waiting: {}, unfiled: 4, openWindows: { spc1: ["s1", "s2"] } };`), files: { "sidebar.js": { header: 'const __spaces = () => [{ id: "spc1", name: "api", active: true, status: "working", tabs: [] }];\n', patch: (s) => s.replaceAll("spaces()", "__spaces()") } } },
+  { mod: "hws-panel", name: "sidebar-unfiled-empty", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [], archived: [], problem: null, folded: new Set(), unfiled: 1, openWindows: {} };"), files: { "sidebar.js": { header: "const __spaces = () => [];\n", patch: (s) => s.replaceAll("spaces()", "__spaces()") } } },
   { mod: "hws-panel", name: "sidebar-waiting-hover", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", `this.sidebar = { workspaces: [${JSON.stringify({ ...KEPT, spaces: ["spc1", "spc3", "spb"] })}], problem: null, folded: new Set(), ahead: {}, fresh: {}, waiting: { spc1: 3 }, hovered: "spc3", blockPx: 60 };`), files: { "sidebar.js": { header: 'const __spaces = () => [{ id: "spc1", name: "api", active: false, status: "idle", tabs: [] }, { id: "spc3", name: "web", active: true, status: null, tabs: [] }, { id: "spb", name: "Board", active: false, status: null, tabs: [] }];\n', patch: (s) => s.replaceAll("spaces()", "__spaces()") } } },
   { mod: "hws-panel", name: "sidebar", props: { view: "sidebar" }, header: LIVE_HEADER, patch: (s) => s.replace("this.sidebar = startSidebar(cx);", "this.sidebar = { workspaces: [__MANIFEST], problem: null, folded: new Set(), ahead: {}, fresh: {} };") },
   { mod: "hws-panel", name: "add-space", props: { view: "add-space", workspace: "spc1", name: "checkout demo", spaces: ["spc1"] }, header: LIVE_HEADER },
@@ -204,6 +217,12 @@ const VARIANTS = [
   { mod: "hws-panel", name: "space-menu-member", props: SPACE_MENU, patch: (s) => s.replace("initSpaceMenu(this, cx);", 'this.git = "linked";'), files: spaceMenuFile(SPACE_MENU) },
   { mod: "hws-panel", name: "space-menu-plain", props: { view: "space-menu", space: "spc2", overlay: "o" }, patch: (s) => s.replace("initSpaceMenu(this, cx);", "this.git = null;"), files: spaceMenuFile({ view: "space-menu", space: "spc2", overlay: "o" }) },
   { mod: "hws-panel", name: "move-space", props: MOVE_SPACE, patch: (s) => s.replace("initMoveSpace(this, cx);", `this.from = { id: "w0", name: "checkout" }; this.matches = new Set(["w1"]); this.workspaces = ${JSON.stringify(DESTINATIONS)}; this.busy = "move-w2"; this.problem = "herdr is not answering";`), files: spaceMenuFile(MOVE_SPACE) },
+  { mod: "hws-panel", name: "unfiled", props: UNFILED, patch: (s) => s.replace("initUnfiled(this, cx);", `this.unfiled = ${JSON.stringify(UNFILED_ITEMS)}; this.busy = "trash-s2"; this.problem = "Could not move that to the Trash.";`), files: unfiledFile(UNFILED) },
+  { mod: "hws-panel", name: "unfiled-empty", props: UNFILED, patch: (s) => s.replace("initUnfiled(this, cx);", "this.unfiled = { surfaces: [], artifacts: [] };"), files: unfiledFile(UNFILED) },
+  { mod: "hws-panel", name: "unfiled-loading", props: UNFILED, patch: (s) => s.replace("initUnfiled(this, cx);", "this.unfiled = null;"), files: unfiledFile(UNFILED) },
+  { mod: "hws-panel", name: "move-item", props: MOVE_ITEM, patch: (s) => s.replace("initMoveItem(this, cx);", `this.targets = { current: "w0", suggested: "w1", workspaces: ${JSON.stringify(DESTINATIONS)} }; this.busy = "move-w2"; this.problem = "herdr is not answering";`), files: unfiledFile(MOVE_ITEM) },
+  { mod: "hws-panel", name: "move-item-none", props: MOVE_ITEM, patch: (s) => s.replace("initMoveItem(this, cx);", 'this.targets = { current: "standalone", suggested: null, workspaces: [] };'), files: unfiledFile(MOVE_ITEM) },
+  { mod: "hws-panel", name: "move-item-loading", props: MOVE_ITEM, patch: (s) => s.replace("initMoveItem(this, cx);", "this.targets = null;"), files: unfiledFile(MOVE_ITEM) },
   { mod: "hws-panel", name: "move-space-loading", props: MOVE_SPACE, patch: (s) => s.replace("initMoveSpace(this, cx);", "this.from = null; this.matches = new Set(); this.workspaces = null;"), files: spaceMenuFile(MOVE_SPACE) },
   { mod: "hws-panel", name: "rename", props: { view: "rename", workspace: "spc1", name: "checkout" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "rename", workspace: "spc1", name: "checkout" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
   { mod: "hws-panel", name: "confirm-archive", props: { view: "confirm", action: "archive", workspace: "spc1", name: "checkout", kind: "app" }, files: { "rowmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "confirm", action: "archive", workspace: "spc1", name: "checkout", kind: "app" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
@@ -233,7 +252,7 @@ for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  for (const file of ["hws.js", "sidebar.js", "rowmenu.js", "spacemenu.js", "artifactmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "tabtitle.js", "board.js", "data.js", "open.js", "todo.js"]) {
+  for (const file of ["hws.js", "sidebar.js", "rowmenu.js", "spacemenu.js", "unfiled.js", "artifactmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "tabtitle.js", "board.js", "data.js", "open.js", "todo.js"]) {
     if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
   }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");

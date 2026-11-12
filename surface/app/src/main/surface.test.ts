@@ -37,6 +37,12 @@ describe('surfaceFromEnv', () => {
     expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_WEB: '1' })).toMatchObject({ shown: 'pane', web: true });
   });
 
+  it('names the workspace, and an empty name means Unfiled', () => {
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_WORKSPACE_ID: 'w1', HWS_WORKSPACE_NAME: 'demo' })?.workspace).toEqual({ id: 'w1', name: 'demo' });
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_WORKSPACE_ID: 'standalone', HWS_WORKSPACE_NAME: '' })?.workspace).toEqual({ id: 'standalone', name: '' });
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1' })?.workspace).toBeUndefined();
+  });
+
   it('keeps a local URL as it is', () => {
     const cfg = surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_TYPE: 'page', HWS_SURFACE_FILE: 'http://localhost:5173/', HWS_FOLDER: '/work' });
     expect(cfg?.file).toBe('http://localhost:5173/');
@@ -257,5 +263,27 @@ describe('SurfaceHost pop', () => {
     await new Promise((done) => setTimeout(done, 200));
     expect(h.lines()).toEqual([]);
     expect(h.states).toEqual([]);
+  });
+
+  it('saves the work, then asks hws to move a window to another workspace', async () => {
+    const h = harness({ shown: 'window', workspace: { id: 'standalone', name: '' } });
+    expect(h.host.info().workspace).toEqual({ id: 'standalone', name: '' });
+    void h.host.move('w1');
+    await h.settled();
+    expect(h.lines()).toEqual(['flushed', 'surface move --id s1 --workspace w1 --json']);
+  });
+
+  it('moves nothing from a pane', async () => {
+    const h = harness({});
+    await h.host.move('w1');
+    expect(h.lines()).toEqual([]);
+    expect(h.states).toEqual([]);
+  });
+
+  it('shows the error when hws refuses to move it to a workspace', async () => {
+    const h = harness({ shown: 'window' }, { fail: true });
+    void h.host.move('w1');
+    await h.settled();
+    expect(h.states.at(-1)?.notice).toEqual({ text: 'Could not move: no open pane', error: true });
   });
 });

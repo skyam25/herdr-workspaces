@@ -50,6 +50,8 @@ export function WriteView(props: {
   onCopy: (clip: { html: string; text: string }) => Promise<boolean>;
   /** Puts a line on the clipboard that a new session can pick the note up from. */
   onCopyReference: (d: Draft) => void;
+  /** The surface's owner and Pop, shown at the left end of the open draft's footer. */
+  placeBar?: ReactNode;
   /** The target chip and Send, shown at the right end of the open draft's footer. */
   sendBar?: ReactNode;
   /** The mic, which talks to the open note's comments. */
@@ -340,6 +342,7 @@ export function WriteView(props: {
           onOpenBoard={props.onOpenBoard}
           onCopy={props.onCopy}
           onCopyReference={() => props.onCopyReference(selected)}
+          placeBar={props.placeBar}
           sendBar={props.sendBar}
           voice={props.voice}
           talking={props.talking}

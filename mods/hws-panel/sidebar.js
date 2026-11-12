@@ -10,6 +10,7 @@ import { freshnessDot } from "./sections.js";
 import { showBoard } from "./cites.js";
 import { openConfirm, openRowMenu } from "./rowmenu.js";
 import { openSpaceMenu } from "./spacemenu.js";
+import { openUnfiled, unfiledOf } from "./unfiled.js";
 
 const NODE = "workspaces";
 const HEADING_PX = 31;
@@ -117,6 +118,15 @@ async function freshnessOf(workspace) {
   }
 }
 
+// Work in no workspace and every open window, each read once per full load. A failure counts as none.
+async function loose() {
+  const [unfiled, windows] = await Promise.all([hws(["unfiled"]).catch(() => null), hws(["surface", "list"]).catch(() => null)]);
+  const { surfaces, artifacts } = unfiledOf(unfiled);
+  const open = {};
+  for (const w of Array.isArray(windows) ? windows : []) if (w?.open && w.workspace) (open[w.workspace] ??= []).push(w.id);
+  return { unfiled: surfaces.length + artifacts.length, open };
+}
+
 // Cards in Waiting on you on a workspace's Board. A failure counts as zero.
 async function waitingOf(workspace) {
   if (!workspace.board) return 0;
@@ -206,6 +216,9 @@ function load(state, cx, { listOnly = false } = {}) {
         state.ahead = Object.fromEntries(extras.map(([id, ahead]) => [id, ahead]));
         state.fresh = Object.fromEntries(extras.map(([id, , fresh]) => [id, fresh]));
         state.waiting = Object.fromEntries(extras.map(([id, , , waiting]) => [id, waiting]));
+        const { unfiled, open } = await loose();
+        state.unfiled = unfiled;
+        state.openWindows = open;
         publishWaiting(state.workspaces, state.waiting);
         state.windowPx = await windowHeight();
       }
@@ -225,7 +238,7 @@ function load(state, cx, { listOnly = false } = {}) {
 function rowsPx(state) {
   const shown = spaces();
   const px = state.workspaces.reduce((sum, w) => sum + ROW_PX + shownChildren(state, w, membersOf(w, shown)).length * SPACE_ROW_PX, 0);
-  return Math.max(px, ROW_PX) + archivedRowCount(state) * SPACE_ROW_PX;
+  return unfiledPx(state) + Math.max(px, ROW_PX) + archivedRowCount(state) * SPACE_ROW_PX;
 }
 
 const verticalPadding = (node) => (Array.isArray(node.padding) ? node.padding[0] : (node.padding ?? 0)) * 2;
@@ -328,6 +341,8 @@ export function startSidebar(cx) {
     ahead: {},
     fresh: {},
     waiting: {},
+    unfiled: 0,
+    openWindows: {},
     windowPx: null,
     blockPx: null,
     hovered: null,
@@ -484,6 +499,36 @@ function spaceRow(t, state, workspace, space, canRemove) {
     .when(showsMinus, (el) => el.child(iconButton(t, `sidebar-remove-${space.id}`, "minus", 18, (cx) => removeSpace(state, space.id, cx)).tooltip("Take out of this workspace. The space stays open.")));
 }
 
+// Brings each of a workspace's open windows forward.
+function raiseWindows(state, ids, cx) {
+  changeThenLoad(state, cx, async () => {
+    for (const id of ids) await hws(["surface", "resume", "--id", id]);
+  });
+}
+
+function windowsBadge(t, state, workspace, ids) {
+  const label = ids.length === 1 ? "1 open window" : `${ids.length} open windows`;
+  return h_flex()
+    .id(`sidebar-windows-${workspace.id}`)
+    .flex_none()
+    .h(18)
+    .px(3)
+    .gap(3)
+    .items_center()
+    .rounded(4)
+    .cursor_pointer()
+    .text_size(11)
+    .text_color(t.dim)
+    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .on_click((_e, cx) => {
+      cx.stop_propagation();
+      raiseWindows(state, ids, cx);
+    })
+    .child(svg("mods/hws-panel/window.svg").size(11).flex_none())
+    .child(String(ids.length))
+    .tooltip(label);
+}
+
 // An open workspace's menu also offers Add space and Add tasks.
 function menuTarget(workspace, archived, space = null) {
   const target = { workspace: workspace.id, name: workspace.name, kind: workspace.kind, archived, space };
@@ -521,6 +566,7 @@ function workspaceRow(t, state, workspace, members) {
   const target = members.find((s) => s.active) ?? members[0];
   const ahead = state.ahead?.[workspace.id] ?? 0;
   const fresh = state.fresh?.[workspace.id] ?? null;
+  const windows = state.openWindows?.[workspace.id] ?? [];
   return h_flex()
     .id(`sidebar-workspace-${workspace.id}`)
     .h(ROW_PX)
@@ -539,10 +585,36 @@ function workspaceRow(t, state, workspace, members) {
     .child(div().flex_1().min_w(0).truncate().text_color(isActive ? t.foreground : t.muted).child(workspace.name))
     .when(Boolean(fresh), (el) => el.child(div().id(`sidebar-fresh-${workspace.id}`).flex_none().child(freshnessDot(t, fresh.level)).tooltip(fresh.title)))
     .when(workspace.kind === "throwaway", (el) => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child("Throwaway")))
+    .when(windows.length > 0, (el) => el.child(windowsBadge(t, state, workspace, windows)))
     .when(Boolean(status), (el) => el.child(statusDot(t, status)))
     .when(ahead > 0, (el) => el.child(div().flex_none().text_size(11.5).text_color(t.ansi2).child(`↑${ahead}`)))
     .when(isActive, (el) => el.child(iconButton(t, "sidebar-panel", "panel-right", 22, () => run("mod.open", { name: "hws-panel" })).tooltip("Show or hide the workspace panel")));
 }
+
+// Unfiled sits above the workspaces, and shows only while something is in it.
+const unfiledPx = (state) => (state.unfiled > 0 ? ROW_PX : 0);
+
+function unfiledRow(t, state) {
+  return h_flex()
+    .id("sidebar-unfiled")
+    .h(ROW_PX)
+    .flex_none()
+    .px(8)
+    .gap(8)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .text_color(t.muted)
+    .hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .on_click(() => openUnfiled())
+    .tooltip("Sketches, notes and pages that belong to no workspace")
+    .child(div().size(CHEVRON_PX).flex_none())
+    .child(h_flex().size(TILE_PX).flex_none().items_center().justify_center().child(svg("mods/hws-panel/inbox.svg").size(14)))
+    .child(div().flex_1().min_w(0).truncate().child("Unfiled"))
+    .child(div().flex_none().text_size(11.5).text_color(t.dim).child(String(state.unfiled)));
+}
+
+const unfiledRows = (t, state) => (state.unfiled > 0 ? [unfiledRow(t, state)] : []);
 
 function archivedRowCount(state) {
   const count = state.archived?.length ?? 0;
@@ -604,14 +676,14 @@ function archivedRows(t, state) {
 function rows(t, state) {
   if (state.problem) return [div().h(ROW_PX).flex_none().px(8).flex().items_center().text_size(11.5).text_color(t.blocked).child(div().truncate().child(state.problem))];
   if (!state.workspaces) return [];
-  if (state.workspaces.length === 0) return [newRow(t), ...archivedRows(t, state)];
+  if (state.workspaces.length === 0) return [...unfiledRows(t, state), newRow(t), ...archivedRows(t, state)];
   const shown = spaces();
   const open = state.workspaces.flatMap((w) => {
     const members = membersOf(w, shown);
     const canRemove = workingSpaces(w, members).length >= 2;
     return [workspaceRow(t, state, w, members), ...shownChildren(state, w, members).map((space) => spaceRow(t, state, w, space, canRemove))];
   });
-  return [...open, ...archivedRows(t, state)];
+  return [...unfiledRows(t, state), ...open, ...archivedRows(t, state)];
 }
 
 // The scrollbar paints only while the rows overflow.

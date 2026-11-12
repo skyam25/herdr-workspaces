@@ -1583,7 +1583,7 @@ test("every element method used exists in gpui-kit.d.ts", { skip: !existsSync(`$
 
 test("every herdr import exists in herdr.d.ts", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {
   const types = readFileSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`, "utf8");
-  for (const file of ["../hws-new/main.js", "../hws-new/hws.js", "../hws-panel/main.js", "../hws-panel/cites.js", "../hws-panel/sections.js", "../hws-panel/sidebar.js", "../hws-brief/main.js"]) {
+  for (const file of ["../hws-new/main.js", "../hws-new/hws.js", "../hws-panel/main.js", "../hws-panel/cites.js", "../hws-panel/sections.js", "../hws-panel/sidebar.js", "../hws-panel/unfiled.js", "../hws-brief/main.js"]) {
     const names = /import \{([^}]*)\} from "herdr"/.exec(read(file))[1].split(",").map((s) => s.trim());
     for (const name of names) assert.match(types, new RegExp(`export function ${name}\\b`), `${file}: ${name}`);
   }
@@ -1633,6 +1633,95 @@ test("the empty sidebar section offers New workspace and the launcher", async ()
   assert.equal(H.overlays[0].props.step, "workspace");
   await m.click("sidebar-launcher");
   assert.deepEqual(H.runs.at(-1), { name: "mod.open", args: { name: "hws-new" } });
+});
+
+test("the sidebar shows Unfiled above the workspaces only while something is unfiled", async () => {
+  const H = setup({ hws: { list: [APP], unfiled: { surfaces: [], artifacts: [] } }, spaces: [{ id: "spc1", active: true, tabs: [] }] });
+  const empty = await mount("hws-panel", { view: "sidebar" });
+  assert.equal(empty.has("sidebar-unfiled"), false);
+
+  H.hws.unfiled = { surfaces: [{ id: "s1", type: "board", title: "idea", state: "draft" }], artifacts: [{ id: "a1", type: "note", title: "memo", path: "/a1" }] };
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.match(m.text(), /Unfiled.*2.*checkout demo/);
+  await m.click("sidebar-unfiled");
+  assert.deepEqual([H.overlays.at(-1).kind, H.overlays.at(-1).props], ["dialog", { view: "unfiled" }]);
+});
+
+test("a workspace row counts its open windows and brings them forward", async () => {
+  const windows = [
+    { id: "s1", workspace: "spc1", open: true },
+    { id: "s2", workspace: "spc1", open: false },
+    { id: "s3", workspace: "standalone", open: true },
+    { id: "s4", workspace: "spc1", open: true },
+  ];
+  const H = setup({ hws: { list: [APP], "surface list": windows }, spaces: [{ id: "spc1", active: true, tabs: [] }] });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.match(m.text(), /checkout demo.*2/);
+  await m.click("sidebar-windows-spc1");
+  const resumed = args(H).filter((a) => a[0] === "surface" && a[1] === "resume").map((a) => a[a.indexOf("--id") + 1]);
+  assert.deepEqual(resumed, ["s1", "s4"]);
+  assert.equal(H.runs.some((r) => r.name === "space.select"), false);
+});
+
+test("the Unfiled dialog opens, trashes and moves each kind of item", async () => {
+  const unfiled = {
+    surfaces: [
+      { id: "s1", type: "board", title: "idea", state: "open" },
+      { id: "s2", type: "note", title: "memo", state: "draft" },
+      { id: "s3", type: "page", title: "spec.html", state: "pane" },
+    ],
+    artifacts: [{ id: "a1", type: "board", title: "flow", path: "/a1", createdAt: 1 }],
+  };
+  const H = setup({ hws: { unfiled } });
+  const d = await mount("hws-panel", { view: "unfiled", overlay: "ov3" });
+  assert.match(d.text(), /idea.*sketch · open.*memo.*note · draft.*spec\.html.*page · in a pane.*flow.*saved/);
+
+  await d.click("unfiled-open-s1");
+  assert.deepEqual(args(H).at(-2), ["surface", "resume", "--id", "s1", "--json"]);
+  await d.click("unfiled-open-s3");
+  assert.deepEqual(args(H).at(-2), ["surface", "pop", "--id", "s3", "--to", "pane", "--json"]);
+
+  assert.equal(d.clickable("unfiled-trash-s1"), false);
+  assert.equal(d.clickable("unfiled-trash-s3"), false);
+  assert.equal(d.clickable("unfiled-move-s3"), false);
+  await d.click("unfiled-trash-s2");
+  assert.deepEqual(args(H).at(-2), ["surface", "discard", "--id", "s2", "--json"]);
+  await d.click("unfiled-trash-a1");
+  assert.deepEqual(args(H).at(-2), ["artifact", "trash", "a1", "--json"]);
+  assert.deepEqual(args(H).at(-1), ["unfiled", "--json"]);
+
+  await d.click("unfiled-move-a1");
+  assert.deepEqual(H.closed, ["ov3"]);
+  assert.deepEqual(H.overlays.at(-1).props, { view: "move-item", kind: "artifact", id: "a1", title: "flow", from: "standalone" });
+});
+
+test("the Unfiled dialog says when nothing is left", async () => {
+  setup({ hws: { unfiled: { surfaces: [], artifacts: [] } } });
+  const d = await mount("hws-panel", { view: "unfiled", overlay: "ov3" });
+  assert.match(d.text(), /Nothing is unfiled/);
+});
+
+test("the move dialog suggests the workspace in view, moves there and closes", async () => {
+  const workspaces = [{ id: "w1", name: "docs", kind: "app" }, { id: "w2", name: "api", kind: "general" }];
+  const H = setup({ hws: { "surface targets": { current: "standalone", suggested: "w2", workspaces } } });
+  const d = await mount("hws-panel", { view: "move-item", kind: "surface", id: "s1", title: "idea", from: "standalone", overlay: "ov5" });
+  assert.deepEqual(args(H).at(-1), ["surface", "targets", "--id", "s1", "--json"]);
+  assert.match(d.text(), /Suggested.*api.*Other workspaces.*docs/);
+  assert.equal(d.has("move-to-standalone"), false);
+  await d.click("move-to-w2");
+  assert.deepEqual(args(H).at(-1), ["surface", "move", "--id", "s1", "--workspace", "w2", "--json"]);
+  assert.deepEqual(H.closed, ["ov5"]);
+});
+
+test("the move dialog moves an artifact, offers Unfiled for filed work and keeps a failure", async () => {
+  const H = setup({ hws: { "surface targets": { current: null, suggested: null, workspaces: [{ id: "w1", name: "docs", kind: "app" }] }, "artifact move a1": { fail: "docs has no artifacts place" } } });
+  const d = await mount("hws-panel", { view: "move-item", kind: "artifact", id: "a1", title: "flow", from: "w0", overlay: "ov5" });
+  assert.deepEqual(args(H).at(-1), ["surface", "targets", "--json"]);
+  assert.ok(d.has("move-to-standalone"));
+  await d.click("move-to-w1");
+  assert.deepEqual(args(H).at(-1), ["artifact", "move", "a1", "--workspace", "w1", "--json"]);
+  assert.match(d.text(), /docs has no artifacts place/);
+  assert.deepEqual(H.closed, []);
 });
 
 test("sidebar rows switch spaces, and only the current workspace toggles the panel", async () => {

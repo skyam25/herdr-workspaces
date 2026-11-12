@@ -51,6 +51,16 @@ case "$1 $2" in
     fi
     echo "{\"id\":\"$id\",\"shown\":\"$to\",\"moved\":true}"
     ;;
+  "surface targets")
+    echo '{"current":"standalone","suggested":"w1","workspaces":[{"id":"w1","name":"herdr-workspaces","kind":"app"},{"id":"w2","name":"herdr-walkthrough","kind":"general"}]}'
+    ;;
+  "surface move")
+    if [[ "$FAKE_HWS_MODE" == "failing" ]]; then
+      echo '{"error":"that workspace is archived"}'
+      exit 1
+    fi
+    echo '{"moved":true}'
+    ;;
   "link "*)
     echo "{\"link\":\"@$FAKE_HWS_DIR/artifacts/$2/prompt.md\"}"
     ;;

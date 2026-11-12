@@ -200,6 +200,9 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
 | `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place. See [Delivery on Done](#delivery-on-done) |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
+| `hws surface move --id S --workspace W` | Moves a surface's record and data folder to W and keeps its id. W `standalone` takes it out of every workspace. An open window ends and starts again on the moved data, and its drafts link into W's drafts place. Prints `{id,from,workspace,moved,restarted}`. Fails on a surface in a pane, an archived W and an unknown W. A surface already in W prints `moved: false` |
+| `hws surface targets [--id S]` | Prints `{current,suggested,workspaces}`. `current` is S's workspace, or null without `--id`. `suggested` is the workspace of the selected space when it differs from `current`, else null. `workspaces` lists each open workspace as `{id,name,kind}` |
+| `hws unfiled` | Prints `{surfaces,artifacts}` for work in no workspace, newest first. Each surface is `{id,type,title,file,state}`, where `state` is `open`, `draft` or `pane`. A closed window with no work and a closed pane are left out. Each artifact is `{id,type,title,path,createdAt}` |
 | `hws phone pair` | In a terminal, shows a QR code and waits for a phone. Without a terminal on stdout, opens a Pair phone tab that does this. See [Phone](#phone) |
 | `hws phone send FILE\|ARTIFACT [--prompt X] [--terminal T] [--space S]` | Puts an `.html` or `.excalidraw` file in the phone's inbox, tied to T. Prints the hand-off. Fails when no phone is paired or the file is another type |
 | `hws phone status` | Prints `{running,paired,devices,handoffs}`, each device `{id,name,lastSeen,pairedAt}`. Starts the listener when a phone is paired, and never otherwise |
@@ -214,6 +217,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws artifact add --file F --in-place [--title X] [--workspace W]` | Kept workspaces only. Registers F where it is, anywhere on disk, with `inPlace: true`. Registering the same path again returns the first record with `existing: true` |
 | `hws artifact add --url URL [--title X] [--workspace W]` | Kept workspaces only. Registers a web document with type `link`. `path`, `prompt` and `url` hold the URL. Registering the same URL again returns the first record |
 | `hws artifact scan [--workspace W]` | Prints `{tracked, candidates, more}`. `candidates` lists output files under the home, files its documents link to and web documents they name, none of them tracked. Writes nothing |
+| `hws artifact move ARTIFACT --workspace W` | Moves an artifact's record to W, or out of every workspace with `standalone`. A bundle `hws` wrote moves under W's `artifacts` place, or `notes` for a note in a kept workspace, and its prompt points at the new folder. A tracked file or link stays where it is. A `supersedes` or `reviewOf` that names an artifact left behind becomes null |
+| `hws artifact trash ARTIFACT` | Moves an unfiled artifact's bundle to the Trash and drops its record. Fails on an artifact in a workspace |
 | `hws link ARTIFACT` | Prints `@<absolute prompt.md path>`, ready to paste into Claude |
 | `hws todo list\|add\|edit\|move\|send\|archive` | To-dos for a workspace, or for a space outside one. See [To-dos](#to-dos-hws-todo) |
 | `hws artifact terminal ARTIFACT` | Opens a new tab running `claude` with that artifact's prompt |
@@ -538,6 +543,7 @@ Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live.
 | `HWS_HOME` | State root |
 | `HWS_SURFACE_ID` | Surface id |
 | `HWS_WORKSPACE_ID` | Space id, or `standalone` |
+| `HWS_WORKSPACE_NAME` | Workspace name, empty when standalone |
 | `HWS_TERMINAL` | Owning terminal, empty when standalone |
 | `HWS_SURFACE_TYPE` | `board`, `note` or `page` |
 | `HWS_SURFACE_TITLE` | Title. `run.sh` sets it as the terminal title, which the pane header shows |
@@ -573,7 +579,9 @@ A running host raises its window on `POST /open`. The Window menu's Keep on Top 
 |---|---|---|
 | Pane header, beside Chat \| Terminal | Resume or Show, then sketch, note or page, for the agent's newest window, with +N for others. A failure toasts `Sketch didn't open`, with the kind that failed | `hws surface resume` |
 | `+` menu | Resume or Show per window, Move into a pane for an open one, Discard for a draft | `hws surface resume`, `hws surface pop --to pane`, `hws surface discard` |
-| Workspace panel, Open now | Every window and draft, including standalone ones. An untitled one reads sketch, note or page | `hws surface resume` |
+| Workspace panel, Open now | Every window and draft in that workspace. An untitled one reads sketch, note or page | `hws surface resume` |
+| Sidebar, Unfiled | Every window, draft and saved artifact in no workspace | `hws surface resume`, `hws surface move`, `hws artifact move` |
+| Sidebar, workspace row | A window glyph and the count of that workspace's open windows | `hws surface resume` for each |
 
 `hws-pane` runs `hws surface list` when the set of live terminals changes and at least every 60 seconds, one header copy at a time, and shares the result as `hws-pane.boards`. The list holds note and page windows as well as boards.
 
@@ -583,11 +591,22 @@ A surface keeps its id, data folder, title, file and owning terminal when it mov
 
 | Control | Where | Runs |
 |---|---|---|
-| Pop out | The surface's bar, in a pane | `hws surface pop --id S --to window` |
-| Pop in | The surface's bar, in a window | `hws surface pop --id S --to pane` |
+| Pop out | Left end of the surface's bar, in a pane | `hws surface pop --id S --to window` |
+| Pop in | Left end of the surface's bar, in a window | `hws surface pop --id S --to pane` |
 | Move `<title>` into a pane | The `+` menu, per open window | `hws surface pop --id S --to pane` |
 
-Neither button shows in a web view. The bar saves pending work, then starts `hws` in its own process group, as Done does. A save that fails shows `Could not save before moving`, and nothing moves. The `+` menu row saves nothing first, and relies on the host saving as it quits. Below 460 px the buttons keep their icon and drop their label.
+Neither button shows in a web view. The bar saves pending work, then starts `hws` in its own process group, as Done does. A save that fails shows `Could not save before moving`, and nothing moves. The `+` menu row saves nothing first, and relies on the host saving as it quits. Below 460 px the buttons keep their icon and drop their label. A workspace chip follows Pop, then the owning terminal's name, and the mic and Done stay at the right end. A surface in its own window has no title strip, because the native title bar shows the title.
+
+### Workspace chip
+
+The chip names the workspace from `HWS_WORKSPACE_NAME`, with a folder icon, or reads Unfiled with a tray icon when the name is empty. A web view shows no chip.
+
+| Where | Chip |
+|---|---|
+| Own window | Opens the move menu |
+| Pane | A label only. Its tooltip says to pop the surface out to move it |
+
+The move menu opens upward and reads `hws surface targets --id S`. It lists Suggested first when `suggested` is set, then every other open workspace, then Unfiled when the surface is in a workspace. A pick saves pending work, as Pop does, then runs `hws surface move --id S --workspace W`, which ends this window and starts it again in W. A failure shows `Could not move` with the reason, and the window stays.
 
 `hws surface pop` works in this order.
 
@@ -705,6 +724,7 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | Action | Result |
 |---|---|
 | Heading + | `mod.open` for `hws-new` |
+| Unfiled row, first in the list, shown while `hws unfiled` lists anything | Opens the [Unfiled dialog](#unfiled-and-move-dialogs). Shows an inbox glyph in the tile's place and the count of unfiled surfaces and artifacts |
 | New workspace row, shown when there are none | Opens the workspace form |
 | Workspace row | `space.select` for its showing space, else its first. Draws a letter tile in the colour `space.colors` holds for the workspace id or its first space, else one picked from its name. Carries the highlight when no shown child row is the active space |
 | Chevron, shown when the workspace has a child row | Folds or unfolds its child rows. The choice is remembered. Its slot stays empty otherwise, so every name starts at the same x |
@@ -712,8 +732,9 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | Tasks row, the Board space listed first and with no minus | `space.select` for the Board space, then `tab.select` for its Board tab. Shows the Waiting on you count when it is above zero |
 | Minus on a space row, shown while the pointer is over the row and the workspace has two or more non-Board spaces | `hws space remove` |
 | Panel button on the current workspace | `mod.open` for `hws-panel` |
+| Window count on a workspace row, shown while it has open windows | A window glyph and the count of open windows that `hws surface list` gives the workspace, before the status dot. Its tooltip reads `N open windows`. A click runs `hws surface resume --id` for each of them and leaves the space as it was |
 
-The section reloads with `hws list` when the spaces change and every 60 seconds. Each reload sets `shared("hws.workspace.spaces")` to the sorted ids of every space in an open workspace, Board spaces included, only when the list changes. Each reload also runs `hws tidy status --workspace W` for every kept workspace. Each full reload runs `hws todo list --space <Board space>` for every workspace with a Board and counts the unarchived cards in `waiting`, and a failure counts as zero. It sets `shared("hws.tasks.waiting")` to an object that maps every space of each such workspace, the Board space included, to that count, only when the map changes. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A kept workspace with no `tidiedAt` shows a dim unwritten ring, which is neither behind nor stale. A throwaway, or a failed status, shows no ring. Space rows show each space's status. The active space row is highlighted, its workspace row shows full-strength text and tile with no background, and other workspace rows are muted. Tabs appear only in the top bar. Right-clicking a workspace row opens a menu with Open panel, Add space…, Add tasks when it has no Board, Rename and Archive, or Close in place of Archive for a throwaway. Add space… opens the dialog for `hws space add` and `hws space move`. Add tasks runs `hws board add --workspace W`, then shows Tasks. Open panel selects the workspace's space and splits the panel beside a terminal on its shown tab, or focuses a panel already there. Archive, Close, Restore and Remove each ask first in a dialog. `hws list --archived` fills a folded Archived row at the end of the list. Clicking an archived workspace offers Restore, and its right-click menu has Restore, Rename and Remove, which runs `hws close`. The section sizes its block with `layout.resize`, growing until the other sidebar blocks reach their fixed size or `min`, measured against the window height in Herdr's `window.json`, or up to 480px of rows when that file cannot be read, and then scrolling. Dragging the divider below the section up caps the list at that height, and the list scrolls. Dragging it down past every row clears the cap. The cap is kept in `localStorage` under `sidebar.workspaces.cap`. The scrollbar shows only while the rows overflow. The section shows only the + when the sidebar is narrower than 160px. The launcher offers Orchestrate this space only when the active space's id is in `hws.workspace.spaces`, and its dialog fits its rows.
+The section reloads with `hws list` when the spaces change and every 60 seconds. Each reload sets `shared("hws.workspace.spaces")` to the sorted ids of every space in an open workspace, Board spaces included, only when the list changes. Each reload also runs `hws tidy status --workspace W` for every kept workspace. Each full reload also runs `hws unfiled` and `hws surface list`, and a failure of either counts as nothing. Each full reload runs `hws todo list --space <Board space>` for every workspace with a Board and counts the unarchived cards in `waiting`, and a failure counts as zero. It sets `shared("hws.tasks.waiting")` to an object that maps every space of each such workspace, the Board space included, to that count, only when the map changes. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A kept workspace with no `tidiedAt` shows a dim unwritten ring, which is neither behind nor stale. A throwaway, or a failed status, shows no ring. Space rows show each space's status. The active space row is highlighted, its workspace row shows full-strength text and tile with no background, and other workspace rows are muted. Tabs appear only in the top bar. Right-clicking a workspace row opens a menu with Open panel, Add space…, Add tasks when it has no Board, Rename and Archive, or Close in place of Archive for a throwaway. Add space… opens the dialog for `hws space add` and `hws space move`. Add tasks runs `hws board add --workspace W`, then shows Tasks. Open panel selects the workspace's space and splits the panel beside a terminal on its shown tab, or focuses a panel already there. Archive, Close, Restore and Remove each ask first in a dialog. `hws list --archived` fills a folded Archived row at the end of the list. Clicking an archived workspace offers Restore, and its right-click menu has Restore, Rename and Remove, which runs `hws close`. The section sizes its block with `layout.resize`, growing until the other sidebar blocks reach their fixed size or `min`, measured against the window height in Herdr's `window.json`, or up to 480px of rows when that file cannot be read, and then scrolling. Dragging the divider below the section up caps the list at that height, and the list scrolls. Dragging it down past every row clears the cap. The cap is kept in `localStorage` under `sidebar.workspaces.cap`. The scrollbar shows only while the rows overflow. The section shows only the + when the sidebar is narrower than 160px. The launcher offers Orchestrate this space only when the active space's id is in `hws.workspace.spaces`, and its dialog fits its rows.
 
 ## Space menu
 
@@ -877,6 +898,15 @@ Reads, on each `hws list` refresh:
 | Record session row | The `[session:ID]` action |
 | Record scratch folder | macOS `open` on the folder, shown when it exists |
 | Promote… | Opens the Promote dialog |
+
+### Unfiled and move dialogs
+
+Both are `hws-panel` dialogs.
+
+| Dialog | Props | Shows | Actions |
+|---|---|---|---|
+| Unfiled | `{"view":"unfiled"}` | `hws unfiled`, surfaces under Open and drafts, then artifacts under Saved. A surface row gives its type and `open`, `draft` or `in a pane`. An artifact row gives `saved` and its age. With nothing left it says so | Open runs `hws surface resume --id S`, or `hws surface pop --id S --to pane` for a pane, and opens an artifact as the `[artifact:ID]` chip does. Move… closes this dialog and opens the move dialog. Trash runs `hws surface discard --id S` for a draft, and is off for an open window or a pane, and runs `hws artifact trash` for an artifact. The list reloads after each action, and a failure shows under it |
+| Move to a workspace | `{"view":"move-item","kind":"surface"\|"artifact","id","title","from"}` | `hws surface targets`, with `--id` for a surface. Suggested holds `suggested`. The other open workspaces follow, without `current`. An Unfiled row closes the list when `current` is neither `standalone` nor null | A row runs `hws surface move --id S --workspace W` or `hws artifact move A --workspace W`, then closes. A failure stays in the dialog. Move… is off for a surface in a pane |
 
 ### New menu: `hws-actions`
 

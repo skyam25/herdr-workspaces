@@ -320,6 +320,8 @@ export interface SurfaceState {
   owner?: string;
   /** Where the host shows this surface. Pop moves it to the other place. */
   shown: 'pane' | 'window';
+  /** The workspace that holds this surface. An empty name means Unfiled. */
+  workspace?: { id: string; name: string };
   /** A web view shows this surface, so it offers no Pop. */
   web?: boolean;
   busy?: boolean;
@@ -526,12 +528,23 @@ export interface IpadSheetStatus {
   refused?: string;
 }
 
+/** What `hws surface targets` reports. `current` is `standalone` for an unfiled surface. */
+export interface SurfaceTargets {
+  current: string | null;
+  suggested: string | null;
+  workspaces: { id: string; name: string; kind: string }[];
+}
+
 export interface CompanionApi extends BoardHost {
   init(): Promise<InitInfo>;
   /** Says what a standalone press wants done with the artifact the next Send makes. Owner and pop act at once. */
   surfaceWant(action: SurfaceAction): Promise<void>;
   /** Runs the waiting press on the artifact already saved. False when there is none, so the caller says what is missing. */
   surfaceRepeat(): Promise<boolean>;
+  /** The workspaces this surface can move to. */
+  surfaceTargets(): Promise<SurfaceTargets>;
+  /** Saves pending work and moves this surface to a workspace, or to `standalone` to unfile it. */
+  surfaceMove(workspace: string): Promise<void>;
   onSurface(fn: (state: SurfaceState) => void): Subscription;
   onSurfaceDoneKey(fn: () => void): Subscription;
   listBoardComments(): Promise<Record<string, BoardComments>>;
@@ -736,6 +749,8 @@ export const CH = {
   surfaceDoneKey: 'surface:done-key',
   surfaceWant: 'surface:want',
   surfaceRepeat: 'surface:repeat',
+  surfaceTargets: 'surface:targets',
+  surfaceMove: 'surface:move',
   init: 'app:init',
   listBoards: 'boards:list',
   loadBoard: 'boards:load',
@@ -869,6 +884,8 @@ export const IPC_INVOKE = {
   init: CH.init,
   surfaceWant: CH.surfaceWant,
   surfaceRepeat: CH.surfaceRepeat,
+  surfaceTargets: CH.surfaceTargets,
+  surfaceMove: CH.surfaceMove,
   ipadSheetOpen: CH.ipadSheetOpen,
   ipadNewCode: CH.ipadNewCode,
   ipadSheetClose: CH.ipadSheetClose,

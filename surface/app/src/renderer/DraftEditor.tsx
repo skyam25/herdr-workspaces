@@ -83,6 +83,8 @@ export function DraftEditor(props: {
   onCopy: (clip: { html: string; text: string }) => Promise<boolean>;
   /** Puts a line on the clipboard that a new session can pick the note up from. */
   onCopyReference: () => void;
+  /** The surface's owner and Pop, first in the footer. */
+  placeBar?: ReactNode;
   /** The target chip and Send, last in the footer. */
   sendBar?: ReactNode;
   /** A surface has one note and no boards, so filing, queueing, deleting and linking a board mean nothing. */
@@ -236,6 +238,7 @@ export function DraftEditor(props: {
         )}
       </div>
       <footer>
+        {props.placeBar}
         {!props.surface && (
           <>
             <label className={draft.board ? 'board-pick' : 'board-pick unset'} title="A board whose sketch goes out with this draft">

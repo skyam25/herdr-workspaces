@@ -3,6 +3,7 @@
 // decision or Promote, a `mod.open` copy toggles the pane and closes itself, a
 // layout block with `view: "sidebar"` shows the Workspaces section, and a popup
 // copy shows the workspace menu, a space's menu, the stage menu or an artifact's menu.
+// Dialog copies also show Unfiled work and move a surface or artifact to a workspace.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -14,6 +15,7 @@ import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, nameList, noteLines, p
 import { openCite, openExternally, revealPath, showBoard } from "./cites.js";
 import { renderArtifactMenu } from "./artifactmenu.js";
 import { initMoveSpace, initSpaceMenu, renderMoveSpace, renderSpaceMenu, spaceRef } from "./spacemenu.js";
+import { initMoveItem, initUnfiled, renderMoveItem, renderUnfiled } from "./unfiled.js";
 import { artifactsSection, currentSection, headerSection, historySection, notesSection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
 
 const MOD = "hws-panel";
@@ -58,6 +60,10 @@ export default class Panel extends View {
       initSpaceMenu(this, cx);
     } else if (this.view === "move-space") {
       initMoveSpace(this, cx);
+    } else if (this.view === "unfiled") {
+      initUnfiled(this, cx);
+    } else if (this.view === "move-item") {
+      initMoveItem(this, cx);
     } else if (this.view === "row-menu" || this.view === "stage-menu" || this.view === "artifact-menu") {
       // The menu draws from its props.
     } else if (this.view === "decide" || this.view === "confirm") {
@@ -668,6 +674,8 @@ export default class Panel extends View {
     if (this.view === "confirm") return renderConfirm(t, this);
     if (this.view === "space-menu") return renderSpaceMenu(t, this);
     if (this.view === "move-space") return renderMoveSpace(t, this);
+    if (this.view === "unfiled") return renderUnfiled(t, this);
+    if (this.view === "move-item") return renderMoveItem(t, this);
     return this.renderPanel(t, cx);
   }
 }

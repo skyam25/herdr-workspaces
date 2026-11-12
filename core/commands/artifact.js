@@ -1,15 +1,17 @@
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
-import { artifactOfFile, findArtifact, isInside, linkFor, moveDir, realOf } from '../artifacts.js';
+import { artifactOfFile, findArtifact, isInside, linkFor, moveBundle, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, listLive } from '../herdr.js';
 import { listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
+import { STANDALONE, slug } from '../paths.js';
 import { isKept, placeOf, writablePlace } from '../places.js';
+import { moveToTrash } from '../trash.js';
 import { requireCallingTerminal, requireFlag, resolveWorkspace, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { listRetired } from '../retired.js';
 import { scanWorkspace } from '../scan.js';
-import { newId, surfaceOpen } from './surface.js';
+import { moveTarget, newId, surfaceOpen } from './surface.js';
 
 export const ARTIFACT_STATUSES = ['draft', 'current', 'superseded'];
 
@@ -41,6 +43,60 @@ function openArtifact(id) {
   const manifest = listManifests({ includeStandalone: true }).find((item) => item.artifacts.some((one) => one.id === id));
   if (!manifest) throw new HwsError(`no artifact ${id} in an open workspace`);
   return manifest;
+}
+
+// The folder hws wrote a bundle into, or null for a file or link tracked where it sits.
+function bundleRoot(manifest, artifact) {
+  if (!artifact.path || /^https?:/i.test(artifact.path)) return null;
+  for (const role of ['artifacts', 'notes']) {
+    if (role === 'notes' && !isKept(manifest)) continue;
+    const { path } = placeOf(manifest, role);
+    if (path && isInside(path, artifact.path) && realOf(path) !== realOf(artifact.path)) return path;
+  }
+  return null;
+}
+
+// Moves an artifact to another workspace. A bundle hws wrote moves with it, and a tracked file stays where it is.
+export function artifactMove(flags, [id]) {
+  if (!id) throw new UsageError('name the artifact to move');
+  const target = moveTarget(requireFlag(flags, 'workspace'));
+  const manifest = openArtifact(id);
+  const artifact = manifest.artifacts.find((item) => item.id === id);
+  if (manifest.id === target.id) return { data: { id, workspace: target.id, moved: false }, text: `${id} is already in ${target.name}` };
+
+  let moved = { ...artifact };
+  if (bundleRoot(manifest, artifact) && existsSync(artifact.path)) {
+    const place = artifact.type === 'note' && isKept(target) ? 'notes' : 'artifacts';
+    const dir = join(writablePlace(target, place), isKept(target) ? `${slug(artifact.title)}-${id}` : id);
+    if (existsSync(dir)) throw new HwsError(`${dir} already exists`);
+    const prompt = moveBundle(artifact.path, dir);
+    moved = { ...moved, path: dir, ...(artifact.prompt ? { prompt } : {}) };
+  }
+
+  // Links to artifacts left behind would point at nothing.
+  if (moved.supersedes && !target.artifacts.some((item) => item.id === moved.supersedes)) moved.supersedes = null;
+  if (moved.reviewOf && !target.artifacts.some((item) => item.id === moved.reviewOf)) moved.reviewOf = null;
+
+  updateManifest(manifest.id, (draft) => {
+    draft.artifacts = draft.artifacts.filter((item) => item.id !== id);
+  });
+  updateManifest(target.id, (draft) => {
+    draft.artifacts.push(moved);
+  });
+  return { data: { ...moved, from: manifest.id, workspace: target.id, moved: true }, text: `moved ${id} to ${target.name}` };
+}
+
+// Moves an unfiled artifact's bundle to the Trash and drops its record.
+export function artifactTrash(_flags, [id]) {
+  if (!id) throw new UsageError('name the artifact to trash');
+  const manifest = openArtifact(id);
+  if (manifest.id !== STANDALONE) throw new HwsError('only an unfiled artifact can go to the Trash this way');
+  const artifact = manifest.artifacts.find((item) => item.id === id);
+  if (bundleRoot(manifest, artifact) && existsSync(artifact.path)) moveToTrash([artifact.path]);
+  updateManifest(manifest.id, (draft) => {
+    draft.artifacts = draft.artifacts.filter((item) => item.id !== id);
+  });
+  return { data: { id, trashed: true }, text: `trashed ${id}` };
 }
 
 // An empty --supersedes clears it.

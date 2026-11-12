@@ -184,7 +184,30 @@ async function noteScenario() {
   }
 }
 
-for (const scenario of [pageScenario, noteScenario]) {
+async function moveScenario() {
+  const name = 'wmove';
+  const host = startWindow({ id: name, type: 'board', port: 9344 });
+  try {
+    const page = await attach(host);
+    const chip = '[data-testid="surface-workspace"]';
+    const shown = await until(() => page.evaluate(`!!document.querySelector('${chip}')`), 30000, 'the workspace chip').catch(() => false);
+    check(name, 'chip_shown', shown);
+    check(name, 'chip_unfiled', (await page.evaluate(`document.querySelector('${chip}')?.textContent`)) === 'Unfiled');
+    await page.evaluate(`document.querySelector('${chip}').click()`);
+    const listed = await until(() => page.evaluate(`!!document.querySelector('[data-testid="move-to-w2"]')`), 10000, 'the move menu').catch(() => false);
+    check(name, 'menu_lists_workspaces', listed);
+    check(name, 'menu_suggests', (await page.evaluate(`document.querySelector('[data-testid="move-menu"] h3')?.textContent`)) === 'Suggested');
+    await page.evaluate(`document.querySelector('[data-testid="move-to-w2"]').click()`);
+    const line = `surface move --id ${name} --workspace w2 --json`;
+    const log = await until(async () => host.log().includes(line) && host.log(), 10000, 'surface move').catch(() => host.log());
+    check(name, 'move_called', log.includes(line), log.trim().split('\n').at(-1) ?? '');
+    page.close();
+  } finally {
+    await stopWindow(host);
+  }
+}
+
+for (const scenario of [pageScenario, noteScenario, moveScenario]) {
   try {
     await scenario();
   } catch (err) {

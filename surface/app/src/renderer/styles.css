@@ -583,14 +583,91 @@ button.stop-talk:hover {
   min-width: 0;
 }
 
-.send-to .surface-owner {
+/* Where the surface lives sits at the left, apart from the hand-off at the right. */
+
+.surface-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.surface-place .surface-owner {
+  min-width: 0;
   max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.surface-place .surface-workspace {
+  min-width: 0;
+  max-width: 240px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.surface-workspace .label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.send-to .surface-pop {
+.surface-workspace.unfiled {
+  color: var(--muted);
+}
+
+.surface-workspace:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+/* The move menu opens upward from the composer's left end. */
+
+.popover-panel.start {
+  left: 0;
+  right: auto;
+}
+
+.move-menu {
+  width: 260px;
+  max-height: 360px;
+  overflow-y: auto;
+  gap: 4px;
+}
+
+.move-menu h3 {
+  padding: 4px 6px 2px;
+}
+
+.move-menu p {
+  margin: 0;
+  padding: 4px 6px;
+}
+
+.move-menu .move-row {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.move-row .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.move-menu .rule {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line);
+}
+
+.surface-place .surface-pop {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -639,7 +716,7 @@ button.stop-talk:hover {
 @media (max-width: 460px) {
   .composer button.talk :is(.talk-label, kbd),
   .editor footer .send-to button.talk :is(.talk-label, kbd),
-  .send-to .surface-pop .label {
+  .surface-place .surface-pop .label {
     display: none;
   }
 }
@@ -981,6 +1058,12 @@ button.stop-talk:hover {
 
 .board-bar .end {
   margin-left: auto;
+}
+
+/* Without the strip above it, the board bar keeps its own top margin. */
+
+.no-strip .board-bar {
+  padding-top: 8px;
 }
 
 /* Attach: a live session can take an unfiled board. */

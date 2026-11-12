@@ -28,7 +28,7 @@ import { ResumeRow } from './ResumeRow';
 import { ReviewMode } from './ReviewMode';
 import { SessionDot, SessionSidebar, sessionState, sidebarOrder, useSidebar } from './SessionSidebar';
 import { SendTo } from './SendTo';
-import { SurfaceBar } from './SurfaceBar';
+import { SurfaceBar, SurfacePlace } from './SurfaceBar';
 import { IpadSheet } from './IpadSheet';
 import { SettingsPopover } from './SettingsPopover';
 import { Toast, type ToastKind, type ToastMessage } from './Toast';
@@ -331,6 +331,9 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
       onDiscard={reviewing ? undefined : () => void discardVoice()}
     />
   );
+  const placeBar = surface && (
+    <SurfacePlace surface={surface} onAct={surfaceAct} onTargets={() => host.surfaceTargets()} onMove={(workspace) => void host.surfaceMove(workspace)} />
+  );
   const sendBar = surface ? (
     <SurfaceBar surface={surface} mic={micButton} onDone={() => void send()} onAct={surfaceAct} />
   ) : (
@@ -440,8 +443,10 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
         cleanup={host}
         onNotify={(text) => notify(text)}
       />}
-      <div className="work">
-        <header className="strip">
+      <div className={surface?.shown === 'window' ? 'work no-strip' : 'work'}>
+
+        {/* A surface in its own window shows its title in the native title bar, so it skips the strip. */}
+        {surface?.shown !== 'window' && <header className="strip">
           <div className="lead">
             {!surface && <button
               className="ghost icon-button"
@@ -546,7 +551,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
               </>
             }
           />}
-        </header>
+        </header>}
         {!surface && active && !active.isLive && (
           <ResumeRow
             key={active.sessionId}
@@ -611,6 +616,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
               onOpenBoard={openBoard}
               onFiled={(where) => notify(`Moved to ${where}.`)}
               onFilingMenu={dismissToast}
+              placeBar={placeBar}
               sendBar={sendBar}
               voice={reviewVoice}
               talking={recording}
@@ -701,6 +707,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
         </main>
         {!inlineSend && (
           <footer className="composer" data-testid="composer">
+            {placeBar}
             {onMicrophone && (
               <VoiceStrip
                 recording={recording}

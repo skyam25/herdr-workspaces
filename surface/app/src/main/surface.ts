@@ -13,7 +13,7 @@ import http from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { DeliveriesResponse, Delivery, OpenRequest } from '../protocol';
-import type { SurfaceAction, SurfaceState, SurfaceType } from '../shared/ipc';
+import type { SurfaceAction, SurfaceState, SurfaceTargets, SurfaceType } from '../shared/ipc';
 import { isLocalUrl } from '../shared/outputs';
 import { portablePrompt } from '../shared/sessions';
 import type { HandedDraft } from './sender';
@@ -33,6 +33,8 @@ export interface SurfaceConfig {
   shown: 'pane' | 'window';
   /** A web view shows the page. */
   web?: boolean;
+  /** The workspace that holds the surface. An empty name means Unfiled. */
+  workspace?: { id: string; name: string };
 }
 
 /** The surface this process hosts, or undefined when it runs as the plain app. */
@@ -54,6 +56,7 @@ export function surfaceFromEnv(env: NodeJS.ProcessEnv): SurfaceConfig | undefine
     ...(env.HWS_SURFACE_OWNER ? { owner: env.HWS_SURFACE_OWNER } : {}),
     shown: env.HWS_SURFACE_WINDOW === '1' ? 'window' : 'pane',
     ...(env.HWS_SURFACE_WEB === '1' ? { web: true } : {}),
+    ...(env.HWS_WORKSPACE_ID ? { workspace: { id: env.HWS_WORKSPACE_ID, name: env.HWS_WORKSPACE_NAME ?? '' } } : {}),
   };
 }
 
@@ -167,6 +170,7 @@ export class SurfaceHost {
       ...(cfg.owner ? { owner: cfg.owner } : {}),
       shown: cfg.shown,
       ...(cfg.web ? { web: true } : {}),
+      ...(cfg.workspace ? { workspace: cfg.workspace } : {}),
     };
   }
 
@@ -239,6 +243,33 @@ export class SurfaceHost {
     }
     try {
       await this.hws(['surface', 'pop', '--id', this.cfg.id, '--to', to, '--json']);
+      this.update({ busy: false });
+    } catch (err) {
+      this.update({ busy: false, notice: { text: `Could not move: ${(err as Error).message}`, error: true } });
+    }
+  }
+
+  /** The workspaces this surface can move to. */
+  async targets(): Promise<SurfaceTargets> {
+    const result = (await this.hws(['surface', 'targets', '--id', this.cfg.id, '--json'])) as Partial<SurfaceTargets>;
+    return { current: result.current ?? null, suggested: result.suggested ?? null, workspaces: result.workspaces ?? [] };
+  }
+
+  /**
+   * Saves pending work, then asks `hws` to move this surface. `hws` ends this host
+   * and starts the window again from the moved data.
+   */
+  async move(workspace: string): Promise<void> {
+    if (this.state.busy || this.state.delivered || this.cfg.shown !== 'window') return;
+    this.update({ busy: true });
+    try {
+      await this.deps.flush?.();
+    } catch (err) {
+      this.update({ busy: false, notice: { text: `Could not save before moving: ${(err as Error).message}`, error: true } });
+      return;
+    }
+    try {
+      await this.hws(['surface', 'move', '--id', this.cfg.id, '--workspace', workspace, '--json']);
       this.update({ busy: false });
     } catch (err) {
       this.update({ busy: false, notice: { text: `Could not move: ${(err as Error).message}`, error: true } });

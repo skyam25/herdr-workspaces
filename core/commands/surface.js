@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdir
 import { request as httpRequest } from 'node:http';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import { FEEDBACK_ROLE, artifactOfFile, linkFor, moveBundle, realOf } from '../artifacts.js';
+import { FEEDBACK_ROLE, artifactOfFile, linkFor, moveBundle, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import {
   act,
@@ -21,9 +21,9 @@ import {
   windowStatus,
 } from '../herdr.js';
 import { TIDY_ROLE, ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
-import { HOST_SCRIPT, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
+import { HOST_SCRIPT, STANDALONE, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
 import { isForeign, isKept, placeOf, writablePlace } from '../places.js';
-import { callingTerminal, requireCallingTerminal, requireFlag, spaceOfTerminal } from '../resolve.js';
+import { callingTerminal, requireCallingTerminal, requireFlag, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
 
@@ -201,6 +201,7 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
     HWS_HOME: stateRoot(),
     HWS_SURFACE_ID: id,
     HWS_WORKSPACE_ID: workspace.id,
+    HWS_WORKSPACE_NAME: workspace.id === STANDALONE ? '' : workspace.name,
     HWS_TERMINAL: terminal ?? '',
     HWS_SURFACE_TYPE: type,
     HWS_SURFACE_TITLE: title,
@@ -401,6 +402,28 @@ export function surfaceList() {
   return { data: windows, text: windows.map((item) => `${item.id} ${item.open ? 'open' : 'draft'} ${item.title}`).join('\n') };
 }
 
+// Work that belongs to no workspace: surfaces still open or holding a draft, then saved artifacts.
+// Each list is newest first.
+export function unfiledList() {
+  const manifest = listManifests({ includeStandalone: true }).find((item) => item.id === STANDALONE);
+  if (!manifest) return { data: { surfaces: [], artifacts: [] }, text: 'nothing unfiled' };
+  const live = listLive() ?? { spaces: [] };
+  const stateOf = (surface) => {
+    if (!surface.host) return paneIsOpen(live, surface.pane) ? 'pane' : null;
+    if (isWindowOpen(surface)) return 'open';
+    return hasDraftWork(manifest.id, surface.id) ? 'draft' : null;
+  };
+  const surfaces = manifest.surfaces
+    .map((surface) => ({ id: surface.id, type: surface.type, title: surface.title, file: surface.file ?? null, state: stateOf(surface) }))
+    .filter((surface) => surface.state)
+    .reverse();
+  const artifacts = manifest.artifacts
+    .map((artifact) => ({ id: artifact.id, type: artifact.type, title: artifact.title, path: artifact.path, createdAt: artifact.createdAt ?? null }))
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  const lines = [...surfaces.map((item) => `${item.id}\t${item.state}\t${item.title}`), ...artifacts.map((item) => `${item.id}\tsaved\t${item.title}`)];
+  return { data: { surfaces, artifacts }, text: lines.join('\n') || 'nothing unfiled' };
+}
+
 // A running host shows its window on POST /open. False means it has not started listening yet.
 function raiseWindow(surface) {
   return new Promise((finish) => {
@@ -521,6 +544,97 @@ export async function surfacePop(flags) {
   process.on('SIGHUP', () => {});
   const data = target === 'window' ? await popOut(manifest, surface, live) : await popIn(manifest, surface, live);
   return { data, text: `moved ${surfaceId} to a ${target}` };
+}
+
+// The workspace a move names. `standalone` takes a surface or artifact out of every workspace.
+export function moveTarget(ref) {
+  if (ref === STANDALONE) return ensureStandaloneManifest();
+  const workspace = workspaceByRef(ref);
+  if (workspace.archived) throw new HwsError(`${workspace.name} is archived, so restore it first`);
+  return workspace;
+}
+
+// Turns linked draft folders back into real ones inside the data folder.
+function unlinkDrafts(dataDir) {
+  for (const entry of DRAFT_ENTRIES) {
+    const link = join(dataDir, entry);
+    if (!lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) continue;
+    const target = existsSync(link) ? realpathSync(link) : null;
+    unlinkSync(link);
+    if (target) moveDir(target, link);
+  }
+}
+
+// Puts real draft folders under the workspace's drafts place and links them back.
+function relinkDrafts(workspace, surface, dataDir) {
+  const place = draftsPlace(workspace);
+  if (!place) return;
+  const home = join(place, `${slug(surface.file ? basename(surface.file) : surface.title)}-${surface.id}`);
+  for (const entry of DRAFT_ENTRIES) {
+    const link = join(dataDir, entry);
+    if (existsSync(link)) moveDir(link, join(home, entry));
+    else mkdirSync(join(home, entry), { recursive: true });
+    symlinkSync(join(home, entry), link);
+  }
+}
+
+// Moves a surface's record and data to another workspace, keeping its id.
+// An open window ends first and starts again on the moved data.
+export async function surfaceMove(flags) {
+  const surfaceId = requireFlag(flags, 'id');
+  const target = moveTarget(requireFlag(flags, 'workspace'));
+  const { manifest, surface } = findSurface(surfaceId);
+  if (manifest.id === target.id) return { data: { id: surfaceId, workspace: target.id, moved: false }, text: `${surfaceId} is already in ${target.name}` };
+  if (!surface.host) throw new HwsError('pop the surface out to its own window before moving it');
+
+  process.on('SIGHUP', () => {});
+  const wasOpen = isWindowOpen(surface);
+  if (wasOpen) {
+    killTerminal(surface.host);
+    await awaitHostEnd(surface.host);
+  }
+
+  const from = surfaceDataDir(manifest.id, surfaceId);
+  const to = surfaceDataDir(target.id, surfaceId);
+  const oldHome = linkedDraftHome(from);
+  if (existsSync(from)) {
+    unlinkDrafts(from);
+    moveDir(from, to);
+  } else {
+    mkdirSync(to, { recursive: true });
+  }
+  relinkDrafts(target, surface, to);
+  if (oldHome) {
+    try {
+      rmdirSync(oldHome);
+    } catch {
+      // Something else is still in there, so it stays.
+    }
+  }
+
+  dropSurface(manifest, surface);
+  let moved = { ...surface };
+  if (wasOpen) {
+    const { host, pid } = startWindow(target, surface, requireLive());
+    moved = { ...moved, host, pid };
+  }
+  replaceSurface(target.id, moved);
+  return { data: { id: surfaceId, from: manifest.id, workspace: target.id, moved: true, restarted: wasOpen }, text: `moved ${surfaceId} to ${target.name}` };
+}
+
+// Where a surface can move. The workspace of the selected space comes first when it is another one.
+export function surfaceTargets(flags) {
+  const current = flags.id ? findSurface(flags.id).manifest.id : null;
+  const space = windowStatus()?.space;
+  const selected = space ? manifestOfSpace(space)?.id ?? null : null;
+  const workspaces = listManifests()
+    .filter((item) => !item.archived)
+    .map((item) => ({ id: item.id, name: item.name, kind: item.kind }));
+  const suggested = selected && selected !== current ? selected : null;
+  return {
+    data: { current, suggested, workspaces },
+    text: workspaces.map((item) => `${item.id}\t${item.name}${item.id === suggested ? '\tsuggested' : ''}${item.id === current ? '\tcurrent' : ''}`).join('\n'),
+  };
 }
 
 // A discarded draft is user work, so it goes to the Trash.
