@@ -24,7 +24,12 @@ if (command === 'get') {
   process.exit(0);
 }
 
+// Every run starts t90, so an ended t90 is live again.
 if (command === 'run') {
+  if (state.hc?.t90 === 'missing') {
+    delete state.hc.t90;
+    writeFileSync(process.env.FAKE_STATE, JSON.stringify(state));
+  }
   process.stdout.write('{"address":"t90","state":"live"}\n');
   process.exit(0);
 }

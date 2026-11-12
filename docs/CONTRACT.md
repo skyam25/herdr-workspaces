@@ -9,7 +9,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Workspace | One or more separate Herdr spaces with one manifest. Its spaces share instructions, a Board, Outputs and surfaces. Kinds are `general`, `app`, `deliverable`, `throwaway` |
 | Kept kind | `general`, `app` or `deliverable`. A setting inside the workspace that tells agents what kind of work it is |
 | Normal terminal | A plain Herdr tab. No manifest |
-| Surface | A board, note or page running in its own Herdr pane through Pixel |
+| Surface | A board, note or page, shown in a Herdr pane through Pixel or in its own window. Pop out and Pop in move it between the two |
 | Glued surface | A surface opened by a terminal. Done returns to that terminal |
 | Standalone surface | A surface with no terminal. Offers Open terminal and Copy link, and its note source line and page comment line name those two buttons in place of Done |
 | Artifact | What a surface leaves behind after Done |
@@ -191,11 +191,12 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws list [--archived]` | Every open manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest. `--archived` lists only archived workspaces |
 | `hws register --terminal T --session S [--role R] [--folder F]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal. The terminal's record is `{ id, folder }`, and `folder` is left out when `--folder` is not given |
 | `hws outputs --terminals T1,T2` | Read-only. Prints `{ agents }`, one `{ terminal, session, folder, file, outputs }` per terminal in the order given. See Outputs under Right panel |
-| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board opens in its own window. Notes, pages and `--in-pane` boards split a pane beside T. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. A file already open in a pane gets the focus, and the result has `focused: true` |
-| `hws review FILE\|ARTIFACT [--title X] [--terminal T]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T` does. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane with no agent attached. Never opens standalone |
+| `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board or note opens in its own window and a page splits a pane beside T. `--window` and `--in-pane` choose the place, and both together exit 2. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. One file is one surface per workspace. A file already open in a pane gets the focus, and one already open in a window is raised, whatever the flags say. The result then has `focused: true`, and `raised` for a window. A file whose window is closed starts again on the same data in the place the flags or the default give |
+| `hws review FILE\|ARTIFACT [--title X] [--terminal T] [--window]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T --in-pane` does. `--window` opens it in its own window. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane or window with no agent attached. Never opens standalone |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open}]`. Leaves out closed windows with no work |
-| `hws surface resume --id S` | Brings an open window forward, or starts a closed one again on the same id and data |
+| `hws surface resume --id S` | Brings an open window forward, or starts a closed one again on the same id, data and file |
+| `hws surface pop --id S [--to window\|pane]` | Moves a surface between a pane and its own window, and picks the other place without `--to`. Prints `{id,shown,moved}` with `host` or `pane`. See [Pop out and pop in](#pop-out-and-pop-in) |
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
 | `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place. See [Delivery on Done](#delivery-on-done) |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
@@ -314,7 +315,7 @@ Five fixed headings, short lines, a cite at the end of each line. The pass rewri
 - Customers get a receipt they can keep [file:README.md]
 
 ## Now
-- Boards open in their own window and notes stay in a pane [commit:ba7d965]
+- Sketches and notes open in their own window [commit:ba7d965]
 
 ## Decisions in force
 - 2026-11-04 Studio is removed, board and note cover it [card:17]
@@ -558,8 +559,9 @@ Herdr resends a pane's whole image for each change to the page, so a surface in 
 | The note footer's Board chip and Open board are hidden, because a surface has no boards of its own | Notes |
 
 ## Own window
+| The page draws at most 30 times a second, set by `PIXEL_FPS` in `surface/run.sh` | Every page |
 
-`hws surface open` shows a board in an ordinary window that other windows can cover, unless `--in-pane` asks for Pixel. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The surface record has `pane: null` and `host`, that terminal's address.
+`hws surface open` shows a board or a note in an ordinary window that other windows can cover, and a page too with `--window`. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The window draws the page directly, with no Pixel stream. The surface record has `pane: null`, `host`, that terminal's address, and `file` when the surface shows one.
 
 Closing the window quits the host. A closed window with a drawing, comments or a note stays in the manifest as a draft, with its data folder. Prune drops a closed window with no work. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host and moves drafts to the Trash.
 
@@ -567,11 +569,40 @@ A running host raises its window on `POST /open`. The Window menu's Keep on Top 
 
 | Where | Shows | Action |
 |---|---|---|
-| Pane header, beside Chat \| Terminal | Resume sketch or Show sketch for the agent's newest sketch, with +N for others | `hws surface resume` |
-| `+` menu | Resume or Show, and Discard for drafts, per board | `hws surface resume`, `hws surface discard` |
-| Workspace panel, Open surfaces | Every window and draft, including standalone ones | `hws surface resume` |
+| Pane header, beside Chat \| Terminal | Resume or Show, then sketch, note or page, for the agent's newest window, with +N for others. A failure toasts `Sketch didn't open`, with the kind that failed | `hws surface resume` |
+| `+` menu | Resume or Show per window, Move into a pane for an open one, Discard for a draft | `hws surface resume`, `hws surface pop --to pane`, `hws surface discard` |
+| Workspace panel, Open now | Every window and draft, including standalone ones. An untitled one reads sketch, note or page | `hws surface resume` |
 
-`hws-pane` runs `hws surface list` when the set of live terminals changes and at least every 60 seconds, one header copy at a time, and shares the result as `hws-pane.boards`.
+`hws-pane` runs `hws surface list` when the set of live terminals changes and at least every 60 seconds, one header copy at a time, and shares the result as `hws-pane.boards`. The list holds note and page windows as well as boards.
+
+## Pop out and pop in
+
+A surface keeps its id, data folder, title, file and owning terminal when it moves. One host runs per surface, because both places share a socket and a browser data folder, so a move ends the old host before it starts the new one.
+
+| Control | Where | Runs |
+|---|---|---|
+| Pop out | The surface's bar, in a pane | `hws surface pop --id S --to window` |
+| Pop in | The surface's bar, in a window | `hws surface pop --id S --to pane` |
+| Move `<title>` into a pane | The `+` menu, per open window | `hws surface pop --id S --to pane` |
+
+Neither button shows in a web view. The bar saves pending work, then starts `hws` in its own process group, as Done does. A save that fails shows `Could not save before moving`, and nothing moves. The `+` menu row saves nothing first, and relies on the host saving as it quits. Below 460 px the buttons keep their icon and drop their label.
+
+`hws surface pop` works in this order.
+
+| Move | Steps |
+|---|---|
+| To a window | Closes the pane. Waits up to 3 s for the pane's terminal to end, then runs `hc kill` and waits 2 s more. Starts the window host and writes `pane: null`, `host` and `pid` |
+| To a pane | Finds the place first, so a failure leaves the window open. A live owner gets a split to the right of its pane, or of its chat pane when flipped. An ended owner or a standalone surface gets a tab named after the title. Then it ends the window's host the same way, starts the pane host, writes `pane` and `pid`, and removes `host` |
+| Already there | Focuses the pane or raises the window, and prints `moved: false`. A closed window starts again |
+
+| Exit | Message |
+|---|---|
+| 2 | A missing `--id`, or `--to must be window or pane` |
+| 1 | `no surface S`, `surface S has no open pane`, or `the old host in T did not end` |
+
+The command finishes after its caller dies, because the host that asks for a move is the one it ends.
+
+A host in a pane or a window treats SIGHUP and SIGTERM as a normal quit. It writes pending board, note and comment edits to disk and then exits, in about a tenth of a second and never later than 9 seconds. `hc kill` and a closed pane both hang up first, so only SIGKILL loses the last half second of edits.
 
 ## Web host
 
@@ -769,7 +800,7 @@ Each region of the `hws` layout has one job.
 | Tab bar | Switch tabs, open Tasks, toggle the right panel | `hws-tabs`, with Tasks and Workspace, a divider, then Outputs, Files, Changes. A tab nobody named, or one named after its program, reads its agent's title |
 | Pane header | Act on this agent | `hws-pane` `+`, always visible on agent and chat panes |
 | Chat composer | Act on this agent while typing | The same menu, plus Attach file |
-| Own window, or a pane beside the agent | Do the work | Boards in their own window, notes and pages in a pane |
+| Own window, or a pane beside the agent | Do the work | Boards and notes in their own window, pages in a pane. Pop out and Pop in move one between the two |
 | Board | Plan and dispatch work | Full-width kanban, `hws-work` with `{"view":"tasks"}`. One Board space per workspace. A plain space has none |
 | Right panel | See what the work produced | Files, Changes, Outputs |
 | Workspace panel | Read and keep the workspace's context | `hws-panel`, a pane beside the terminal. The top bar's Workspace button, the sidebar row's panel icon and `mod.open:hws-panel` toggle it. The sidebar row's right-click menu opens it |
@@ -858,10 +889,11 @@ A popup that the pane header and the chat composer open at the pointer.
 | Tasks | Always | Opens the Board tab |
 | Outputs | Always | Selects `outputs` in `panel-body` and shows `panel` |
 | Orchestrate this space | `space` and `cwd` are known, and `space` is in `hws.workspace.spaces` | `hws orchestrator start --space S --folder F`, where F is this agent's folder |
-| Resume or Show `<title>` | Per entry in `boards` | `hws surface resume --id S`. An untitled sketch reads `sketch` |
+| Resume or Show `<title>` | Per entry in `boards` | `hws surface resume --id S`. An untitled window reads `sketch`, `note` or `page` |
+| Move `<title>` into a pane | Per open entry in `boards` | `hws surface pop --id S --to pane`, then the entry leaves `hws-pane.boards` |
 | Discard `<title>` | Per closed entry in `boards` | `hws surface discard --id S` |
 
-Every `hws surface open` passes `--terminal T`. A flipped agent also passes `--beside-pane P --space S`, which the menu already knows.
+Every `hws surface open` passes `--terminal T` and no place flag. A flipped agent also passes `--beside-pane P --space S`, which the menu already knows.
 
 ### Flipped agents
 
@@ -871,7 +903,7 @@ A flipped agent has no pane, and `herdr-app ls` does not list chat panes. Mods f
 2. Find the live terminal in `terminals()` whose `herdr.chat` label equals that pane.
 3. Its tab is the pane's `tab`. Its space is the entry in `spaces()` that holds that tab.
 
-`hws surface open --terminal T --beside-pane P --space S` opens a board in its own window and splits a note or page beside P. It fails unless T's `herdr.chat` label equals P. On Done, `hws` reads T's `herdr.chat` label again. It focuses that pane when the label is set and the terminal otherwise.
+`hws surface open --terminal T --beside-pane P --space S` opens a board or note in its own window and splits a page beside P. It fails unless T's `herdr.chat` label equals P. On Done, `hws` reads T's `herdr.chat` label again. It focuses that pane when the label is set and the terminal otherwise.
 
 An agent calling `hws` knows neither P nor S, so `--terminal T` alone works too. `hws` takes P from T's `herdr.chat` label. It takes S from T's `herdr.space` label, else from a `where` label that matches one space name, else from the space that holds the tab T was recorded in. With no space it fails and asks for both flags.
 

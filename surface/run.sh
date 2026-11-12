@@ -27,6 +27,9 @@ export XDG_STATE_HOME="$COMPANION_DATA_DIR/state"
 export PIXEL_TTY="$(tty)"
 unset ELECTRON_RUN_AS_NODE COMPANION_TEST
 
+# A pane shows about 5 whole frames a second, so the page draws at 30 and not at the display's rate.
+export PIXEL_FPS="${PIXEL_FPS:-30}"
+
 # The pane header shows the terminal's title, which is its address until something sets it.
 # A control character would end the sequence early, so tr drops them.
 title="$(printf '%s' "${HWS_SURFACE_TITLE:-}" | tr -d '\000-\037\177')"

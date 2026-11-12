@@ -159,13 +159,15 @@ function trackReviewed(manifest, file, title) {
 
 function reviewText(file, terminal, surface) {
   const name = basename(file);
-  if (!surface.focused) return `Opened ${name} beside ${terminal} for review. End the turn now. The person's comments arrive as your next prompt.`;
+  const where = surface.pane ? `beside ${terminal}` : 'in its own window';
+  if (!surface.focused) return `Opened ${name} ${where} for review. End the turn now. The person's comments arrive as your next prompt.`;
   if (surface.terminal === terminal) return `${name} is already open for review. End the turn now. The person's comments arrive as your next prompt.`;
-  return `${name} is already open in a pane that ${surface.terminal ? `belongs to ${surface.terminal}` : 'has no agent attached'}, so its comments will not arrive here. Ask the person to close that pane, then run this again.`;
+  const place = surface.pane ? 'pane' : 'window';
+  return `${name} is already open in a ${place} that ${surface.terminal ? `belongs to ${surface.terminal}` : 'has no agent attached'}, so its comments will not arrive here. Ask the person to close that ${place}, then run this again.`;
 }
 
-// Hands a page to the person for comments, in a pane beside the agent that asks.
-export function review(flags, [target]) {
+// Hands a page to the person for comments, in a pane beside the agent that asks or in its own window.
+export async function review(flags, [target]) {
   const terminal = requireCallingTerminal(flags);
   const file = reviewedFile(target);
   if (!REVIEWABLE.test(file)) throw new HwsError('hws review opens .html and .md files');
@@ -174,7 +176,8 @@ export function review(flags, [target]) {
   const manifest = space ? manifestOfSpace(space) : null;
   const tracked = manifest && artifactOfFile(manifest, file);
   const title = flags.title ?? tracked?.title;
-  const { data: surface } = surfaceOpen({ type: 'page', file, terminal, ...(title ? { title } : {}) });
+  const place = flags.window ? { window: true } : { 'in-pane': true };
+  const { data: surface } = await surfaceOpen({ type: 'page', file, terminal, ...place, ...(title ? { title } : {}) });
   const artifact = tracked || trackReviewed(manifest, file, title);
   return { data: { ...surface, file, artifact: artifact?.id ?? null }, text: reviewText(file, terminal, surface) };
 }

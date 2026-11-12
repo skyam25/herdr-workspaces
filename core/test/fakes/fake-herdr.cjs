@@ -96,6 +96,18 @@ if (action === 'pane.split') {
   reply({ pane: `p${n}`, terminal: `t${n}` });
 }
 
+// Closing a pane ends its terminal, unless closeKeepsTerminal says the host is stuck.
+if (action === 'pane.close') {
+  for (const tab of state.spaces.flatMap((space) => space.tabs)) {
+    const found = tab.terminals.find((terminal) => terminal.pane === flags.pane);
+    if (!found) continue;
+    tab.terminals = tab.terminals.filter((terminal) => terminal !== found);
+    if (!state.closeKeepsTerminal) state.hc = { ...state.hc, [found.terminal]: 'missing' };
+  }
+  save();
+  reply({});
+}
+
 if (action === 'space.close') {
   state.spaces = state.spaces.filter((space) => space.id !== flags.id);
   save();

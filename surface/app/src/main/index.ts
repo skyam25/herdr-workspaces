@@ -602,6 +602,7 @@ async function start(): Promise<void> {
     ...(process.env.HWS_SURFACE_WINDOW === '1' ? { close: () => app.quit() } : {}),
     handedOff: (deliveryId) => sender.handedOff(deliveryId),
     settle: (handed) => sender.settle(handed),
+    flush: () => bridge.request('flush', {}, 2000),
     // Verification reads the link from a file, so it never touches the real clipboard.
     copy: (text) => (process.env.HWS_CLIPBOARD_FILE ? writeFileSync(process.env.HWS_CLIPBOARD_FILE, text) : clipboard.writeText(text)),
   });

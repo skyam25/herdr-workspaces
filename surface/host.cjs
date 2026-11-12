@@ -130,7 +130,29 @@ function adoptPanelWindow(options) {
   win.setVisibleOnAllWorkspaces = inPane;
 
   app.on('will-quit', () => root.stop(0));
+  quitOnSignals();
   return win;
+}
+
+// The Quitter's flush, close and exit caps add up to 9 seconds.
+const QUIT_CAP_MS = 9000;
+
+/*
+ * Pixel exits at once on SIGHUP and SIGTERM, which drops edits the autosave has not written.
+ * A normal quit runs the Quitter's flush first. Later signals change nothing, and the cap ends the host.
+ */
+function quitOnSignals() {
+  let quitting = false;
+  const quit = (code) => {
+    if (quitting) return;
+    quitting = true;
+    setTimeout(() => app.exit(code), QUIT_CAP_MS).unref();
+    app.quit();
+  };
+  for (const [signal, code] of [['SIGHUP', 129], ['SIGTERM', 143]]) {
+    process.removeAllListeners(signal);
+    process.on(signal, () => quit(code));
+  }
 }
 
 // A web view shows the page, so the panel's window stays hidden and empty.

@@ -306,7 +306,7 @@ export interface InitInfo {
 }
 
 export type SurfaceType = 'board' | 'note' | 'page';
-export type SurfaceAction = 'terminal' | 'link' | 'owner';
+export type SurfaceAction = 'terminal' | 'link' | 'owner' | 'pop';
 
 /** What the surface's Done area shows. */
 export interface SurfaceState {
@@ -318,6 +318,10 @@ export interface SurfaceState {
   standalone: boolean;
   /** Names the terminal this surface belongs to, for a surface shown apart from it. */
   owner?: string;
+  /** Where the host shows this surface. Pop moves it to the other place. */
+  shown: 'pane' | 'window';
+  /** A web view shows this surface, so it offers no Pop. */
+  web?: boolean;
   busy?: boolean;
   delivered?: boolean;
   artifact?: string;
@@ -524,7 +528,7 @@ export interface IpadSheetStatus {
 
 export interface CompanionApi extends BoardHost {
   init(): Promise<InitInfo>;
-  /** Says what a standalone press wants done with the artifact the next Send makes. */
+  /** Says what a standalone press wants done with the artifact the next Send makes. Owner and pop act at once. */
   surfaceWant(action: SurfaceAction): Promise<void>;
   /** Runs the waiting press on the artifact already saved. False when there is none, so the caller says what is missing. */
   surfaceRepeat(): Promise<boolean>;

@@ -159,7 +159,7 @@ export default class Launcher extends View {
       { id: "new-throwaway", name: "Throwaway", line: "Claude in a scratch workspace.", go: (cx) => this.launch("new-throwaway", ["new", "throwaway"], cx) },
       { id: "find-past", name: "Find past work…", line: "Bring back an archived workspace or a closed throwaway.", go: () => this.openFind() },
       { id: "new-board", name: "New sketch", line: "A sketch in its own floating window, tied to no terminal.", go: (cx) => this.launch("new-board", ["surface", "open", "--type", "board", "--title", "Untitled sketch", "--standalone"], cx) },
-      { id: "new-note", name: "New note", line: "A prompt, template or note on its own.", go: (cx) => this.launch("new-note", ["surface", "open", "--type", "note", "--title", "Untitled note", "--standalone"], cx) },
+      { id: "new-note", name: "New note", line: "A prompt, template or note in its own window.", go: (cx) => this.launch("new-note", ["surface", "open", "--type", "note", "--title", "Untitled note", "--standalone"], cx) },
       ...this.orchestrateRows(),
     ];
   }

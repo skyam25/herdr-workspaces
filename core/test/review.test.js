@@ -23,7 +23,7 @@ test('surface open finds a flipped agent by its recorded tab when it has no spac
   const manifest = box.app();
   const { owner } = flipToChat(box, manifest);
 
-  const surface = box.json(['surface', 'open', '--type', 'note', '--terminal', owner]);
+  const surface = box.json(['surface', 'open', '--type', 'note', '--in-pane', '--terminal', owner]);
 
   assert.equal(splitPane(box), 'pchat');
   assert.equal(surface.workspace, manifest.id);
@@ -38,7 +38,7 @@ test('surface open finds a flipped agent by its space label', (t) => {
     hc: { t9: { labels: { 'herdr.chat': 'pchat', 'herdr.space': 'sp1' } } },
   });
 
-  box.json(['surface', 'open', '--type', 'note', '--terminal', 't9']);
+  box.json(['surface', 'open', '--type', 'note', '--in-pane', '--terminal', 't9']);
 
   assert.equal(splitPane(box), 'pchat');
 });
@@ -191,4 +191,15 @@ test('feedback rounds stay out of freshness and the scan', (t) => {
   assert.equal(status.behind.artifacts, 1);
   assert.deepEqual(status.items.filter((item) => item.kind === 'artifact').map((item) => item.id), [page.id]);
   assert.deepEqual(scan.tracked.map((item) => item.id), [page.id]);
+});
+
+test('review --window opens the page in its own window', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const result = box.hws(['review', pageIn(manifest), '--window', '--terminal', owner]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /in its own window for review/);
+  assert.ok(box.actions().some((call) => call[0] === 'hc' && call[1] === 'run'));
+  assert.equal(box.manifest(manifest.id).surfaces[0].pane, null);
 });

@@ -35,6 +35,10 @@ let resuming = false;
 const hws = (args) => exec(`${home()}/.local/bin/hws`, [...args, "--json"]);
 const boardsOf = (terminal) => (shared(BOARDS) ?? []).filter((b) => b.terminal === terminal);
 
+// A window shows a board, a note or a page. A person reads a board as a sketch.
+const kindOf = (type) => (type === "note" || type === "page" ? type : "sketch");
+const capital = (word) => word.charAt(0).toUpperCase() + word.slice(1);
+
 // One header copy reads the list, and shared state carries it to the others.
 // A window opens and closes with its host terminal, so the slow timer only catches the rest.
 async function refreshBoards() {
@@ -50,14 +54,14 @@ async function refreshBoards() {
   try { setShared(BOARDS, JSON.parse(r.stdout)); } catch { boardsJson = ""; }
 }
 
-async function resumeBoard(id) {
+async function resumeBoard(board) {
   if (resuming) return;
   resuming = true;
   try {
-    const r = await hws(["surface", "resume", "--id", id]);
+    const r = await hws(["surface", "resume", "--id", board.id]);
     if (r.code !== 0) throw new Error(r.stdout.trim() || r.stderr.trim());
   } catch (e) {
-    toast({ title: "Sketch didn't open", body: plainError(e), level: "error" });
+    toast({ title: `${capital(kindOf(board.type))} didn't open`, body: plainError(e), level: "error" });
   }
   resuming = false;
   lastBoards = 0;
@@ -183,11 +187,11 @@ export default class Pane extends View {
     openOverlay({ mod: "hws-actions", kind: "popup", width: MENU_WIDTH, props: menu });
   }
 
-  // Acts on the newest board. The + menu lists them all and discards drafts.
+  // Acts on the newest window. The + menu lists them all, discards drafts and moves windows into panes.
   boardButton(boards, pane) {
     const board = boards.at(-1);
     const more = boards.length > 1 ? ` +${boards.length - 1}` : "";
-    return uiButton(`ph-board-${pane}`, `${board.open ? "Show" : "Resume"} sketch${more}`, { onClick: () => resumeBoard(board.id) });
+    return uiButton(`ph-board-${pane}`, `${board.open ? "Show" : "Resume"} ${kindOf(board.type)}${more}`, { onClick: () => resumeBoard(board) });
   }
 
   toChat(p, cx) {

@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane, asks to look over, comment on or give feedback on a page or document, or asks to see or review something on their phone, iPhone or iPad. Explains how to read the workspace, use the space's task list, hand a page to the user for review and ask for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane or window, asks to look over, comment on or give feedback on a page or document, or asks to see or review something on their phone, iPhone or iPad. Explains how to read the workspace, use the space's task list, hand a page to the user for review and ask for input through a surface.
 ---
 
 # Herdr workspace
@@ -43,7 +43,7 @@ To change that folder, run `hws set --home PATH`. PATH must already exist. `hws 
 
 Session start names the current, notes, artifacts and scratch paths. Run `hws place ROLE` before you write into a place. It prints the absolute path, creates the `artifacts` or `scratch` folder on first use, and prints nothing when the role is unset.
 
-When the person lands a decision mid-session, such as "we're going with X", offer to log it. Exploring is not deciding, so never log an option they are still weighing, and log nothing without their yes. On yes, run `hws decision add --title X --why Y [--decided-at YYYY-MM-DD] [--cites card:ID,commit:SHA] [--replaces D-001]`, and find what it replaces with `hws decision list`. Then you may add one dated line with a cite under Decisions in force in the current note, such as `- 2026-11-08 Notes stay in a pane [commit:ba7d965]`, and remove any line the decision replaced. A cite is `[card:ID]`, `[session:ID]`, `[commit:SHA]`, `[artifact:ID]` or `[file:PATH]`. Change nothing else in the note, because the tidy pass rewrites the whole note when the person runs it. A throwaway has no current note, so `hws place current` prints nothing there.
+When the person lands a decision mid-session, such as "we're going with X", offer to log it. Exploring is not deciding, so never log an option they are still weighing, and log nothing without their yes. On yes, run `hws decision add --title X --why Y [--decided-at YYYY-MM-DD] [--cites card:ID,commit:SHA] [--replaces D-001]`, and find what it replaces with `hws decision list`. Then you may add one dated line with a cite under Decisions in force in the current note, such as `- 2026-11-08 Notes open in their own window [commit:ba7d965]`, and remove any line the decision replaced. A cite is `[card:ID]`, `[session:ID]`, `[commit:SHA]`, `[artifact:ID]` or `[file:PATH]`. Change nothing else in the note, because the tidy pass rewrites the whole note when the person runs it. A throwaway has no current note, so `hws place current` prints nothing there.
 
 ## Kinds
 
@@ -122,24 +122,24 @@ Use this when the user wants to look over a page or document you wrote, and agai
 hws review FILE
 ```
 
-FILE is an `.html` or `.md` file, or the id of an artifact that tracks one. The page opens in a pane beside this terminal, or beside the chat when the user has flipped this agent to Chat. A kept workspace tracks the file as an artifact where it sits, so do not register it again.
+FILE is an `.html` or `.md` file, or the id of an artifact that tracks one. The page opens in a pane beside this terminal, or beside the chat when the user has flipped this agent to Chat. Run `hws review FILE --window` instead when the user asks for the page in its own window. A kept workspace tracks the file as an artifact where it sits, so do not register it again.
 
 The round trip has four steps.
 
 1. Run `hws review FILE` and end the turn. Do not poll.
-2. The user pins comments and presses Done. The comments arrive as your next prompt, and the pane closes.
+2. The user pins comments and presses Done. The comments arrive as your next prompt, and the page closes.
 3. Make the changes in the same file.
 4. Run `hws review FILE` again, as the prompt's last line asks. The page opens with the new version and none of the comments you already received.
 
 Each round of comments stays under the artifact in the Workspace panel.
 
-Review the local file, never its published copy. A claude.ai artifact opens in the browser and takes no comments in a pane, so register its link with `hws artifact add --url` and review the file it was published from.
+Review the local file, never its published copy. A claude.ai artifact opens in the browser and takes no comments, so register its link with `hws artifact add --url` and review the file it was published from.
 
-Never pass `--standalone` when you have a terminal. That pane has no agent attached, so the user's comments reach nobody. If `hws review` fails, show the user the error and stop.
+Never pass `--standalone` when you have a terminal. That page has no agent attached, so the user's comments reach nobody. If `hws review` fails, show the user the error and stop.
 
 ## Ask the user through a surface
 
-A surface is a sketch, note or page tied to this terminal. A sketch opens in its own window, and a note or page opens in a pane beside this terminal, or beside the chat for an agent flipped to Chat. Open one only when the user asks for it. Never open a surface unasked. The one exception is the last line of a review's comments, which asks you to run `hws review` again.
+A surface is a sketch, note or page tied to this terminal. A sketch or note opens in its own window. A page opens in a pane beside this terminal, or beside the chat for an agent flipped to Chat. Open one only when the user asks for it. Never open a surface unasked. The one exception is the last line of a review's comments, which asks you to run `hws review` again.
 
 ```bash
 hws surface open --type board|note --title X --terminal $HC_TERMINAL_ID
@@ -147,7 +147,9 @@ hws surface open --type board|note --title X --terminal $HC_TERMINAL_ID
 
 Pass `--file F` to open an existing file in a note. Use `hws review` for a page.
 
-After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it. A user who closes a sketch early keeps it as a draft and resumes it from the pane header.
+After opening a surface, end the turn and wait. The user presses Done and the feedback arrives as the next prompt. Do not poll for it. A user who closes a sketch or note window early keeps it as a draft and resumes it from the pane header.
+
+The user can move a surface between a pane and a window with Pop out and Pop in. When they ask you to move one, find its id under `surfaces` in `hws current --json` and run `hws surface pop --id S`. Add `--to pane` or `--to window` to choose the place. Without it the surface moves to the other place.
 
 ## Send to the phone
 

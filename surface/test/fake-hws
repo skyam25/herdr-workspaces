@@ -2,7 +2,7 @@
 # Stands in for the hws CLI. Logs each call and answers per the contract.
 # FAKE_HWS_DIR      where the log and moved bundles go
 # FAKE_HWS_MODE     glued (default), standalone, or failing
-# FAKE_HWS_CLOSE    when 1, a glued Done hangs up the host first, as closing its pane would
+# FAKE_HWS_CLOSE    when 1, a glued Done or a pop hangs up the host first, as closing its pane would
 log="$FAKE_HWS_DIR/hws.log"
 mkdir -p "$FAKE_HWS_DIR"
 echo "$*" >> "$log"
@@ -31,6 +31,25 @@ case "$1 $2" in
       fi
       echo "{\"artifact\":\"$art\"}"
     fi
+    ;;
+  "surface pop")
+    id=""
+    to=""
+    while [[ $# -gt 0 ]]; do
+      [[ "$1" == "--id" ]] && id="$2"
+      [[ "$1" == "--to" ]] && to="$2"
+      shift
+    done
+    if [[ "$FAKE_HWS_MODE" == "failing" ]]; then
+      echo '{"error":"the surface has no open pane"}'
+      exit 1
+    fi
+    if [[ "$FAKE_HWS_CLOSE" == "1" ]]; then
+      kill -HUP "$PPID" 2>/dev/null
+      sleep 1
+      echo "survived host hangup" >> "$log"
+    fi
+    echo "{\"id\":\"$id\",\"shown\":\"$to\",\"moved\":true}"
     ;;
   "link "*)
     echo "{\"link\":\"@$FAKE_HWS_DIR/artifacts/$2/prompt.md\"}"

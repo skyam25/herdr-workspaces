@@ -437,7 +437,7 @@ export default class Panel extends View {
             .rounded(6)
             .when(livePanes.has(s.pane), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(() => run("pane.focus", { pane: s.pane })))
             .when(Boolean(s.host), (el) => el.cursor_pointer().hover((st) => st.bg(t.hover)).on_click(() => { hws(["surface", "resume", "--id", s.id]).catch(() => {}); }))
-            .child(div().flex_1().min_w(0).truncate().child(s.title || s.type))
+            .child(div().flex_1().min_w(0).truncate().child(!s.title || s.title === s.type ? typeLabel(s.type) : s.title))
             .child(div().flex_none().text_size(11).text_color(t.dim).child(detail(s))),
         ),
       );

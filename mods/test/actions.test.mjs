@@ -506,7 +506,7 @@ test("an attach request for another pane or an old time is ignored", async () =>
 
 const BOARD_LIST = "hws-pane.boards";
 const boardsWorld = (boards) => world({ panes: [AGENT], sharedValues: { [BOARD_LIST]: boards } });
-const draft = { id: "s1", title: "Plan", terminal: "t1", open: false };
+const draft = { id: "s1", type: "board", title: "Plan", terminal: "t1", open: false };
 
 test("a draft shows Resume sketch in its agent's header and resumes on click", async () => {
   const H = boardsWorld([draft]);
@@ -552,6 +552,42 @@ test("discarding a draft takes it off the shared list at once", async () => {
   await settle();
   assert.ok(openArgs(H).some((args) => args.join(" ") === "surface discard --id s1 --json"));
   assert.deepEqual(H.sharedSets.at(-1).value.map((b) => b.id), ["s2"]);
+});
+
+test("the header names a note or page window by its type", async () => {
+  boardsWorld([{ ...draft, type: "note", open: true }]);
+  const note = await mount("hws-pane", { pane: "p1" });
+  assert.match(note.text(), /Show note/);
+  boardsWorld([draft, { ...draft, id: "s2", type: "page", title: "spec.html" }]);
+  const page = await mount("hws-pane", { pane: "p1" });
+  assert.match(page.text(), /Resume page \+1/);
+});
+
+test("a window that fails to resume names its type in the toast", async () => {
+  const H = boardsWorld([{ ...draft, type: "note" }]);
+  H.notices = [];
+  H.hws["surface resume"] = { fail: "that terminal has ended" };
+  const m = await mount("hws-pane", { pane: "p1" });
+  await m.click("ph-board-p1");
+  assert.equal(H.notices.at(-1).title, "Note didn't open");
+});
+
+test("the + menu names note and page windows by their type", async () => {
+  world({});
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [{ ...draft, type: "note", title: "note" }, { ...draft, id: "s2", type: "page", title: "spec.html", open: true }] });
+  const list = rows(m);
+  assert.ok(list.includes("Resume note") && list.includes("Discard note"));
+  assert.ok(list.includes("Show spec.html") && list.includes("Move spec.html into a pane"));
+});
+
+test("an open window moves into a pane and leaves the shared list, and a draft has no move", async () => {
+  const H = boardsWorld([draft, { ...draft, id: "s2", open: true }]);
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [draft, { ...draft, id: "s2", title: "Flow", open: true }] });
+  assert.equal(m.has("pop-s1"), false);
+  await m.click("pop-s2");
+  await settle();
+  assert.ok(openArgs(H).some((args) => args.join(" ") === "surface pop --id s2 --to pane --json"));
+  assert.deepEqual(H.sharedSets.at(-1).value.map((b) => b.id), ["s1"]);
 });
 
 // The sidebar footer's Phone row

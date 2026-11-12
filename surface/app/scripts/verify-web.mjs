@@ -119,6 +119,7 @@ async function runEngine(name) {
     await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
     check(name, 'board_renders', true);
     check(name, 'token_leaves_url', !page.url().includes('#t='), page.url());
+    check(name, 'no_pop_in_web', (await page.locator('[data-testid^="surface-pop"]').count()) === 0);
 
     await page.waitForTimeout(1500);
     const stats = await strokeAndMeasure(page);

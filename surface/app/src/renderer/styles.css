@@ -590,6 +590,13 @@ button.stop-talk:hover {
   white-space: nowrap;
 }
 
+.send-to .surface-pop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .send-to .divider {
   flex: none;
   width: 1px;
@@ -630,7 +637,9 @@ button.stop-talk:hover {
 
 /* A narrow pane keeps the mic's icon, so the buttons after it stay on screen. */
 @media (max-width: 460px) {
-  .composer button.talk :is(.talk-label, kbd) {
+  .composer button.talk :is(.talk-label, kbd),
+  .editor footer .send-to button.talk :is(.talk-label, kbd),
+  .send-to .surface-pop .label {
     display: none;
   }
 }

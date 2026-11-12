@@ -12,6 +12,7 @@ import {
   findTerminal,
   focusTerminal,
   isTerminalAlive,
+  killTerminal,
   listLive,
   requireLive,
   runDetached,
@@ -31,6 +32,12 @@ const SURFACE_TYPES = ['board', 'note', 'page'];
 // The limit for one argument on Linux, and well inside the 1 MiB macOS total.
 export const MAX_SEND_BYTES = 128 * 1024;
 const RAISE_MS = 3000;
+
+// A host ends soon after its pane or window closes. A stuck one is killed.
+const STOP_WAIT_MS = 3000;
+const KILL_WAIT_MS = 2000;
+const POLL_MS = 100;
+const POP_PLACES = ['window', 'pane'];
 
 export function newId(prefix) {
   return prefix + randomBytes(3).toString('hex');
@@ -74,6 +81,14 @@ function placementFor(live, terminal, flags) {
   if (!terminal) return standalonePlacement();
   if (flags['beside-pane']) return flippedPlacement(terminal, flags['beside-pane'], flags.space);
   return gluedPlacement(live, terminal);
+}
+
+// A board and a note open in a window, and a page opens in a pane.
+function opensInWindow(flags) {
+  if (flags.window && flags['in-pane']) throw new UsageError('use --window or --in-pane, not both');
+  if (flags.window) return true;
+  if (flags['in-pane']) return false;
+  return flags.type !== 'page';
 }
 
 function assertBesideFlags(flags) {
@@ -166,7 +181,19 @@ function linkedDraftHome(dataDir) {
   return lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink() && existsSync(link) ? dirname(realpathSync(link)) : null;
 }
 
-const paneIsOpen = (live, pane) => live.spaces.some((space) => (space.tabs ?? []).some((tab) => (tab.terminals ?? []).some((record) => record.pane === pane)));
+// The listed terminal that shows a pane, or null when the pane is closed.
+function paneTerminal(live, pane) {
+  if (!pane) return null;
+  for (const space of live.spaces) {
+    for (const tab of space.tabs ?? []) {
+      const found = (tab.terminals ?? []).find((record) => record.pane === pane);
+      if (found) return found.terminal;
+    }
+  }
+  return null;
+}
+
+const paneIsOpen = (live, pane) => paneTerminal(live, pane) !== null;
 
 // `owner` is set only for a surface in its own window.
 function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
@@ -186,23 +213,30 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
   return ['env', ...Object.entries(environment).map(([key, value]) => `${key}=${value}`), HOST_SCRIPT];
 }
 
-export function surfaceOpen(flags) {
+export async function surfaceOpen(flags) {
   if (!SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
   assertBesideFlags(flags);
+  const windowed = opensInWindow(flags);
   const terminal = ownerTerminal(flags);
   if (terminal?.includes('/')) throw new HwsError(`surfaces run on this computer, and ${terminal} is on another machine`);
   const live = requireLive();
 
   const placement = placementFor(live, terminal, flags);
   const workspace = placement.workspace ?? ensureStandaloneManifest();
-  const windowed = flags.type === 'board' && !flags['in-pane'];
   const file = flags.type === 'board' ? '' : resolveFile(flags.file);
   const surfaceId = surfaceIdFor(workspace, file);
+
+  // A file's surface shows again where it already is, whatever the flags say.
   const already = workspace.surfaces.find((surface) => surface.id === surfaceId);
   if (already?.pane && paneIsOpen(live, already.pane)) {
     act('pane.focus', { pane: already.pane });
     return { data: { ...already, workspace: workspace.id, focused: true }, text: `showed ${surfaceId}` };
   }
+  if (already?.host && isWindowOpen(already)) {
+    const raised = await raiseWindow(already);
+    return { data: { ...already, workspace: workspace.id, focused: true, raised }, text: `showed ${surfaceId}` };
+  }
+
   const title = surfaceTitle(flags.title, file, flags.type);
   const socket = socketPath(surfaceId);
   const dataDir = surfaceDataDir(workspace.id, surfaceId);
@@ -211,11 +245,12 @@ export function surfaceOpen(flags) {
 
   const owner = windowed ? (terminal ? windowOwnerLabel(live, terminal, placement) : '') : undefined;
   const argv = hostArgv({ workspace, id: surfaceId, type: flags.type, title, terminal, file, owner });
+  const fileField = file ? { file } : {};
 
   if (windowed) {
     const host = runDetached(argv, workspace.folder);
-    const surface = { id: surfaceId, type: flags.type, title, terminal, pane: null, host, socket, pid: terminalInfo(host)?.pid ?? null };
-    updateManifest(workspace.id, (draft) => draft.surfaces.push(surface));
+    const surface = { id: surfaceId, type: flags.type, title, terminal, pane: null, host, socket, pid: terminalInfo(host)?.pid ?? null, ...fileField };
+    replaceSurface(workspace.id, surface);
     return { data: { ...surface, workspace: workspace.id, hostTerminal: host }, text: `opened ${flags.type} ${surfaceId}` };
   }
 
@@ -225,13 +260,27 @@ export function surfaceOpen(flags) {
   const pane = opened.pane ?? findTerminal(listLive() ?? { spaces: [] }, opened.terminal)?.pane ?? null;
   const pid = terminalInfo(opened.terminal)?.pid ?? null;
 
-  const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...(file ? { file } : {}) };
-  updateManifest(workspace.id, (draft) => {
-    draft.surfaces = draft.surfaces.filter((item) => item.id !== surfaceId);
-    draft.surfaces.push(surface);
-  });
+  const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...fileField };
+  replaceSurface(workspace.id, surface);
   const data = { ...surface, workspace: workspace.id, hostTerminal: opened.terminal };
   return { data, text: `opened ${flags.type} ${surfaceId}` };
+}
+
+// A reopened surface replaces its old record and moves to the end of the list.
+function replaceSurface(workspaceId, surface) {
+  updateManifest(workspaceId, (draft) => {
+    draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
+    draft.surfaces.push(surface);
+  });
+}
+
+// Rewrites a record where it stands. A prune may drop a record whose host just ended, so it comes back.
+function rewriteSurface(workspaceId, surface) {
+  updateManifest(workspaceId, (draft) => {
+    const at = draft.surfaces.findIndex((item) => item.id === surface.id);
+    if (at === -1) draft.surfaces.push(surface);
+    else draft.surfaces[at] = surface;
+  });
 }
 
 function findSurface(surfaceId) {
@@ -365,6 +414,14 @@ function raiseWindow(surface) {
   });
 }
 
+// Starts a window host on the surface's id, data folder, title, file and owner.
+function startWindow(manifest, surface, live) {
+  const owner = surface.terminal ? windowOwnerLabel(live, surface.terminal, {}) : '';
+  const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: surface.file ?? '', owner });
+  const host = runDetached(argv, manifest.folder);
+  return { host, pid: terminalInfo(host)?.pid ?? null };
+}
+
 // Brings an open window forward, or starts a closed one again on its saved data.
 export async function surfaceResume(flags) {
   const { manifest, surface } = findWindow(requireFlag(flags, 'id'));
@@ -373,15 +430,97 @@ export async function surfaceResume(flags) {
     return { data: { id: surface.id, resumed: false, raised }, text: `showed ${surface.id}` };
   }
 
-  const live = requireLive();
-  const owner = surface.terminal ? windowOwnerLabel(live, surface.terminal, {}) : '';
-  const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: '', owner });
-  const host = runDetached(argv, manifest.folder);
-  const pid = terminalInfo(host)?.pid ?? null;
-  updateManifest(manifest.id, (draft) => {
-    Object.assign(draft.surfaces.find((item) => item.id === surface.id), { host, pid });
-  });
+  const { host, pid } = startWindow(manifest, surface, requireLive());
+  rewriteSurface(manifest.id, { ...surface, host, pid });
   return { data: { id: surface.id, resumed: true, host }, text: `resumed ${surface.id}` };
+}
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+async function endsWithin(terminal, ms) {
+  const deadline = Date.now() + ms;
+  while (isTerminalAlive(terminal)) {
+    if (Date.now() >= deadline) return false;
+    await sleep(POLL_MS);
+  }
+  return true;
+}
+
+// Two hosts on one surface would share its socket and Chromium data folder, so the old one must end first.
+async function awaitHostEnd(terminal) {
+  if (await endsWithin(terminal, STOP_WAIT_MS)) return;
+  killTerminal(terminal);
+  if (!(await endsWithin(terminal, KILL_WAIT_MS))) throw new HwsError(`the old host in ${terminal} did not end`);
+}
+
+// A surface comes back beside its owner, or beside the chat pane of a flipped owner.
+// It opens a tab in the selected space when it has no live owner.
+function popInPlacement(live, surface) {
+  if (surface.terminal && isTerminalAlive(surface.terminal)) {
+    const pane = findTerminal(live, surface.terminal)?.pane ?? chatPaneOf(surface.terminal);
+    if (pane) return { pane };
+  }
+  return { pane: null, space: windowStatus()?.space ?? undefined };
+}
+
+async function popOut(manifest, surface, live) {
+  const paneHost = paneTerminal(live, surface.pane);
+  if (!paneHost) throw new HwsError(`surface ${surface.id} has no open pane`);
+  act('pane.close', { pane: surface.pane });
+  await awaitHostEnd(paneHost);
+  const { host, pid } = startWindow(manifest, surface, live);
+  rewriteSurface(manifest.id, { ...surface, pane: null, host, pid });
+  return { id: surface.id, shown: 'window', moved: true, host };
+}
+
+async function popIn(manifest, surface, live) {
+  const placement = popInPlacement(live, surface);
+  if (isWindowOpen(surface)) {
+    killTerminal(surface.host);
+    await awaitHostEnd(surface.host);
+  }
+  const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: surface.file ?? '' });
+  const opened = placement.pane
+    ? act('pane.split', { direction: 'right', pane: placement.pane, argv })
+    : act('tab.new', { name: surface.title, space: placement.space, folder: manifest.folder, argv });
+  const pane = opened.pane ?? findTerminal(listLive() ?? { spaces: [] }, opened.terminal)?.pane ?? null;
+  const pid = terminalInfo(opened.terminal)?.pid ?? null;
+  const { host: _host, ...rest } = surface;
+  rewriteSurface(manifest.id, { ...rest, pane, pid });
+  return { id: surface.id, shown: 'pane', moved: true, pane };
+}
+
+// Shows a surface where it already is. A closed window starts again on its saved data.
+async function showInPlace(manifest, surface, live, shown) {
+  if (shown === 'pane') {
+    if (!paneIsOpen(live, surface.pane)) throw new HwsError(`surface ${surface.id} has no open pane`);
+    act('pane.focus', { pane: surface.pane });
+  } else if (isWindowOpen(surface)) {
+    await raiseWindow(surface);
+  } else {
+    const { host, pid } = startWindow(manifest, surface, live);
+    rewriteSurface(manifest.id, { ...surface, host, pid });
+  }
+  return { id: surface.id, shown, moved: false };
+}
+
+// Moves a surface between its pane and its own window. The surface's own host may call this
+// and end part-way through, so hws ignores the hangup and its closed stdout.
+export async function surfacePop(flags) {
+  const surfaceId = requireFlag(flags, 'id');
+  if (flags.to !== undefined && !POP_PLACES.includes(flags.to)) throw new UsageError('--to must be window or pane');
+  const { manifest, surface } = findSurface(surfaceId);
+  const live = requireLive();
+  const shown = surface.host ? 'window' : 'pane';
+  const target = flags.to ?? (shown === 'window' ? 'pane' : 'window');
+  if (target === shown) {
+    const data = await showInPlace(manifest, surface, live, shown);
+    return { data, text: `showed ${surfaceId}` };
+  }
+
+  process.on('SIGHUP', () => {});
+  const data = target === 'window' ? await popOut(manifest, surface, live) : await popIn(manifest, surface, live);
+  return { data, text: `moved ${surfaceId} to a ${target}` };
 }
 
 // A discarded draft is user work, so it goes to the Trash.

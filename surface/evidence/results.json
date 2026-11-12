@@ -67,5 +67,38 @@
     "both_alive": true,
     "first_status": true,
     "second_status": true
+  },
+  "pop_note": {
+    "pop_called": true,
+    "hws_survived_hangup": true,
+    "host_exited_on_hangup": true,
+    "draft_on_disk": true,
+    "done_after_reopen": true,
+    "text_came_back": true
+  },
+  "pop_page": {
+    "pop_called": true,
+    "hws_survived_hangup": true,
+    "host_exited_on_hangup": true,
+    "comment_on_disk": true,
+    "done_after_reopen": true,
+    "comment_came_back": true
+  },
+  "pop_board": {
+    "pop_called": true,
+    "hws_survived_hangup": true,
+    "host_exited_on_hangup": true,
+    "done_after_reopen": true,
+    "drawing_came_back": true
+  },
+  "hangup": {
+    "unsaved_before": true,
+    "host_exited_on_hangup": true,
+    "text_on_disk": true
+  },
+  "sigterm": {
+    "unsaved_before": true,
+    "host_exited": true,
+    "text_on_disk": true
   }
 }

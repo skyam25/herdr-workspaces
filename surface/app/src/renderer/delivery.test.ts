@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SurfaceState } from '../shared/ipc';
 import { deliveryOf, pageHint } from './delivery';
 
-const surface = (standalone: boolean): SurfaceState => ({ type: 'page', title: 'plan.md', sessionId: 'surface-s1', standalone });
+const surface = (standalone: boolean): SurfaceState => ({ type: 'page', title: 'plan.md', sessionId: 'surface-s1', standalone, shown: 'pane' });
 
 describe('delivery', () => {
   it('follows the surface, including a terminal that ends', () => {

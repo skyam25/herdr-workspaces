@@ -241,7 +241,7 @@ test('a reopened throwaway gets a fresh idle period', (t) => {
 test('reopen starts one tab per session, newest first', (t) => {
   const box = sandbox(t);
   const manifest = box.throwaway();
-  box.json(['surface', 'open', '--type', 'note', '--terminal', manifest.terminals[0].terminal]);
+  box.json(['surface', 'open', '--type', 'note', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
   box.transcript(manifest, 'sess-old', { hours: 50 });
   const second = box.state().spaces.find((item) => item.id === manifest.id).tabs[0].terminals[1].terminal;
   box.transcript(manifest, 'sess-new', { hours: 40, terminal: second });

@@ -14,7 +14,7 @@ import { find, reopen } from './commands/retired.js';
 import { decisionAdd, decisionList } from './commands/decision.js';
 import { tidyApply, tidyStart, tidyStatus, tidyStop } from './commands/tidy.js';
 import { boardAdd, boardOpen, spaceAdd, spaceMatch, spaceMove, spaceRemove } from './commands/spaces.js';
-import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceOpen, surfaceResume, surfaceSocket } from './commands/surface.js';
+import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceOpen, surfacePop, surfaceResume, surfaceSocket } from './commands/surface.js';
 import {
   todoAdd,
   todoArchive,
@@ -67,6 +67,7 @@ const ROUTES = [
       terminal: text,
       standalone: flag,
       'in-pane': flag,
+      window: flag,
       'beside-pane': text,
       space: text,
     },
@@ -76,6 +77,7 @@ const ROUTES = [
   { path: ['surface', 'list'], run: surfaceList, options: {} },
   { path: ['surface', 'resume'], run: surfaceResume, options: { id: text } },
   { path: ['surface', 'discard'], run: surfaceDiscard, options: { id: text } },
+  { path: ['surface', 'pop'], run: surfacePop, options: { id: text, to: text } },
   { path: ['surface', 'socket'], run: surfaceSocket, options: { terminal: text, title: text } },
   { path: ['phone', 'pair'], run: phonePair, options: { tab: flag } },
   { path: ['phone', 'send'], run: phoneSend, options: { prompt: text, terminal: text, space: text }, positionals: 1 },
@@ -89,7 +91,7 @@ const ROUTES = [
   { path: ['artifact', 'add'], run: artifactAdd, options: { file: text, url: text, 'in-place': flag, title: text, workspace: text } },
   { path: ['artifact', 'scan'], run: artifactScan, options: { workspace: text } },
   { path: ['link'], run: link, options: {}, positionals: 1 },
-  { path: ['review'], run: review, options: { title: text, terminal: text }, positionals: 1 },
+  { path: ['review'], run: review, options: { title: text, terminal: text, window: flag }, positionals: 1 },
   { path: ['todo', 'list'], run: todoList, options: { archived: flag, reports: flag, space: text } },
   {
     path: ['todo', 'add'],

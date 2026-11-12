@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -62,7 +63,7 @@ test('surface open passes a note file and defaults the title to its name', (t) =
   const box = sandbox(t);
   const manifest = box.app();
   const file = join(manifest.folder, 'notes.md');
-  const surface = box.json(['surface', 'open', '--type', 'note', '--file', file, '--terminal', manifest.terminals[0].terminal]);
+  const surface = box.json(['surface', 'open', '--type', 'note', '--in-pane', '--file', file, '--terminal', manifest.terminals[0].terminal]);
   const environment = hostEnvOf(box.actions()[0]);
   assert.equal(environment.HWS_SURFACE_FILE, file);
   assert.equal(surface.title, 'notes.md');
@@ -482,11 +483,19 @@ test('a board opens in its own window, in a terminal with no pane', (t) => {
   assert.equal(surface.hostTerminal, 't90');
 });
 
-test('notes and pages stay in a pane', (t) => {
+test('a note opens in a window and a page opens in a pane', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
-  box.json(['surface', 'open', '--type', 'note', '--terminal', manifest.terminals[0].terminal]);
+  const owner = manifest.terminals[0].terminal;
+  const note = box.json(['surface', 'open', '--type', 'note', '--terminal', owner]);
+  assert.deepEqual(box.actions()[0].slice(0, 2), ['hc', 'run']);
+  assert.equal(note.pane, null);
+  assert.equal(note.host, 't90');
+
+  box.clearCalls();
+  const page = box.json(['surface', 'open', '--type', 'page', '--file', 'http://localhost:3000/', '--terminal', owner]);
   assert.equal(box.actions()[0][2], 'pane.split');
+  assert.equal(page.host, undefined);
 });
 
 test('done on a window sends and shows the terminal, and closes no pane', (t) => {
@@ -611,4 +620,290 @@ test('discard refuses an open window', (t) => {
   const { box, manifest, surface } = openWindow(t);
   assert.notEqual(box.hws(['surface', 'discard', '--id', surface.id, '--json']).code, 0);
   assert.equal(box.manifest(manifest.id).surfaces.length, 1);
+});
+
+function runEnvOf(call) {
+  return Object.fromEntries(call.slice(11, -1).map((pair) => [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)]));
+}
+
+const hcRuns = (box) => box.actions().filter((call) => call[0] === 'hc' && call[1] === 'run');
+
+function ownerPaneOf(box, manifest) {
+  const [{ terminal: owner, tabId }] = manifest.terminals;
+  return box.state().spaces.flatMap((item) => item.tabs).find((item) => item.id === tabId).terminals.find((item) => item.terminal === owner).pane;
+}
+
+// A note file in the workspace folder, so its surface has a fixed id.
+function noteFile(manifest, name = 'plan.md') {
+  const file = join(manifest.folder, name);
+  writeFileSync(file, '# Plan');
+  return file;
+}
+
+test('surface open refuses --window with --in-pane', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const result = box.hws(['surface', 'open', '--type', 'note', '--window', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /use --window or --in-pane, not both/);
+  assert.deepEqual(box.actions(), []);
+});
+
+test('--window opens a page in a window that stores its file', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const file = noteFile(manifest, 'page.html');
+  const surface = box.json(['surface', 'open', '--type', 'page', '--window', '--file', file, '--terminal', manifest.terminals[0].terminal]);
+  const [run] = hcRuns(box);
+  assert.equal(runEnvOf(run).HWS_SURFACE_FILE, file);
+  assert.equal(runEnvOf(run).HWS_SURFACE_WINDOW, '1');
+  const [record] = box.manifest(manifest.id).surfaces;
+  assert.deepEqual([record.pane, record.host, record.file], [null, 't90', file]);
+  assert.equal(surface.file, file);
+});
+
+test('reopening a file whose window is open raises it and starts no host', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const file = noteFile(manifest);
+  const first = box.json(['surface', 'open', '--type', 'note', '--file', file, '--terminal', owner]);
+  box.clearCalls();
+
+  const again = box.json(['surface', 'open', '--type', 'note', '--in-pane', '--file', file, '--terminal', owner]);
+
+  assert.equal(again.id, first.id);
+  assert.equal(again.focused, true);
+  assert.equal(again.host, 't90');
+  assert.deepEqual(box.actions(), []);
+  assert.equal(box.manifest(manifest.id).surfaces.length, 1);
+});
+
+test('reopening a file whose window closed starts it again and replaces the record', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const file = noteFile(manifest);
+  const first = box.json(['surface', 'open', '--type', 'note', '--file', file, '--terminal', owner]);
+  box.setState({ hc: { t90: 'missing' } });
+  box.clearCalls();
+
+  const again = box.json(['surface', 'open', '--type', 'note', '--file', file, '--terminal', owner]);
+
+  assert.equal(again.id, first.id);
+  assert.equal(again.focused, undefined);
+  const [run] = hcRuns(box);
+  assert.equal(runEnvOf(run).COMPANION_DATA_DIR, surfaceData(box, manifest, first));
+  const records = box.manifest(manifest.id).surfaces;
+  assert.equal(records.length, 1);
+  assert.deepEqual([records[0].host, records[0].file], ['t90', file]);
+});
+
+test('reopening a file whose window closed follows --in-pane', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const file = noteFile(manifest);
+  box.json(['surface', 'open', '--type', 'note', '--file', file, '--terminal', owner]);
+  box.setState({ hc: { t90: 'missing' } });
+  box.clearCalls();
+
+  const again = box.json(['surface', 'open', '--type', 'note', '--in-pane', '--file', file, '--terminal', owner]);
+
+  assert.equal(box.actions()[0][2], 'pane.split');
+  const records = box.manifest(manifest.id).surfaces;
+  assert.equal(records.length, 1);
+  assert.equal(records[0].host, undefined);
+  assert.equal(records[0].pane, again.pane);
+});
+
+test('reopening a file in an open pane focuses it even with --window', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const file = noteFile(manifest, 'page.html');
+  const first = box.json(['surface', 'open', '--type', 'page', '--file', file, '--terminal', owner]);
+  box.clearCalls();
+
+  const again = box.json(['surface', 'open', '--type', 'page', '--window', '--file', file, '--terminal', owner]);
+
+  assert.equal(again.focused, true);
+  assert.deepEqual(box.actions(), [['herdr-app', 'do', 'pane.focus', '--pane', first.pane]]);
+});
+
+test('resume passes the window its file', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const file = noteFile(manifest);
+  const surface = box.json(['surface', 'open', '--type', 'note', '--file', file, '--terminal', manifest.terminals[0].terminal]);
+  box.setState({ hc: { t90: 'missing' } });
+  box.clearCalls();
+
+  box.json(['surface', 'resume', '--id', surface.id]);
+
+  assert.equal(runEnvOf(hcRuns(box)[0]).HWS_SURFACE_FILE, file);
+});
+
+test('pop moves a pane into a window on the same id, data and file', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const file = noteFile(manifest, 'page.html');
+  const surface = box.json(['surface', 'open', '--type', 'page', '--file', file, '--title', 'Plan', '--terminal', owner]);
+  box.clearCalls();
+
+  const result = box.json(['surface', 'pop', '--id', surface.id, '--to', 'window']);
+
+  assert.deepEqual(result, { id: surface.id, shown: 'window', moved: true, host: 't90' });
+  const actions = box.actions();
+  assert.deepEqual(actions[0], ['herdr-app', 'do', 'pane.close', '--pane', surface.pane]);
+  const environment = runEnvOf(actions[1]);
+  assert.deepEqual(
+    [environment.HWS_SURFACE_ID, environment.COMPANION_DATA_DIR, environment.HWS_SURFACE_TITLE, environment.HWS_SURFACE_FILE, environment.HWS_SURFACE_WINDOW],
+    [surface.id, surfaceData(box, manifest, surface), 'Plan', file, '1'],
+  );
+  assert.match(environment.HWS_SURFACE_OWNER, new RegExp(`· ${owner}$`));
+  const records = box.manifest(manifest.id).surfaces;
+  assert.equal(records.length, 1);
+  assert.deepEqual(
+    [records[0].id, records[0].terminal, records[0].pane, records[0].host, records[0].file, records[0].socket],
+    [surface.id, owner, null, 't90', file, surface.socket],
+  );
+});
+
+test('pop moves a window back into a pane beside its owner', (t) => {
+  const { box, manifest, owner, surface } = openWindow(t);
+  box.clearCalls();
+
+  const result = box.json(['surface', 'pop', '--id', surface.id]);
+
+  const actions = box.actions();
+  assert.deepEqual(actions[0], ['hc', 'kill', 't90']);
+  assert.deepEqual(actions[1].slice(0, 8), ['herdr-app', 'do', 'pane.split', '--direction', 'right', '--pane', ownerPaneOf(box, manifest), '--argv']);
+  const environment = hostEnvOf(actions[1]);
+  assert.equal(environment.HWS_SURFACE_WINDOW, undefined);
+  assert.equal(environment.HWS_SURFACE_ID, surface.id);
+  assert.equal(environment.HWS_TERMINAL, owner);
+  const [record] = box.manifest(manifest.id).surfaces;
+  assert.deepEqual(result, { id: surface.id, shown: 'pane', moved: true, pane: record.pane });
+  assert.equal(record.host, undefined);
+  assert.match(record.pane, /^p/);
+});
+
+test('pop to a pane from a closed window starts the pane and kills nothing', (t) => {
+  const { box, manifest, surface } = openWindow(t);
+  closeWindowWithDrawing(box, manifest, surface);
+  box.clearCalls();
+
+  box.json(['surface', 'pop', '--id', surface.id, '--to', 'pane']);
+
+  assert.deepEqual(box.actions().map((call) => call[2] ?? call[1]), ['pane.split']);
+});
+
+test('pop to a pane splits beside the chat pane of a flipped owner', (t) => {
+  const { box, manifest, surface } = openWindow(t);
+  const { chatPane } = flipToChat(box, manifest);
+  box.clearCalls();
+
+  box.json(['surface', 'pop', '--id', surface.id, '--to', 'pane']);
+
+  const split = box.actions().find((call) => call[2] === 'pane.split');
+  assert.equal(split[split.indexOf('--pane') + 1], chatPane);
+});
+
+test('pop to a pane opens a tab when the owner has ended', (t) => {
+  const { box, manifest, owner, surface } = openWindow(t);
+  box.setState({ hc: { [owner]: 'missing' } });
+  box.clearCalls();
+
+  const result = box.json(['surface', 'pop', '--id', surface.id, '--to', 'pane']);
+
+  const opened = box.actions().find((call) => call[2] === 'tab.new');
+  assert.deepEqual(opened.slice(0, 8), ['herdr-app', 'do', 'tab.new', '--name', 'flow', '--space', manifest.id, '--folder']);
+  assert.equal(hostEnvOf(opened).HWS_TERMINAL, owner);
+  assert.equal(box.manifest(manifest.id).surfaces[0].pane, result.pane);
+});
+
+test('pop moves a standalone surface both ways', (t) => {
+  const box = sandbox(t);
+  box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])], selected: 'sp1' });
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'idea', '--standalone']);
+  box.clearCalls();
+
+  assert.equal(box.json(['surface', 'pop', '--id', surface.id]).shown, 'window');
+  const environment = runEnvOf(hcRuns(box)[0]);
+  assert.deepEqual([environment.HWS_SURFACE_WINDOW, environment.HWS_SURFACE_OWNER, environment.HWS_TERMINAL], ['1', '', '']);
+
+  box.clearCalls();
+  assert.equal(box.json(['surface', 'pop', '--id', surface.id]).shown, 'pane');
+  const opened = box.actions().find((call) => call[2] === 'tab.new');
+  assert.deepEqual(opened.slice(0, 7), ['herdr-app', 'do', 'tab.new', '--name', 'idea', '--space', 'sp1']);
+  const [record] = box.manifest('standalone').surfaces;
+  assert.equal(record.host, undefined);
+  assert.match(record.pane, /^p/);
+});
+
+test('pop to where a surface already is shows it and moves nothing', (t) => {
+  const { box, surface } = openWindow(t);
+  box.clearCalls();
+  assert.deepEqual(box.json(['surface', 'pop', '--id', surface.id, '--to', 'window']), { id: surface.id, shown: 'window', moved: false });
+  assert.deepEqual(box.actions(), []);
+
+  const inPane = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', surface.terminal]);
+  box.clearCalls();
+  assert.deepEqual(box.json(['surface', 'pop', '--id', inPane.id, '--to', 'pane']), { id: inPane.id, shown: 'pane', moved: false });
+  assert.deepEqual(box.actions(), [['herdr-app', 'do', 'pane.focus', '--pane', inPane.pane]]);
+});
+
+test('pop to a closed window starts it again on its data', (t) => {
+  const { box, manifest, surface } = openWindow(t);
+  closeWindowWithDrawing(box, manifest, surface);
+  box.clearCalls();
+  assert.equal(box.json(['surface', 'pop', '--id', surface.id, '--to', 'window']).moved, false);
+  assert.equal(hcRuns(box).length, 1);
+});
+
+test('pop kills a pane host that does not end by itself before starting the window', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
+  const paneHost = surface.hostTerminal;
+  box.setState({ closeKeepsTerminal: true });
+  box.clearCalls();
+
+  box.json(['surface', 'pop', '--id', surface.id]);
+
+  assert.deepEqual(box.actions().map((call) => call.slice(0, 3)), [
+    ['herdr-app', 'do', 'pane.close'],
+    ['hc', 'kill', paneHost],
+    ['hc', 'run', '--bg'],
+  ]);
+});
+
+test('pop refuses bad usage, an unknown surface and a closed pane', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
+  assert.equal(box.hws(['surface', 'pop']).code, 2);
+  assert.equal(box.hws(['surface', 'pop', '--id', surface.id, '--to', 'tab']).code, 2);
+  assert.equal(box.hws(['surface', 'pop', '--id', 'nope']).code, 1);
+
+  box.setState({ spaces: box.state().spaces.map((item) => ({ ...item, tabs: item.tabs.map((one) => ({ ...one, terminals: one.terminals.filter((record) => record.pane !== surface.pane) })) })) });
+  box.clearCalls();
+  const closed = box.hws(['surface', 'pop', '--id', surface.id]);
+  assert.equal(closed.code, 1);
+  assert.match(closed.stderr, /has no open pane/);
+  assert.deepEqual(box.actions(), []);
+});
+
+test('pop finishes the move when its stdout closes early', async (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--terminal', manifest.terminals[0].terminal]);
+  const child = spawn(fileURLToPath(new URL('../../bin/hws', import.meta.url)), ['surface', 'pop', '--id', surface.id, '--json'], { env: box.environment, stdio: ['ignore', 'pipe', 'ignore'] });
+  child.stdout.destroy();
+  const code = await new Promise((done) => child.on('exit', done));
+  assert.equal(code, 0);
+  const [record] = box.manifest(manifest.id).surfaces;
+  assert.deepEqual([record.pane, record.host], [null, 't90']);
 });

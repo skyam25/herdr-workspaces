@@ -1,5 +1,5 @@
 /**
- * A surface: one board, note or page in one Herdr pane.
+ * A surface: one board, note or page in a Herdr pane or in its own window.
  *
  * The host stands in for the Claude plugin. It registers a session over the app's own socket,
  * opens the surface bound to that session, and long-polls for what Send delivers. Each delivery
@@ -29,6 +29,10 @@ export interface SurfaceConfig {
   dataDir: string;
   hws: string;
   owner?: string;
+  /** A pane streams the page, and a window shows it directly. */
+  shown: 'pane' | 'window';
+  /** A web view shows the page. */
+  web?: boolean;
 }
 
 /** The surface this process hosts, or undefined when it runs as the plain app. */
@@ -48,6 +52,8 @@ export function surfaceFromEnv(env: NodeJS.ProcessEnv): SurfaceConfig | undefine
     dataDir: env.COMPANION_DATA_DIR ?? '',
     hws: env.HWS_BIN || 'hws',
     ...(env.HWS_SURFACE_OWNER ? { owner: env.HWS_SURFACE_OWNER } : {}),
+    shown: env.HWS_SURFACE_WINDOW === '1' ? 'window' : 'pane',
+    ...(env.HWS_SURFACE_WEB === '1' ? { web: true } : {}),
   };
 }
 
@@ -125,6 +131,8 @@ export interface SurfaceDeps {
   handedOff?: (deliveryId: string) => HandedDraft | undefined;
   /** Deletes a handed draft, so the file opens next time with no delivered comments. */
   settle?: (handed: HandedDraft) => void;
+  /** Writes the board, the drafts and the board comments to disk. */
+  flush?: () => Promise<unknown>;
 }
 
 /** Names the draft `hws` is being handed. `hws` closes the pane on success, which ends this process before it can settle. */
@@ -157,6 +165,8 @@ export class SurfaceHost {
       sessionId: this.sessionId,
       standalone: !cfg.terminal,
       ...(cfg.owner ? { owner: cfg.owner } : {}),
+      shown: cfg.shown,
+      ...(cfg.web ? { web: true } : {}),
     };
   }
 
@@ -206,10 +216,33 @@ export class SurfaceHost {
     }
   }
 
-  /** Goes to the owning terminal now. Other actions wait for the artifact the next delivery makes. */
+  /** Goes to the owning terminal or moves the surface now. Other actions wait for the artifact the next delivery makes. */
   want(action: SurfaceAction): void {
     if (action === 'owner') void this.focusOwner();
+    else if (action === 'pop') void this.pop();
     else this.action = action;
+  }
+
+  /**
+   * Saves pending work, then asks `hws` to show this surface in the other place.
+   * `hws` ends this host part-way through a move, so the work is on disk before it runs.
+   */
+  private async pop(): Promise<void> {
+    if (this.state.busy || this.state.delivered || this.cfg.web) return;
+    const to = this.cfg.shown === 'pane' ? 'window' : 'pane';
+    this.update({ busy: true });
+    try {
+      await this.deps.flush?.();
+    } catch (err) {
+      this.update({ busy: false, notice: { text: `Could not save before moving: ${(err as Error).message}`, error: true } });
+      return;
+    }
+    try {
+      await this.hws(['surface', 'pop', '--id', this.cfg.id, '--to', to, '--json']);
+      this.update({ busy: false });
+    } catch (err) {
+      this.update({ busy: false, notice: { text: `Could not move: ${(err as Error).message}`, error: true } });
+    }
   }
 
   private async focusOwner(): Promise<void> {

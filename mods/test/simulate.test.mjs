@@ -529,6 +529,14 @@ test("panel shows the workspace, surfaces and artifacts newest first, and no Age
   assert.deepEqual(H.runs.at(-1), { name: "pane.focus", args: { pane: "p9" } });
 });
 
+test("Open now names an untitled window by its type and resumes it on click", async () => {
+  const H = inWorkspace({ ...APP, surfaces: [{ id: "s3", type: "note", title: "note", terminal: "t13", pane: null, host: "t20", socket: "/tmp/y", pid: 2 }] });
+  const m = await mount("hws-panel", {});
+  assert.match(m.text(), /Open now \| note \| note · Claude Code/);
+  await m.click("surface-s3");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["surface", "resume", "--id", "s3", "--json"]);
+});
+
 test("Open now shows only when something is open", async () => {
   inWorkspace({ ...APP, surfaces: [] });
   const m = await mount("hws-panel", {});

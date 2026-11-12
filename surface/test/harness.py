@@ -19,7 +19,7 @@ def scrubbed():
 
 
 class Surface:
-    def __init__(self, sid, root, surface_type='board', title='flow', file='', terminal='t1', mode='glued', close=False, folder=None, cols=240, rows=90, fresh=True):
+    def __init__(self, sid, root, surface_type='board', title='flow', file='', terminal='t1', mode='glued', close=False, folder=None, cols=240, rows=90, fresh=True, owner=''):
         self.sid = sid
         self.root = os.path.join(root, sid)
 
@@ -56,6 +56,8 @@ class Surface:
             'FAKE_HWS_MODE': mode,
             'FAKE_HWS_CLOSE': '1' if close else '0',
         })
+        if owner:
+            env['HWS_SURFACE_OWNER'] = owner
         self.d = Driver(['/bin/zsh', RUN_SH], env=env, cols=cols, rows=rows, xpixel=cols * 10, ypixel=rows * 20,
                         stderr_log=os.path.join(self.root, 'driver.stderr.log'))
 

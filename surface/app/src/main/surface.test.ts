@@ -17,6 +17,7 @@ const config = (over: Partial<SurfaceConfig> = {}): SurfaceConfig => ({
   folder: '/nowhere',
   dataDir: '/data',
   hws: 'hws',
+  shown: 'pane',
   ...over,
 });
 
@@ -28,6 +29,12 @@ describe('surfaceFromEnv', () => {
   it('resolves a relative file against the workspace folder', () => {
     const cfg = surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_TYPE: 'note', HWS_SURFACE_FILE: 'docs/a.md', HWS_FOLDER: '/work' });
     expect(cfg).toMatchObject({ type: 'note', file: '/work/docs/a.md', title: 'note', terminal: '' });
+  });
+
+  it('says where the surface shows, and whether a web view shows it', () => {
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1' })).toMatchObject({ shown: 'pane' });
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_WINDOW: '1' })).toMatchObject({ shown: 'window' });
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_WEB: '1' })).toMatchObject({ shown: 'pane', web: true });
   });
 
   it('keeps a local URL as it is', () => {
@@ -187,5 +194,68 @@ describe('SurfaceHost', () => {
     expect(await h.host.repeat()).toBe(true);
     h.stop();
     expect(h.states.at(-1)?.notice?.text).toBe('Copied the link.');
+  });
+});
+
+describe('SurfaceHost pop', () => {
+  /** An `hws` that logs its arguments, and whether the flush ran first, then answers or fails. */
+  function harness(over: Partial<SurfaceConfig>, opts: { fail?: boolean; flush?: () => Promise<unknown> } = {}) {
+    const root = temp();
+    const log = join(root, 'log');
+    const flushed = join(root, 'flushed');
+    const hws = join(root, 'hws');
+    const answer = opts.fail ? `echo '{"error":"no open pane"}'; exit 1` : `echo '{"moved":true}'`;
+    writeFileSync(hws, `#!/bin/sh\ntest -f '${flushed}' && echo flushed >> '${log}'\necho "$@" >> '${log}'\n${answer}\n`, { mode: 0o755 });
+    const states: SurfaceState[] = [];
+    const flush = opts.flush ?? (async () => writeFileSync(flushed, ''));
+    const host = new SurfaceHost(config({ hws, dataDir: join(root, 'data'), ...over }), { socket: join(root, 'sock'), push: (state) => states.push(state), copy: vi.fn(), flush });
+    const lines = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
+    const settled = () => vi.waitFor(() => expect(states.at(-1)?.busy).toBe(false), { timeout: 5000 });
+    return { host, states, lines, settled };
+  }
+
+  it('reports where it shows', () => {
+    expect(harness({}).host.info().shown).toBe('pane');
+    expect(harness({ shown: 'window' }).host.info().shown).toBe('window');
+  });
+
+  it('saves the work, then asks hws to move a pane to a window', async () => {
+    const h = harness({});
+    h.host.want('pop');
+    await h.settled();
+    expect(h.lines()).toEqual(['flushed', 'surface pop --id s1 --to window --json']);
+    expect(h.states[0]?.busy).toBe(true);
+    expect(h.states.at(-1)?.notice).toBeUndefined();
+  });
+
+  it('moves a window to a pane', async () => {
+    const h = harness({ shown: 'window' });
+    h.host.want('pop');
+    await h.settled();
+    expect(h.lines().at(-1)).toBe('surface pop --id s1 --to pane --json');
+  });
+
+  it('stays put and says why when the work does not save', async () => {
+    const h = harness({}, { flush: () => Promise.reject(new Error('panel is not ready')) });
+    h.host.want('pop');
+    await h.settled();
+    expect(h.lines()).toEqual([]);
+    expect(h.states.at(-1)?.notice).toEqual({ text: 'Could not save before moving: panel is not ready', error: true });
+  });
+
+  it('shows the error when hws refuses the move', async () => {
+    const h = harness({}, { fail: true });
+    h.host.want('pop');
+    await h.settled();
+    expect(h.states.at(-1)?.notice).toEqual({ text: 'Could not move: no open pane', error: true });
+  });
+
+  it('offers no move in a web view', async () => {
+    const h = harness({ web: true });
+    expect(h.host.info().web).toBe(true);
+    h.host.want('pop');
+    await new Promise((done) => setTimeout(done, 200));
+    expect(h.lines()).toEqual([]);
+    expect(h.states).toEqual([]);
   });
 });

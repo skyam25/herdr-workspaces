@@ -6,6 +6,7 @@ PNGs go to surface/evidence/. Working files go to /tmp/hws-surface-verify.
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -18,6 +19,7 @@ EVIDENCE = os.path.join(SURFACE, 'evidence')
 os.makedirs(EVIDENCE, exist_ok=True)
 DONE = (2296, 1760)
 OPEN_TERMINAL = (2085, 1760)
+POP_OUT = (1695, 1756)
 CMD_ENTER = b'\x1b[13;9u'
 results = {}
 
@@ -140,13 +142,13 @@ def note_file():
     s.stop()
 
 
-def pin(s, text):
+def pin(s, text, settle=1.5):
     s.d.click(500, 330)
     s.wait(1.5)
     for ch in text:
         s.d.key(ch)
         s.d.pump(0.03)
-    s.wait(1.5)
+    s.wait(settle)
 
 
 def page():
@@ -337,7 +339,136 @@ def two():
     b.stop()
 
 
-ALL = {f.__name__: f for f in [board_glued, note_new, note_file, page, page_reopen, page_standalone, standalone, terminal_ended, failing, two]}
+def popped(name, s):
+    """Presses Pop out at once, before the autosave runs, and waits for the fake hws to hang up the host."""
+    s.d.click(*POP_OUT)
+    deadline = time.time() + 8
+    while time.time() < deadline and 'survived host hangup' not in s.log():
+        s.wait(0.2)
+    log = s.log()
+    print(log, flush=True)
+    check(name, 'pop_called', 'surface pop --id %s --to window --json' % s.sid in log, log)
+    check(name, 'hws_survived_hangup', 'survived host hangup' in log)
+    check(name, 'host_exited_on_hangup', s.d.exited)
+    s.d.stop()
+
+
+def reopened(name, sid, shot_name, **kw):
+    """Starts the surface again on the same data folder, as the window host does, and presses Done."""
+    again = Surface(sid, ROOT, fresh=False, **kw)
+    again.wait(9)
+    shot(again, shot_name)
+    again.d.click(*DONE)
+    again.wait(5)
+    arts = again.artifacts()
+    check(name, 'done_after_reopen', len(arts) == 1, arts)
+    files = {}
+    if arts:
+        art = again.artifact(arts[0])
+        for f in sorted(os.listdir(art)):
+            if os.path.isfile(os.path.join(art, f)) and not f.endswith('.png'):
+                files[f] = read(os.path.join(art, f))
+        print(sorted(files), flush=True)
+    again.stop()
+    return files
+
+
+def pop_note():
+    name = 'pop_note'
+    s = Surface('po1', ROOT, surface_type='note', title='Launch memo', close=True)
+    s.wait(7)
+    s.d.click(1200, 500)
+    s.wait(0.5)
+    for ch in 'Ship the surface first.':
+        s.d.key(ch)
+        s.d.pump(0.03)
+    s.d.pump(0.05)
+    shot(s, 'pop-note-before')
+    popped(name, s)
+    check(name, 'draft_on_disk', 'Ship the surface first.' in drafts_text(s), drafts_text(s)[:200])
+    files = reopened(name, 'po1', 'pop-note-reopened', surface_type='note', title='Launch memo')
+    check(name, 'text_came_back', 'Ship the surface first.' in files.get('prompt.md', '') + files.get('draft.md', ''))
+
+
+def pop_page():
+    name = 'pop_page'
+    folder, path = demo_page('proj-pop')
+    s = Surface('pp1', ROOT, surface_type='page', title='demo', file=path, folder=folder, close=True)
+    s.wait(9)
+    pin(s, 'tighten this', settle=0.05)
+    popped(name, s)
+    check(name, 'comment_on_disk', 'tighten this' in drafts_text(s), drafts_text(s)[:200])
+    files = reopened(name, 'pp1', 'pop-page-reopened', surface_type='page', title='demo', file=path, folder=folder)
+    check(name, 'comment_came_back', 'tighten this' in files.get('review.md', ''))
+
+
+def pop_board():
+    name = 'pop_board'
+    s = Surface('pb1', ROOT, close=True)
+    s.wait(7)
+    s.stroke()
+    shot(s, 'pop-board-before')
+    popped(name, s)
+    files = reopened(name, 'pb1', 'pop-board-reopened')
+    scene = json.loads(files.get('board.excalidraw', '{}'))
+    kinds = [e.get('type') for e in scene.get('elements', []) if not e.get('isDeleted')]
+    check(name, 'drawing_came_back', 'freedraw' in kinds, kinds)
+
+
+def typed_note(sid, text):
+    s = Surface(sid, ROOT, surface_type='note', title='memo')
+    s.wait(7)
+    s.d.click(1200, 500)
+    s.wait(0.5)
+    for ch in text:
+        s.d.key(ch)
+        s.d.pump(0.03)
+    return s
+
+
+def wait_gone(pid, seconds):
+    """Reaps the host and returns how long it took, or None when it outlives the wait."""
+    start = time.time()
+    while time.time() - start < seconds:
+        done, _ = os.waitpid(pid, os.WNOHANG)
+        if done:
+            return time.time() - start
+        time.sleep(0.05)
+    os.kill(pid, signal.SIGKILL)
+    os.waitpid(pid, 0)
+    return None
+
+
+def hangup():
+    """Closes the pane's pty right after typing, as closing a Herdr pane does, before the autosave runs."""
+    name = 'hangup'
+    text = 'Saved on hangup.'
+    s = typed_note('hu1', text)
+    check(name, 'unsaved_before', text not in drafts_text(s))
+    os.close(s.d.master)
+    took = wait_gone(s.d.pid, 12)
+    print('exit after hangup took', took, flush=True)
+    check(name, 'host_exited_on_hangup', took is not None and took < 9, took)
+    check(name, 'text_on_disk', text in drafts_text(s), drafts_text(s)[:200])
+
+
+def sigterm():
+    name = 'sigterm'
+    text = 'Saved on SIGTERM.'
+    s = typed_note('st1', text)
+    check(name, 'unsaved_before', text not in drafts_text(s))
+    start = time.time()
+    os.kill(s.d.pid, signal.SIGTERM)
+    while time.time() - start < 12 and not s.d.exited:
+        s.d.pump(0.05)
+    took = time.time() - start if s.d.exited else None
+    print('exit after SIGTERM took', took, flush=True)
+    check(name, 'host_exited', took is not None and took < 9, took)
+    check(name, 'text_on_disk', text in drafts_text(s), drafts_text(s)[:200])
+    s.d.stop()
+
+
+ALL = {f.__name__: f for f in [board_glued, note_new, note_file, page, page_reopen, page_standalone, standalone, terminal_ended, failing, two, pop_note, pop_page, pop_board, hangup, sigterm]}
 for key in sys.argv[1:] or list(ALL):
     ALL[key]()
 out = os.path.join(EVIDENCE, 'results.json')

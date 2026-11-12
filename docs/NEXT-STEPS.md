@@ -1,6 +1,6 @@
 # Next steps
 
-Handoff for the next session. Updated 2026-11-09.
+Handoff for the next session. Updated 2026-11-12.
 
 Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
@@ -37,7 +37,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Standalone | Shows Open terminal and Copy link in place of Done |
 | Throwaway | Asks Keep or Trash on close only if something was made. Closes itself after 24 idle hours and stays findable for 30 days |
 | Studio | Removed. New board and New note cover the need |
-| Rendering | Boards open in their own window, which stays as a resumable draft when closed. Notes and pages stay on Pixel in a pane. A native GPUI board was rejected as too costly |
+| Rendering | A surface shows in a pane through Pixel or in its own window, and Pop out and Pop in move it between the two. Boards and notes open in a window, which stays as a resumable draft when closed. Pages open in a pane beside the agent. A native GPUI board was rejected as too costly |
 | Context lifecycle | Working context stays messy in the stream. A tidy pass the person triggers rewrites one current note and demotes the rest. `docs/CONTRACT.md` holds the Tidy section |
 | Places | `hws` speaks in roles (`current`, `artifacts`, `scratch`, `decisions`, `history`, `meetings`). Folder names belong to the user and live in the manifest `places` map |
 | Tidy | `hws tidy start` opens a Claude tab on a packet. The agent writes a proposal and opens it in a page. Done delivers feedback to the agent, which runs `hws tidy apply`. Only `hws` writes the note |
@@ -136,7 +136,7 @@ The audit found these from reading code.
 Pixel streams frames through the terminal. Herdr shows a full-window board at 1-2 fps ([herdr-app #498](https://github.com/herdrdev/herdr-app/issues/498)). A web view draws directly, and mods cannot host one today.
 
 - [x] Serve board surfaces over loopback behind `HWS_SURFACE_WEB=1`. `node scripts/verify-web.mjs` in `surface/app` checks WebKit and Chromium.
-- [ ] Ask on [#218](https://github.com/herdrdev/herdr-app/issues/218) whether the official browser mod can load a local app. This decides the host.
+- [ ] Ask on [#853](https://github.com/herdrdev/herdr-app/issues/853) whether the official browser mod can load a local app. This decides the host. #218 was closed as not planned on 2026-11-05.
 - [ ] Serve page surfaces, which load from the Electron-only review scheme today.
 - [ ] Test notes, Talk and the microphone in WebKit.
 - [ ] Scan the pairing code with a real iPhone and iPad, then send a page and a board and press Send on the device.
@@ -144,11 +144,27 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 - [ ] Revisit a board inside the pane if Herdr ships a browser mod that can load a local app. Patching Herdr is ruled out.
 - [ ] Add the host address to the manifest through `hws`.
 
-Until then a pane's page holds still, through `surface/still.cjs`. Herdr 0.1.14 takes image bytes inline only, so Pixel resends the whole pane for each change, and Herdr shows the pane empty while the image arrives.
+Until then a pane's page holds still, through `surface/still.cjs`. Herdr 0.1.15 takes image bytes inline only, so Pixel resends the whole pane for each change.
+
+Measured on 2026-11-12 in a separate Herdr 0.1.15 window of 1994 by 1211 points, with Pixel 0.2.10 and a page that draws its frame number.
+
+| Case | Frames Herdr showed | Blank shots |
+|---|---|---|
+| Whole frames, half-width and full-tab pane | 5 a second | 0 of 130 |
+| Pixel's recorded frames replayed at 10 a second | 10 a second | 4 of 136 |
+| The same at 20 a second | 9 a second | 68 of 138 |
+| `TERMINAL_BROWSER_PRESENT=patched`, one line changing | 27 a second or more | 0 of 135 |
+
+- Pixel holds inline frames to 3 MB a second, which is 5 frames of about 650 KB. The limit is a constant in Pixel and Herdr starts to blank at twice that rate, so nothing here can raise it.
+- With `patched`, Herdr 0.1.15 draws typed characters about half a cell too high. #500 still blocks it.
+- `PIXEL_RENDER_SCALE=1` sends the same pixel count and more bytes, so it does not help.
+- Pixel 0.2.16 has the same 3 MB limit and the same presenter choice as 0.2.10.
+- A window draws at full speed, so `hws surface pop` moves any surface between a pane and a window. A separate Herdr 0.1.15 window ran the real `hws` on a page and a note, from pane to window and back, and the note kept its text.
 
 - [x] Stop the caret blink, transitions and hover sweeps in a pane. In the pty an idle note went from 2 whole-pane resends a second to none.
 - [ ] Open a note and a page in the real window and confirm an idle pane no longer flickers. Only the pty has shown it.
 - [ ] Set `TERMINAL_BROWSER_PRESENT=patched` in `surface/run.sh` once Herdr fixes [#500](https://github.com/herdrdev/herdr-app/issues/500). Pixel then sends only the changed region, which cut typing from 2.4 MB/s to 0.01 MB/s in the pty. Herdr drops the pixel offset the patches are placed with, so they land up to a cell off today.
+- [x] Draw the page at 30 frames a second in a pane, through `PIXEL_FPS` in `surface/run.sh`. Pixel's CPU use fell from 54% of a core to 28% while a page scrolled, and the pane showed the same 5 frames a second.
 - [ ] Watch Herdr [#508](https://github.com/herdrdev/herdr-app/pull/508) and [#704](https://github.com/herdrdev/herdr-app/pull/704). They keep the old image on screen during an update and take frames in shared memory, and Pixel uses both with no change here.
 
 ### 10. Test the new UI homes by hand
@@ -169,7 +185,7 @@ Until then a pane's page holds still, through `surface/still.cjs`. Herdr 0.1.14 
 Built 2026-11-09 by six Opus workers against fakes. Nothing has run in the real window.
 
 - [x] Open the workspace panel on this repo and read the header line. It should say "No current note yet" until a pass runs. `hws tidy status --line` said that on 2026-11-09, and the first pass wrote a proposal with a note, 17 cards to archive and one artifact superseded.
-- [ ] Press Open note. The note should open in a pane. The default place is `CURRENT.md`. Decide whether this file should become the current note instead, knowing a tidy pass rewrites the whole note.
+- [ ] Press Open note. The note should open in its own window. The default place is `CURRENT.md`. Decide whether this file should become the current note instead, knowing a tidy pass rewrites the whole note.
 - [ ] Press Tidy. A terminal should open below the panel, ask anything unclear, write a proposal and open it in a page. Press Done and check the note, the Trash and the archived cards.
 - [ ] Read the Not in the note yet rows after a commit and after a card moves to Done.
 - [ ] Create a workspace with Workspace files in set to a subfolder, then finish a note and a board and check they land in `notes/` and `artifacts/`.
@@ -236,3 +252,14 @@ Built 2026-11-09 by six Opus workers against fakes, after a review of the live w
 - [ ] Close the panes that started before commit 015706a. They still show a terminal address as their title.
 - [ ] Section 14 expects a menu on a workspace's only space. That space no longer has a row, so decide whether the workspace row's menu should carry Rename and Close for it.
 
+### 16. Test pop out and pop in by hand
+
+Built 2026-11-12 by three Opus workers against fakes. The lead ran `hws surface pop` against a separate Herdr window. Nobody has pressed the buttons in the real one.
+
+- [ ] Ask an agent to review a page, press Pop out in the pane, and check the window opens with the same comments. Press Pop in and check the pane returns beside that agent.
+- [ ] Open a note from the `+` menu. It should open in a window. Type, press Pop in, and check the text is there in the pane.
+- [ ] Pop a page out from a flipped agent, then pop it in. The pane should split beside the chat pane.
+- [ ] End the owning terminal while its window is open, then press Pop in. The surface should open as a tab.
+- [ ] Choose Move into a pane in the `+` menu right after typing in a window, and close a note's pane right after typing. The host saves on a hangup, which the pty and a signal test showed, so nothing typed should be lost.
+- [ ] Read the pane header button with a note window and a page window open. It should say note or page, not sketch.
+- [ ] Narrow a pane below 460 px and check the bar keeps the Pop out icon, the mic and Done on one line.

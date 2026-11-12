@@ -1,5 +1,6 @@
 // The + menu on agent panes and in the chat composer. It starts boards, notes and page
-// reviews glued to an agent, and reaches the chat's file picker, the Tasks tab and the right panel.
+// reviews glued to an agent, lists the agent's windows, and reaches the chat's file picker,
+// the Tasks tab and the right panel.
 // Props: { terminal, chat?, pane?, space?, cwd?, lastReply?, boards? }. docs/CONTRACT.md lists the rows.
 
 import { View, div, svg } from "gpui-kit";
@@ -9,6 +10,9 @@ import { hws, submitDialog, problemLine } from "./hws.js";
 import { openBoard } from "./board.js";
 
 const BOARD_LIST = "hws-pane.boards";
+const KINDS = { board: { name: "sketch", icon: "sketch" }, note: { name: "note", icon: "write" }, page: { name: "page", icon: "review" } };
+
+const dropFromList = (id) => setShared(BOARD_LIST, (shared(BOARD_LIST) ?? []).filter((b) => b.id !== id));
 
 // One shell runs the chooser and the open, because the popup can close while the chooser has
 // focus and an exec already started keeps running. Error -128 means the person cancelled.
@@ -79,16 +83,26 @@ export default class Actions extends View {
   // The list refreshes when a terminal changes, and discarding a draft changes none.
   async discardBoard(id) {
     await hws(["surface", "discard", "--id", id]);
-    setShared(BOARD_LIST, (shared(BOARD_LIST) ?? []).filter((b) => b.id !== id));
+    dropFromList(id);
   }
 
-  // An untitled sketch carries its type, `board`, as its title.
+  // A window in a pane leaves the list, because the list holds only windows and drafts.
+  async moveIntoPane(id) {
+    await hws(["surface", "pop", "--id", id, "--to", "pane"]);
+    dropFromList(id);
+  }
+
+  // An untitled window carries its type as its title. A person reads a board as a sketch.
   boardRows(boards) {
     return boards.flatMap((b, i) => {
-      const title = b.title === "board" ? "sketch" : b.title;
+      const type = KINDS[b.type] ? b.type : "board";
+      const kind = KINDS[type];
+      const title = !b.title || b.title === type ? kind.name : b.title;
       return [
-        { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${title}`, icon: "sketch", divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
-        ...(b.open ? [] : [{ id: `discard-${b.id}`, name: `Discard ${title}`, icon: "close", work: () => this.discardBoard(b.id) }]),
+        { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${title}`, icon: kind.icon, divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
+        ...(b.open
+          ? [{ id: `pop-${b.id}`, name: `Move ${title} into a pane`, icon: "pane", work: () => this.moveIntoPane(b.id) }]
+          : [{ id: `discard-${b.id}`, name: `Discard ${title}`, icon: "close", work: () => this.discardBoard(b.id) }]),
       ];
     });
   }

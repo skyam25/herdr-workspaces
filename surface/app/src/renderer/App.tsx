@@ -321,7 +321,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
       for (const fn of off) if (typeof fn === 'function') fn();
     };
   }, [host, info.surface, notify]);
-  const surfaceAct = (action: SurfaceAction) => void host.surfaceWant(action).then(() => (action === 'owner' ? undefined : send()));
+  const surfaceAct = (action: SurfaceAction) => void host.surfaceWant(action).then(() => (action === 'owner' || action === 'pop' ? undefined : send()));
   const micButton = onMicrophone && (
     <Mic
       recording={recording}
