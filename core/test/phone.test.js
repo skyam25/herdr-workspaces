@@ -355,6 +355,43 @@ test('phone targets lists the terminals that run an agent, with their labels', a
   assert.match(targets[0].label, new RegExp(`^demo · .*${terminal}$`));
 });
 
+test('phone targets and accept reach an agent flipped to Chat, which has no pane', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const space = manifest.spaces[0];
+  const claude = { foreground: { name: 'claude', argv: ['claude'] } };
+  box.setState({
+    hc: {
+      t88: { ...claude, labels: { 'herdr.chat': 'pchat', 'herdr.space': space } },
+      t89: { labels: { 'herdr.chat': 'pchat2', 'herdr.space': space } },
+      t87: { ...claude, machine: 'remote' },
+      t86: claude,
+    },
+  });
+
+  const { targets } = box.json(['phone', 'targets']);
+  assert.deepEqual(targets.map((item) => item.id), ['t88']);
+  assert.match(targets[0].label, /^demo · t88$/);
+
+  const opened = box.json(['phone', 'accept', '--terminal', 't88']);
+  assert.equal(sendRecord(box, opened.send).workspace, manifest.id);
+});
+
+test('phone targets and accept leave out terminals on another machine', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const remote = 'box/t1';
+  const { spaces } = box.state();
+  spaces[0].tabs[0].terminals.push({ terminal: remote, pane: 'p77', status: 'idle', app: 'codex' });
+  box.setState({ spaces, hc: { [remote]: { foreground: { name: 'codex', argv: ['codex'] } } } });
+
+  assert.deepEqual(box.json(['phone', 'targets']).targets, []);
+
+  const result = box.hws(['phone', 'accept', '--terminal', remote]);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /on another machine/);
+});
+
 test('phone accept opens a send for a whiteboard, and its answer names the whiteboard', async (t) => {
   const box = sandbox(t);
   const manifest = box.app();

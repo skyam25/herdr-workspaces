@@ -5,10 +5,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 import { findArtifact, freeName, isInside, linkFor, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
-import { act, findTerminal, isAgentTerminal, isIdleShell, isTerminalAlive, listLive, requireLive, runDetached, sendText, terminalInfo, windowStatus } from '../herdr.js';
+import { act, findTerminal, isAgentTerminal, isIdleShell, isTerminalAlive, listLive, listLocalTerminals, requireLive, runDetached, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { ensureStandaloneManifest, manifestOfSpace, readManifest, writeJsonAtomic } from '../manifest.js';
 import { HWS_BIN, PHONE_HOST, home, phoneDir, phoneSocket, stateRoot } from '../paths.js';
-import { requireCallingTerminal, requireFlag } from '../resolve.js';
+import { requireCallingTerminal, requireFlag, spaceOfTerminal } from '../resolve.js';
 import { archiveBundle, assertBundle, newId, promptToSend, windowOwnerLabel } from './surface.js';
 
 const CONTROL_MS = 15_000;
@@ -135,12 +135,19 @@ function snapshotBoard(file) {
   return basename(target, '.excalidraw');
 }
 
+// The answer is a file on this Mac, which an agent on another machine cannot read.
+const isRemote = (terminal) => terminal.includes('/');
+
+function requireLocal(terminal) {
+  if (isRemote(terminal)) throw new HwsError(`the phone answers terminals on this computer, and ${terminal} is on another machine`);
+}
+
 export async function phoneSend(flags, [ref]) {
   const terminal = requireCallingTerminal(flags);
-  if (terminal.includes('/')) throw new HwsError(`the phone answers terminals on this computer, and ${terminal} is on another machine`);
+  requireLocal(terminal);
   const target = resolveTarget(ref);
   const live = requireLive();
-  const space = flags.space ?? findTerminal(live, terminal)?.space.id;
+  const space = flags.space ?? spaceOfTerminal(terminal);
   const workspace = (space && manifestOfSpace(space)) ?? ensureStandaloneManifest();
 
   const status = await ensureHost();
@@ -164,13 +171,24 @@ export async function phoneSend(flags, [ref]) {
 export function phoneTargets() {
   const live = requireLive();
   const targets = [];
+  const listed = new Set();
   for (const space of live.spaces) {
     for (const tab of space.tabs ?? []) {
       for (const record of tab.terminals ?? []) {
-        if (!isAgentTerminal(terminalInfo(record.terminal))) continue;
+        listed.add(record.terminal);
+        if (isRemote(record.terminal) || !isAgentTerminal(terminalInfo(record.terminal))) continue;
         targets.push({ id: record.terminal, label: windowOwnerLabel(live, record.terminal, { space: space.id }) });
       }
     }
+  }
+
+  // An agent flipped to Chat has no pane, so only hc lists it.
+  for (const { address } of listLocalTerminals()) {
+    if (listed.has(address)) continue;
+    const info = terminalInfo(address);
+    const labels = info?.labels ?? {};
+    if (!labels['herdr.chat'] || !isAgentTerminal(info)) continue;
+    targets.push({ id: address, label: windowOwnerLabel(live, address, { space: spaceOfTerminal(address, labels) }) });
   }
   return { data: { targets }, text: targets.length ? targets.map((item) => `${item.id}  ${item.label}`).join('\n') : 'No terminal runs an agent.' };
 }
@@ -178,9 +196,10 @@ export function phoneTargets() {
 // Opens a send for a whiteboard the phone starts, as phone send does for a file. The listener calls this.
 export function phoneAccept(flags) {
   const terminal = requireFlag(flags, 'terminal');
+  requireLocal(terminal);
   const live = requireLive();
   if (!isAgentTerminal(terminalInfo(terminal))) throw new HwsError(`terminal ${terminal} does not run an agent`);
-  const space = flags.space ?? findTerminal(live, terminal)?.space.id;
+  const space = flags.space ?? spaceOfTerminal(terminal);
   const workspace = (space && manifestOfSpace(space)) ?? ensureStandaloneManifest();
 
   pruneOld('sends');

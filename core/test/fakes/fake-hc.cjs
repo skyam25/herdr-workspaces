@@ -24,6 +24,13 @@ if (command === 'get') {
   process.exit(0);
 }
 
+// Lists terminals in FAKE_STATE.hc, as the core holds terminals a window has no pane for.
+if (command === 'ls') {
+  const terminals = Object.entries(state.hc ?? {}).filter(([, info]) => info !== 'missing').map(([address, info]) => ({ address, state: 'live', ...(info.machine ? { machine: info.machine } : {}) }));
+  process.stdout.write(`${JSON.stringify({ terminals })}\n`);
+  process.exit(0);
+}
+
 // Every run starts t90, so an ended t90 is live again.
 if (command === 'run') {
   if (state.hc?.t90 === 'missing') {

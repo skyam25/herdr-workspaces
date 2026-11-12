@@ -140,7 +140,7 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 - [ ] Serve page surfaces, which load from the Electron-only review scheme today.
 - [ ] Test notes, Talk and the microphone in WebKit.
 - [ ] Scan the pairing code with a real iPhone and iPad, then send a page and a board and press Send on the device.
-- [ ] Start a whiteboard on the phone, press Send, pick a Herdr terminal and check the prompt lands there. Only the listener test and the simulator test have run it. `hws phone targets` lists `herdr-app ls` terminals, so a flipped agent is not offered yet.
+- [ ] Start a whiteboard on the phone, press Send, pick a Herdr terminal and check the prompt lands there. Only the listener test and the simulator test have run it. `hws phone targets` offers agents flipped to Chat too, tested with fakes only.
 - [ ] Replace the remaining Electron APIs in `src/main`, so the host is a plain Node process.
 - [ ] Revisit a board inside the pane if Herdr ships a browser mod that can load a local app. Patching Herdr is ruled out.
 - [ ] Add the host address to the manifest through `hws`.

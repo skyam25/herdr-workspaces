@@ -146,6 +146,13 @@ export function terminalInfo(terminal) {
   return info && !info.error ? info : null;
 }
 
+// Live terminals on this Mac, as `hc ls` lists them. Empty when the core does not answer.
+export function listLocalTerminals() {
+  const result = run(hcBin(), ['ls', '--json'], READ_MS);
+  const listing = result.ok ? parseJson(result.stdout) : null;
+  return (Array.isArray(listing?.terminals) ? listing.terminals : []).filter((item) => item?.address && !item.machine);
+}
+
 // Returns the chat pane that shows a flipped agent, or null for any other terminal.
 export function chatPaneOf(terminal) {
   return terminalInfo(terminal)?.labels?.['herdr.chat'] || null;

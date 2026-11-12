@@ -205,8 +205,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws phone status` | Prints `{running,paired,devices,handoffs}`, each device `{id,name,lastSeen,pairedAt}`. Starts the listener when a phone is paired, and never otherwise |
 | `hws phone forget NAME\|ID` | Revokes one paired phone |
 | `hws phone stop` | Quits the listener |
-| `hws phone targets` | Lists the terminals that run an agent now, as `{targets:[{id,label}]}`. The listener runs it when a phone asks where a whiteboard can go |
-| `hws phone accept --terminal T [--space S]` | Called by the listener. Opens a send of type `board` and title `Whiteboard` for a whiteboard the phone started, tied to T. Fails when T sits at a shell or has ended |
+| `hws phone targets` | Lists the terminals that run an agent now, as `{targets:[{id,label}]}`. Panes come from `herdr-app ls`, and agents flipped to Chat come from `hc ls` by their `herdr.chat` label. Terminals on other machines are left out, because the answer is a file on this Mac. The listener runs it when a phone asks where a whiteboard can go |
+| `hws phone accept --terminal T [--space S]` | Called by the listener. Opens a send of type `board` and title `Whiteboard` for a whiteboard the phone started, tied to T. Fails when T sits at a shell, has ended or is on another machine |
 | `hws phone deliver --send P --bundle DIR` | Called by the listener. Files DIR as an artifact and delivers it. See [Phone](#phone) |
 | `hws artifact list [--workspace W]` | Artifacts, including those of retired throwaways when W is absent |
 | `hws artifact set ID [--status draft\|current\|superseded] [--supersedes ID]` | Changes an artifact in an open workspace and prints its record. Needs one of the two flags. `--supersedes` must name another artifact of the same workspace, and an empty value clears it |
