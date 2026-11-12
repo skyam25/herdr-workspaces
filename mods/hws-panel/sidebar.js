@@ -24,6 +24,7 @@ const REFRESH_MS = 60000;
 const GIT_TIMEOUT_MS = 5000;
 const FOLDED_KEY = "sidebar.folded";
 const ARCHIVED_OPEN_KEY = "sidebar.archived.open";
+const CAP_KEY = "sidebar.workspaces.cap";
 const STATUS_ORDER = ["blocked", "done", "working", "idle"];
 
 // Child glyphs center under the workspace tile.
@@ -252,12 +253,50 @@ export function overflows(state) {
   return rowsPx(state) > Math.min(maxListPx(state), measured);
 }
 
+// A height this mod neither set nor is still waiting on came from a drag on the divider.
+// Dragging up caps the list, which then scrolls. Dragging down to every row clears the cap.
+function takeDrag(state, now, full) {
+  if (state.fitPx == null || now == null || now === state.fitPx || now === state.fitFrom) return;
+  const dragged = now - HEADING_PX - BOTTOM_PX;
+  state.capPx = dragged < full ? Math.max(ROW_PX, dragged) : null;
+  try {
+    if (state.capPx == null) localStorage.removeItem(CAP_KEY);
+    else localStorage.setItem(CAP_KEY, String(state.capPx));
+  } catch {
+    // The cap still holds for this window.
+  }
+}
+
 // Sizes the block to its rows, so an empty section leaves no gap above Spaces.
 function fit(state) {
   const block = findNode(layout(), NODE);
   if (!block || !state.workspaces) return;
-  const px = isNarrow() ? HEADING_PX : HEADING_PX + listPx(state) + BOTTOM_PX;
-  if (block.size?.px !== px) run("layout.resize", { id: NODE, px });
+  const now = block.size?.px;
+  let px = HEADING_PX;
+  if (!isNarrow()) {
+    const full = listPx(state);
+    takeDrag(state, now, full);
+    px = HEADING_PX + Math.min(full, state.capPx ?? Infinity) + BOTTOM_PX;
+  }
+  if (now === px) {
+    state.fitPx = px;
+    state.fitFrom = null;
+    return;
+  }
+  if (state.fitPx !== px) {
+    state.fitFrom = now;
+    state.fitPx = px;
+  }
+  run("layout.resize", { id: NODE, px });
+}
+
+function savedCap() {
+  try {
+    const px = Number(localStorage.getItem(CAP_KEY));
+    return px > 0 ? px : null;
+  } catch {
+    return null;
+  }
 }
 
 const changeKey = () => spaces().map((s) => s.id).join();
@@ -292,6 +331,9 @@ export function startSidebar(cx) {
     windowPx: null,
     blockPx: null,
     hovered: null,
+    capPx: savedCap(),
+    fitPx: null,
+    fitFrom: null,
   };
   load(state, cx);
   cx.timer.every(CHECK_MS, (cx) => check(state, cx));
