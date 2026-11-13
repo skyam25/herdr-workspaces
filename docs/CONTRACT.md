@@ -575,6 +575,8 @@ Closing the window quits the host. A closed window with a drawing, comments or a
 
 A running host raises its window on `POST /open`. The Window menu's Keep on Top floats it on request.
 
+On macOS the host runs as Herdr Surfaces. `surface/window-app.sh` builds `surface/node_modules/.herdr-surfaces/Herdr Surfaces.app` on first use, from Pixel with Herdr's icon, no `LSUIElement` and a local signature. A new Pixel version rebuilds it. Its windows get a Dock icon and show in Cmd-Tab and App Exposé, in their own group beside Herdr, because macOS groups windows by process. A window stays on the Space it opened on. A failed build falls back to Pixel, whose window has no Dock icon.
+
 | Where | Shows | Action |
 |---|---|---|
 | Pane header, beside Chat \| Terminal | Resume or Show, then sketch, note or page, for the agent's newest window, with +N for others. A failure toasts `Sketch didn't open`, with the kind that failed | `hws surface resume` |

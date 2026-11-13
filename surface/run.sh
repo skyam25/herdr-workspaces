@@ -35,4 +35,11 @@ export PIXEL_FPS="${PIXEL_FPS:-30}"
 title="$(printf '%s' "${HWS_SURFACE_TITLE:-}" | tr -d '\000-\037\177')"
 printf '\033]2;%s\007' "${title:-$HWS_SURFACE_TYPE}"
 
-exec "$(sh "$here/pixel-path.sh")" "$here/host.cjs" 2>>"$COMPANION_DATA_DIR/host.stderr.log"
+# A surface in its own window runs as Herdr Surfaces, so its window has a Dock icon and shows in App Exposé.
+if [ "${HWS_SURFACE_WINDOW:-}" = 1 ]; then
+  electron="$(sh "$here/window-app.sh" 2>>"$COMPANION_DATA_DIR/host.stderr.log")"
+else
+  electron="$(sh "$here/pixel-path.sh")"
+fi
+
+exec "$electron" "$here/host.cjs" 2>>"$COMPANION_DATA_DIR/host.stderr.log"

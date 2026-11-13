@@ -193,10 +193,9 @@ function ownPanelWindow(options) {
     takeFocus();
     app.focus({ steal: true });
   };
-  Object.assign(win, { show: inert, showInactive: raise, hide: inert, focus: inert, setPosition: inert, setBounds: inert });
+  Object.assign(win, { show: inert, showInactive: raise, hide: inert, focus: inert, setPosition: inert, setBounds: inert, setVisibleOnAllWorkspaces: inert });
 
   const float = (on) => win.setAlwaysOnTop(on, 'floating');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   win.once('ready-to-show', () => {
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       { role: 'appMenu' },
@@ -240,8 +239,10 @@ Module._load = function (request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 
-// The main bundle hides the app for a surface. A surface with its own window keeps the Dock icon and Edit menu.
+// The main bundle hides the app for a surface. A surface with its own window keeps the Dock icon and Edit menu,
+// and its window stays on the Space it opened on.
 if (process.env.HWS_SURFACE_WINDOW === '1') {
+  app.setName('Herdr Surfaces');
   app.setActivationPolicy = () => {};
   if (app.dock) app.dock.hide = () => {};
 }
