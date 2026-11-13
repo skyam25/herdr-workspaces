@@ -5,7 +5,7 @@ export const ROLES = ["current", "notes", "artifacts", "scratch", "decisions", "
 
 // What a role means when the manifest leaves it out. See docs/CONTRACT.md, Places.
 export const ROLE_DEFAULTS = {
-  current: "CURRENT.md",
+  current: "The current note, in the workspace files",
   notes: "Written notes, in the workspace files",
   artifacts: "Sketches and reviews, in the workspace files",
   scratch: "Working files and unsent drafts",

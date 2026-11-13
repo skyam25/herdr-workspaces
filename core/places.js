@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { HwsError, UsageError } from './errors.js';
@@ -52,8 +52,11 @@ function builtInDefaults(manifest) {
   }
   if (hasOwnHome(manifest)) return { current: 'CURRENT.md', notes: 'notes', artifacts: 'artifacts', scratch: 'scratch', decisions: 'decisions', history: 'history' };
   const own = keptWorkspaceDir(manifest.folder, manifest);
-  return { current: 'CURRENT.md', notes: join(own, 'notes'), artifacts: join(own, 'artifacts'), scratch: join(own, 'scratch'), decisions: join(own, 'decisions'), history: join(own, 'history') };
+  return { current: join(own, 'CURRENT.md'), notes: join(own, 'notes'), artifacts: join(own, 'artifacts'), scratch: join(own, 'scratch'), decisions: join(own, 'decisions'), history: join(own, 'history') };
 }
+
+// True when neither the manifest nor settings.json names the role.
+const takesDefault = (manifest, role) => !entryOf(manifest.places?.[role]) && !entryOf(defaultPlaces()[role]);
 
 // The manifest decides first, then settings.json for a kept workspace, then the built-in default.
 function entryFor(manifest, role) {
@@ -111,4 +114,26 @@ export function applyPlaces(draft, paths, writers) {
   }
   if (Object.keys(places).length > 0) draft.places = places;
   else delete draft.places;
+}
+
+// A kept workspace without its own home once kept its note at `<folder>/CURRENT.md`,
+// which every workspace in that folder shared. The latest tidier in each folder keeps
+// that file as an explicit place. The others forget their pass, so the next one
+// gathers their whole stream into a note of their own.
+export function adoptSharedNotes(manifests, update) {
+  const byFolder = new Map();
+  for (const manifest of manifests) {
+    if (!isKept(manifest) || hasOwnHome(manifest) || !manifest.current?.tidiedAt || !takesDefault(manifest, 'current')) continue;
+    if (existsSync(placeOf(manifest, 'current').path)) continue;
+    if (!existsSync(join(manifest.folder, 'CURRENT.md'))) continue;
+    byFolder.set(manifest.folder, [...(byFolder.get(manifest.folder) ?? []), manifest]);
+  }
+  const adopted = [];
+  for (const group of byFolder.values()) {
+    const [owner, ...others] = group.sort((a, b) => b.current.tidiedAt - a.current.tidiedAt);
+    update(owner.id, (draft) => applyPlaces(draft, [['current', 'CURRENT.md']], []));
+    for (const other of others) update(other.id, (draft) => delete draft.current);
+    adopted.push(owner.id);
+  }
+  return adopted;
 }

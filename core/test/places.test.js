@@ -17,7 +17,7 @@ test('a kept workspace takes the default places', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
 
-  assert.equal(placeText(box, manifest, 'current'), join(manifest.folder, 'CURRENT.md'));
+  assert.equal(placeText(box, manifest, 'current'), join(ownDir(manifest), 'CURRENT.md'));
   assert.equal(placeText(box, manifest, 'artifacts'), join(ownDir(manifest), 'artifacts'));
   assert.equal(placeText(box, manifest, 'scratch'), join(ownDir(manifest), 'scratch'));
   for (const role of ['decisions', 'history']) assert.equal(placeText(box, manifest, role), join(ownDir(manifest), role));
@@ -172,4 +172,33 @@ test('done still lands a default kept bundle under the workspace folder', (t) =>
   const { artifact } = box.finishGlued(manifest);
   assert.equal(artifact.path, join(ownDir(manifest), 'artifacts', `flow-${artifact.id}`));
   assert.equal(artifact.status, 'current');
+});
+
+test('workspaces sharing a folder each keep their own current note', (t) => {
+  const box = sandbox(t);
+  const first = box.app();
+  const second = box.json(['new', 'workspace', '--name', 'other', '--folder', first.folder, '--kind', 'app']);
+
+  const notes = [placeText(box, first, 'current'), placeText(box, second, 'current')];
+  assert.equal(notes[0], join(ownDir(first), 'CURRENT.md'));
+  assert.notEqual(notes[0], notes[1]);
+});
+
+test('the latest tidier keeps a shared CURRENT.md and the others start over', (t) => {
+  const box = sandbox(t);
+  const first = box.app();
+  const second = box.json(['new', 'workspace', '--name', 'other', '--folder', first.folder, '--kind', 'app']);
+  const third = box.json(['new', 'workspace', '--name', 'fresh', '--folder', first.folder, '--kind', 'app']);
+  writeFileSync(join(first.folder, 'CURRENT.md'), '# Shared\n');
+  box.rewriteManifest(first.id, (raw) => ({ ...raw, current: { tidiedAt: 1000, covers: {} } }));
+  box.rewriteManifest(second.id, (raw) => ({ ...raw, current: { tidiedAt: 2000, covers: {} } }));
+
+  box.hws(['list']);
+
+  assert.equal(placeText(box, second, 'current'), join(first.folder, 'CURRENT.md'));
+  assert.equal(box.manifest(second.id).current.tidiedAt, 2000);
+  assert.equal(placeText(box, first, 'current'), join(ownDir(first), 'CURRENT.md'));
+  assert.equal(box.manifest(first.id).current, undefined);
+  assert.equal(box.manifest(third.id).places, undefined);
+  assert.equal(existsSync(join(first.folder, 'CURRENT.md')), true);
 });

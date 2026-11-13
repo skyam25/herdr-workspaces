@@ -142,7 +142,7 @@ Notes and artifacts reach the note through a tidy pass. Each new or edited one a
 
 | Role | Holds | Default for a kept workspace |
 |---|---|---|
-| `current` | The current note | `CURRENT.md` |
+| `current` | The current note | `.herdr-workspace/<name>-<id tail>/CURRENT.md` |
 | `notes` | Done bundles from a note surface | `.herdr-workspace/<name>-<id tail>/notes/` |
 | `artifacts` | Done bundles from boards and pages, and registered files | `.herdr-workspace/<name>-<id tail>/artifacts/` |
 | `scratch` | Working files, and unsent drafts under `drafts/` | `.herdr-workspace/<name>-<id tail>/scratch/` |
@@ -151,6 +151,7 @@ Notes and artifacts reach the note through a tidy pass. Each new or edited one a
 | `meetings` | Transcribed meeting notes | Unset |
 
 - A role resolves from the manifest, then from `settings.json` `places`, then from the default above.
+- Workspaces that share a folder never share a current note. A kept workspace without its own home that tidied into `<folder>/CURRENT.md` before this default keeps that file. Each prune pins it as the `current` place of the workspace in that folder that tidied last, and drops `current` from the others, so their next pass gathers their whole stream.
 - The `settings.json` map applies to every kept workspace without its own entry for that role.
 - A throwaway has only `artifacts` and `scratch` under `<root>/workspaces/<spaceId>/`. Standalone has only `artifacts`. Neither reads `settings.json` or accepts `--place`.
 - A place is a path string or `{ "path": "...", "writer": "name" }`. Paths are relative to the workspace folder, absolute, or start with `~/`.

@@ -7,7 +7,7 @@ import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isIdleShell, killTerminal, listLive, requireLive, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { listManifests, readManifest, updateManifest } from '../manifest.js';
 import { STANDALONE, captureDir, expandFolder, terminalSessionDir, keptThrowawayDir, manifestPath, workspaceDir } from '../paths.js';
-import { applyPlaces, assertRole, assertStage, ensurePlace, isKept, parseAssignment, placeOf, writablePlace } from '../places.js';
+import { adoptSharedNotes, applyPlaces, assertRole, assertStage, ensurePlace, isKept, parseAssignment, placeOf, writablePlace } from '../places.js';
 import { resolveWorkspace, spaceOfTerminal } from '../resolve.js';
 import { containsFile, isStored, lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
 import { requireFolder } from '../settings.js';
@@ -158,6 +158,11 @@ function dropSpaces(id, gone) {
 // because remote spaces can stay listed while the local core is down.
 export function prune() {
   const manifests = listManifests();
+  try {
+    adoptSharedNotes(manifests, updateManifest);
+  } catch {
+    // The next prune retries it.
+  }
   const live = listLive();
   if (!live?.spaces.some((space) => !space.machine)) {
     return { data: { pruned: [], expired: [], skipped: true }, text: 'the Herdr window listed no local space, so nothing changed' };

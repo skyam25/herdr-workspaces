@@ -24,6 +24,13 @@ function commit(folder, subject) {
   return git(folder, 'rev-parse', 'HEAD');
 }
 
+const noteOf = (manifest) => join(manifest.folder, '.herdr-workspace', `${manifest.name}-${manifest.id.slice(-6)}`, 'CURRENT.md');
+
+function writeNote(manifest, text) {
+  mkdirSync(join(noteOf(manifest), '..'), { recursive: true });
+  writeFileSync(noteOf(manifest), text);
+}
+
 function status(box, manifest) {
   return box.json(['tidy', 'status', '--workspace', manifest.id]);
 }
@@ -215,7 +222,7 @@ test('with no current note every item is behind', (t) => {
 test('a note written outside a tidy pass reads as not tidied', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
-  writeFileSync(status(box, manifest).places.current, '# Plan\n');
+  writeNote(manifest, '# Plan\n');
 
   assert.equal(status(box, manifest).line, 'Current note not tidied yet');
 });
@@ -275,7 +282,7 @@ test('commits that only touch drafts or the note records do not count', (t) => {
   const scratch = status(box, manifest).places.scratch.slice(manifest.folder.length + 1);
 
   save(`${scratch}/draft.json`, 'Auto-commit draft');
-  save('CURRENT.md', 'Auto-commit note');
+  save(noteOf(manifest).slice(manifest.folder.length + 1), 'Auto-commit note');
   assert.equal(status(box, manifest).behind.commits, 0);
 
   save('plan.md', 'Real work');
@@ -408,13 +415,13 @@ test('start writes the packet, opens a Tidy tab and records the pass', (t) => {
   assert.equal(packet.folder, manifest.folder);
   assert.equal(packet.stage, 'deciding');
   assert.equal(packet.instructions, 'Be brief');
-  assert.equal(packet.places.current, join(manifest.folder, 'CURRENT.md'));
+  assert.equal(packet.places.current, noteOf(manifest));
   assert.equal(packet.places.history, join(manifest.folder, '.herdr-workspace', `demo-${manifest.id.slice(-6)}`, 'history'));
   assert.deepEqual(packet.live.artifacts.map((item) => item.id), ['a1']);
   assert.deepEqual(packet.live.decisions.inForce, []);
   assert.deepEqual(packet.live.cards, [{ id: 'c2', title: 'Card c2', column: 'todo' }]);
   assert.equal(packet.writers.decisions, null);
-  assert.deepEqual(packet.current, { path: join(manifest.folder, 'CURRENT.md'), exists: false, hash: null, tidiedAt: null, covers: null });
+  assert.deepEqual(packet.current, { path: noteOf(manifest), exists: false, hash: null, tidiedAt: null, covers: null });
   assert.deepEqual(packet.since.sessions.map((item) => item.id), ['s1']);
   assert.deepEqual(packet.since.artifacts, [{ id: 'a1', title: 'Artifact a1', path: '/tmp/a1', status: 'current', createdAt: 5 }]);
   assert.deepEqual(packet.since.commits.map((item) => [item.sha, item.subject]), [[head, 'first']]);
@@ -426,7 +433,7 @@ test('start writes the packet, opens a Tidy tab and records the pass', (t) => {
 test('the packet hashes an existing current note', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
-  writeFileSync(join(manifest.folder, 'CURRENT.md'), '# Current\n');
+  writeNote(manifest, '# Current\n');
 
   box.json(['tidy', 'start', '--workspace', manifest.id]);
 
@@ -473,7 +480,7 @@ function applyFixture(box, { history = true } = {}) {
   const manifest = box.app();
   const folder = manifest.folder;
   mkdirSync(join(folder, 'docs'), { recursive: true });
-  writeFileSync(join(folder, 'CURRENT.md'), '# Old\n');
+  writeNote(manifest, '# Old\n');
   writeFileSync(join(folder, 'docs', 'plan.md'), 'plan');
   writeFileSync(join(folder, 'docs', 'scrap.md'), 'scrap');
   if (history) box.json(['set', '--workspace', manifest.id, '--place', 'history=docs/history']);
@@ -520,7 +527,7 @@ test('apply writes the note, demotes, marks artifacts, archives cards and stamps
   const snapshot = result.snapshot;
   assert.equal(readFileSync(snapshot, 'utf8'), '# Old\n');
   assert.deepEqual(result, {
-    wrote: join(folder, 'CURRENT.md'),
+    wrote: noteOf(manifest),
     snapshot,
     updates: join(folder, 'docs', 'history', 'updates.md'),
     decisions: [],
@@ -529,7 +536,7 @@ test('apply writes the note, demotes, marks artifacts, archives cards and stamps
     archived: ['c1', 'c2'],
     skipped: [],
   });
-  assert.equal(readFileSync(join(folder, 'CURRENT.md'), 'utf8'), NEW_NOTE);
+  assert.equal(readFileSync(noteOf(manifest), 'utf8'), NEW_NOTE);
   assert.equal(readFileSync(history, 'utf8'), 'plan');
   assert.equal(existsSync(join(folder, 'docs', 'scrap.md')), false);
   assert.equal(readFileSync(join(box.trashDir, '0-scrap.md'), 'utf8'), 'scrap');
@@ -550,7 +557,7 @@ test('the proposal names its workspace, so apply needs no flag', (t) => {
 
   const result = box.json(['tidy', 'apply', '--file', file]);
 
-  assert.equal(result.wrote, join(manifest.folder, 'CURRENT.md'));
+  assert.equal(result.wrote, noteOf(manifest));
   assert.deepEqual([result.demoted, result.artifacts, result.archived, result.skipped], [[], [], [], []]);
 });
 
@@ -563,9 +570,9 @@ for (const part of ['current', 'demote', 'artifacts', 'cards']) {
     const result = box.json(['tidy', 'apply', '--file', file, '--skip', part]);
 
     assert.deepEqual(result.skipped, [part]);
-    const note = readFileSync(join(folder, 'CURRENT.md'), 'utf8');
+    const note = readFileSync(noteOf(manifest), 'utf8');
     assert.equal(note, part === 'current' ? '# Old\n' : NEW_NOTE);
-    assert.equal(result.wrote, part === 'current' ? null : join(folder, 'CURRENT.md'));
+    assert.equal(result.wrote, part === 'current' ? null : noteOf(manifest));
     assert.equal(existsSync(join(folder, 'docs', 'plan.md')), part === 'demote');
     assert.equal(existsSync(join(folder, 'docs', 'scrap.md')), part === 'demote');
     assert.equal(result.demoted.length, part === 'demote' ? 0 : 2);
@@ -582,13 +589,13 @@ test('apply refuses a note that changed after the packet and changes nothing', (
   const box = sandbox(t);
   const { manifest, folder, packet } = applyFixture(box);
   const file = writeProposal(box, manifest, packet);
-  writeFileSync(join(folder, 'CURRENT.md'), '# Edited by hand\n');
+  writeNote(manifest, '# Edited by hand\n');
 
   const result = box.hws(['tidy', 'apply', '--file', file]);
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /changed after the packet was written/);
-  assert.equal(readFileSync(join(folder, 'CURRENT.md'), 'utf8'), '# Edited by hand\n');
+  assert.equal(readFileSync(noteOf(manifest), 'utf8'), '# Edited by hand\n');
   assert.equal(existsSync(join(folder, 'docs', 'scrap.md')), true);
   assert.deepEqual(archivedIds(box, manifest), []);
   assert.ok(box.manifest(manifest.id).tidy);
@@ -599,13 +606,13 @@ test('apply refuses a note that appeared after a packet with no note', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const { packet } = box.json(['tidy', 'start', '--workspace', manifest.id]);
-  writeFileSync(join(manifest.folder, 'CURRENT.md'), '# Written meanwhile\n');
+  writeNote(manifest, '# Written meanwhile\n');
   const file = writeProposal(box, manifest, packet, { demote: [], artifacts: [], cards: [] });
 
   const result = box.hws(['tidy', 'apply', '--file', file]);
 
   assert.equal(result.code, 1);
-  assert.equal(readFileSync(join(manifest.folder, 'CURRENT.md'), 'utf8'), '# Written meanwhile\n');
+  assert.equal(readFileSync(noteOf(manifest), 'utf8'), '# Written meanwhile\n');
 });
 
 test('apply writes a first note when the packet had none', (t) => {
@@ -655,11 +662,11 @@ test('apply refuses demotions of the note, outside the folder, under another wri
   writeFileSync(outside, 'notes');
 
   const cases = [
-    [join(folder, 'CURRENT.md'), /is or holds the current note/],
+    [noteOf(manifest), /is or holds the current note/],
     [folder, /is or holds the current note/],
     [outside, /outside the workspace folder/],
     [join(folder, 'decisions', 'd1.md'), /decisions place that pmos writes/],
-    [join(folder, '.herdr-workspace'), /holds the (notes|artifacts|scratch) place/],
+    [join(folder, '.herdr-workspace'), /is or holds the current note/],
     [join(folder, 'docs', 'missing.md'), /does not exist/],
   ];
   mkdirSync(join(folder, '.herdr-workspace'), { recursive: true });
@@ -669,7 +676,7 @@ test('apply refuses demotions of the note, outside the folder, under another wri
     assert.equal(result.code, 1, path);
     assert.match(result.stderr, message, path);
   }
-  assert.equal(readFileSync(join(folder, 'CURRENT.md'), 'utf8'), '# Old\n');
+  assert.equal(readFileSync(noteOf(manifest), 'utf8'), '# Old\n');
   assert.equal(existsSync(outside), true);
   assert.equal(existsSync(join(folder, 'decisions', 'd1.md')), true);
   assert.ok(box.manifest(manifest.id).tidy);
@@ -705,13 +712,13 @@ test('apply refuses an unknown artifact or a card that left Done', (t) => {
   const doing = box.hws(['tidy', 'apply', '--file', writeProposal(box, manifest, packet, { cards: ['c3'] })]);
   assert.equal(doing.code, 1);
   assert.match(doing.stderr, /card c3 is in doing/);
-  assert.equal(readFileSync(join(manifest.folder, 'CURRENT.md'), 'utf8'), '# Old\n');
+  assert.equal(readFileSync(noteOf(manifest), 'utf8'), '# Old\n');
 });
 
 test('apply refuses to write a current note another writer owns', (t) => {
   const box = sandbox(t);
   const { manifest, packet } = applyFixture(box);
-  box.json(['set', '--workspace', manifest.id, '--place', 'current=CURRENT.md', '--writer', 'current=pmos']);
+  box.json(['set', '--workspace', manifest.id, '--place', `current=${noteOf(manifest)}`, '--writer', 'current=pmos']);
   const file = writeProposal(box, manifest, packet);
 
   const result = box.hws(['tidy', 'apply', '--file', file]);
@@ -808,7 +815,7 @@ test('apply refuses a bad decision or an unknown replacement and changes nothing
   const unknown = box.hws(['tidy', 'apply', '--file', writeProposal(box, manifest, packet, { ...rest, decisions: [decision('X', { replaces: ['D-009'] })] })]);
   assert.equal(unknown.code, 1);
   assert.match(unknown.stderr, /no decision D-009/);
-  assert.equal(readFileSync(join(folder, 'CURRENT.md'), 'utf8'), '# Old\n');
+  assert.equal(readFileSync(noteOf(manifest), 'utf8'), '# Old\n');
 });
 
 test('apply refuses decisions when another tool owns the log, and --skip decisions leaves it alone', (t) => {
