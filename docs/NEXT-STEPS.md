@@ -239,7 +239,7 @@ Built 2026-11-09 against fakes, then installed. The window reported no errors, a
 
 Built 2026-11-09 by six Opus workers against fakes, after a review of the live window. Nobody has clicked any of it.
 
-- [ ] Read the Workspaces list. Each workspace should show a letter tile in its space's colour, every name should start at the same x, and a workspace with one space should show no child row for it.
+- [ ] Read the Workspaces list. Each workspace should show a letter tile in its space's colour, every name should start at the same x, and a workspace with one space should list that space indented under it.
 - [ ] Select the last workspace in the list. Its rows should stay on screen, and Other spaces and Agents should keep at least 90px each.
 - [ ] Right-click a workspace row and choose Add space… and Add tasks.
 - [ ] Hover a space row under a workspace with two spaces. The minus should show only on that row.

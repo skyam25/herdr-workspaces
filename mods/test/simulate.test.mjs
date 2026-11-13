@@ -1788,11 +1788,11 @@ test("the sidebar folds archived workspaces under one row and restores on click"
   const archived = { ...APP, id: "spa", name: "old work", spaces: [], archived: { at: 1, spaces: [] } };
   const H = setup({ hws: { list: [APP], "list --archived": [archived] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 95 } });
-  assert.equal(m.has("sidebar-archived-spa"), false);
-  H.layout.children[0].children[0].size.px = 95;
-  await m.click("sidebar-archived-toggle");
   assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 121 } });
+  assert.equal(m.has("sidebar-archived-spa"), false);
+  H.layout.children[0].children[0].size.px = 121;
+  await m.click("sidebar-archived-toggle");
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 147 } });
   await m.click("sidebar-archived-spa");
   assert.deepEqual([H.overlays.at(-1).props.view, H.overlays.at(-1).props.action, H.overlays.at(-1).props.workspace], ["confirm", "restore", "spa"]);
   await m.rightClick("sidebar-archived-spa");
@@ -1802,8 +1802,8 @@ test("the sidebar folds archived workspaces under one row and restores on click"
 test("the sidebar section sizes its block to its rows and hides them when narrow", async () => {
   const H = setup({ hws: { list: [APP, THROWAWAY] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 99 } });
-  H.layout.children[0].children[0].size.px = 99;
+  assert.deepEqual(H.runs.at(-1), { name: "layout.resize", args: { id: "workspaces", px: 151 } });
+  H.layout.children[0].children[0].size.px = 151;
   H.runs.length = 0;
   await m.fireTimer(1000);
   assert.deepEqual(H.runs, []);
@@ -1819,11 +1819,11 @@ test("a drag on the divider caps the list, and a drag past every row clears the 
   const m = await mount("hws-panel", { view: "sidebar" });
   const block = H.layout.children[0].children[0];
   const resizes = () => H.runs.filter((r) => r.name === "layout.resize");
-  assert.deepEqual(resizes().at(-1).args, { id: "workspaces", px: 99 });
+  assert.deepEqual(resizes().at(-1).args, { id: "workspaces", px: 151 });
 
   await m.fireTimer(1000);
-  assert.deepEqual(resizes().at(-1).args.px, 99, "a resize still pending is not a drag");
-  block.size.px = 99;
+  assert.deepEqual(resizes().at(-1).args.px, 151, "a resize still pending is not a drag");
+  block.size.px = 151;
   await m.fireTimer(1000);
 
   H.runs.length = 0;
@@ -1835,7 +1835,7 @@ test("a drag on the divider caps the list, and a drag past every row clears the 
 
   block.size.px = 160;
   await m.fireTimer(1000);
-  assert.deepEqual(resizes().at(-1).args, { id: "workspaces", px: 99 }, "past every row it fits the rows again");
+  assert.deepEqual(resizes().at(-1).args, { id: "workspaces", px: 151 }, "past every row it fits the rows again");
   assert.equal(localStorage.getItem("sidebar.workspaces.cap"), null);
 });
 
@@ -1877,22 +1877,23 @@ async function hover(m, id, isHovered) {
 const BOARDED = { ...GROUP, spaces: ["spc1", "spb"], board: { space: "spb", tab: "tbb" } };
 const WITH_BOARD = [...SPACED, { id: "spb", name: "Board", active: false, status: null, tabs: [{ id: "tbb", name: "Tasks", active: true }] }];
 
-test("a workspace with one space shows no child row, and its row takes the selection", async () => {
+test("a workspace with one space lists it as a child row, which takes the selection", async () => {
   setup({ hws: { list: [APP] }, spaces: SPACED });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.equal(m.has("sidebar-space-spc1"), false);
-  assert.equal(m.has("sidebar-fold-spc1"), false);
-  assert.equal(findNode(m.render(), "sidebar-workspace-spc1").bg, "color:selected");
+  assert.match(m.text(), /C \| checkout demo \| api/);
+  assert.equal(m.has("sidebar-fold-spc1"), true);
+  assert.equal(findNode(m.render(), "sidebar-space-spc1").bg, "color:selected");
+  assert.equal(findNode(m.render(), "sidebar-workspace-spc1").bg, undefined);
 });
 
-test("a workspace with one space and a Board lists only Tasks under it", async () => {
+test("a workspace with one space and a Board lists Tasks, then the space", async () => {
   setup({ hws: { list: [BOARDED] }, spaces: WITH_BOARD });
   const m = await mount("hws-panel", { view: "sidebar" });
-  assert.match(m.text(), /C \| checkout demo \| Tasks/);
-  assert.equal(m.has("sidebar-space-spc1"), false);
+  assert.match(m.text(), /C \| checkout demo \| Tasks \| api/);
+  assert.equal(m.has("sidebar-space-spc1"), true);
   assert.equal(m.has("sidebar-space-spb"), true);
   assert.equal(m.has("sidebar-fold-spc1"), true);
-  assert.equal(findNode(m.render(), "sidebar-workspace-spc1").bg, "color:selected");
+  assert.equal(findNode(m.render(), "sidebar-space-spc1").bg, "color:selected");
 });
 
 test("the active space row holds the selection and its workspace row stays quiet", async () => {
@@ -1924,8 +1925,15 @@ test("every workspace row draws a letter tile in a stable color and reserves the
   assert.equal(findNode(again.render(), "sidebar-tile-spc2").bg, quiet.bg);
 
   const row = findNode(tree, "sidebar-workspace-spc2");
-  assert.equal(m.has("sidebar-fold-spc2"), false);
+  assert.equal(m.has("sidebar-fold-spc2"), true);
   assert.equal(row.children[1].node.id, "sidebar-tile-spc2");
+
+  // A workspace with no live space has no chevron, but its tile stays in the same slot.
+  const gone = { ...APP, id: "spc7", name: "gone", spaces: ["spc7"] };
+  setup({ hws: { list: [gone] }, spaces: SPACED, sharedValues: {} });
+  const empty = await mount("hws-panel", { view: "sidebar" });
+  assert.equal(empty.has("sidebar-fold-spc7"), false);
+  assert.equal(findNode(empty.render(), "sidebar-workspace-spc7").children[1].node.id, "sidebar-tile-spc7");
 });
 
 test("the Board is listed once and first as Tasks, opens its tab and has no minus", async () => {

@@ -76,11 +76,10 @@ const isCurrent = (members) => members.some((s) => s.active);
 const mostUrgent = (members) => STATUS_ORDER.find((status) => members.some((s) => s.status === status)) ?? null;
 const workingSpaces = (workspace, members) => members.filter((s) => s.id !== workspace.board?.space);
 
-// Tasks comes first. A lone working space gets no row, because the workspace row selects it.
+// Tasks comes first. Every working space gets a row, a lone one included.
 function childSpaces(workspace, members) {
   const board = members.filter((s) => s.id === workspace.board?.space);
-  const working = workingSpaces(workspace, members);
-  return [...board, ...(working.length === 1 ? [] : working)];
+  return [...board, ...workingSpaces(workspace, members)];
 }
 
 const shownChildren = (state, workspace, members) => (state.folded.has(workspace.id) ? [] : childSpaces(workspace, members));
