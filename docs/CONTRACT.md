@@ -1108,7 +1108,7 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 1. Runs `hws register --terminal T --session S --folder F --json` and `hws current --line` in parallel. F is the hook's `cwd`, so Outputs finds the session's outputs file.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
-3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE` and rules out `--standalone`. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws phone send FILE --prompt X` and says Agent Brief's Outputs panel does not reach the phone.
+3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE` and rules out `--standalone`. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` for a Markdown file and rules out `open` and other editors, then a paragraph that teaches `hws phone send FILE --prompt X` and says Agent Brief's Outputs panel does not reach the phone.
 
 | Places sentence | |
 |---|---|

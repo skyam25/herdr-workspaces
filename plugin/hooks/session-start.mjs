@@ -20,6 +20,13 @@ const REVIEW = [
   "Never open it with --standalone, because that pane has no agent to answer.",
 ].join(" ");
 
+// A plain tab gets no skill hint, so without this an agent falls back to `open`, which sends .md to VS Code.
+const NOTE_EDITOR = [
+  "To show the person a Markdown file to read or edit, run `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn.",
+  "It opens in a Herdr note window, in a workspace or not.",
+  "Never open the file with `open`, VS Code or another editor.",
+].join(" ");
+
 // Agent Brief's own outputs and iPad pairing never reach a phone paired with Herdr.
 const PHONE = [
   'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn.',
@@ -148,7 +155,7 @@ async function main() {
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(
