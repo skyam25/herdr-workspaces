@@ -1,6 +1,6 @@
 # Next steps
 
-Handoff for the next session. Updated 2026-11-12.
+Handoff for the next session. Updated 2026-11-15.
 
 Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 
@@ -266,3 +266,21 @@ Built 2026-11-12 by three Opus workers against fakes. The lead ran `hws surface 
 - [ ] Choose Move into a pane in the `+` menu right after typing in a window, and close a note's pane right after typing. The host saves on a hangup, which the pty and a signal test showed, so nothing typed should be lost.
 - [ ] Read the pane header button with a note window and a page window open. It should say note or page, not sketch.
 - [ ] Narrow a pane below 460 px and check the bar keeps the Pop out icon, the mic and Done on one line.
+
+### 17. Test the Herdr 0.1.16 changes by hand
+
+Built 2026-11-15 against fakes, after Herdr 0.1.16 and core 0.1.21. `hws-tabs`, `hws-agents` and `hws-spaces` now match Herdr 0.1.16's originals plus the changes in `mods/NOTICE.md`.
+
+- [ ] Flick the trackpad over the tab bar. It should move one tab per short swipe.
+- [ ] Open enough tabs to overflow the bar, then select the last. It should scroll into view.
+- [ ] Move a card to Waiting on you. The Dock icon should show the count, and clear at zero.
+- [ ] Switch between a workspace's space and a plain space. The window title should read the workspace's name, then Herdr.
+- [ ] Drag an artifact title from the panel and a file row from Outputs into a Claude terminal. Each should type its path without Enter.
+- [ ] Start an Orchestrator and a Tidy tab from the panel. The screen should stay put with no flash to the new tab.
+- [ ] Flip a zoomed agent to Chat and back. The keyboard should land in the agent's pane.
+- [ ] Check whether the new menu bar takes ⌘Enter before a surface does.
+- [ ] Decide on Cmd+A. Herdr 0.1.16 binds it to `terminal.select_all` by default, and a page surface in a pane runs inside a terminal, so the binding would take Cmd+A from the page's text fields. `keys.json` leaves it out for now.
+- [ ] Run `herdr-app check` on each mod and confirm no "runs for real" warning.
+- [ ] Open a workspace's Tasks space. Its Workspace board tab now shows in the tab bar like any tab.
+- [ ] Read the Agents list in priority order. Rows now read "space · title", as Herdr's own list does.
+- [ ] After the next Herdr update, run `hws doctor`, then `node mods/sync-forks.mjs --merge`, and judge how much was left to resolve by hand.

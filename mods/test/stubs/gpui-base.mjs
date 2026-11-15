@@ -8,5 +8,6 @@ export const TextareaState = { new: inputState };
 export const Textarea = { new: (state) => element("textarea", { state }) };
 export const Scrollbar = { new: () => element("scrollbar") };
 export const VirtualListScrollHandle = { new: () => ({}) };
+export const ScrollHandle = { new: () => ({ scrolledTo: [], scroll_to_item(index) { this.scrolledTo.push(index); } }) };
 export const TextView = { markdown: (_id, text) => element("textview").child(text) };
 export const v_virtual_list = () => element("virtual_list");

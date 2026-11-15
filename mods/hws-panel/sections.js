@@ -359,6 +359,8 @@ function artifactRow(t, host, workspace, artifact, now, rounds = []) {
     else host.showRounds.add(artifact.id);
     cx.notify();
   };
+  // Dragging the title into a terminal types the same path Copy for Claude gives.
+  const file = artifact.type === "link" ? null : (artifact.prompt ?? artifact.path);
   const row = h_flex()
     .flex_none()
     .h(26)
@@ -368,6 +370,7 @@ function artifactRow(t, host, workspace, artifact, now, rounds = []) {
     .child(
       div()
         .id(`artifact-open-${artifact.id}`)
+        .when(Boolean(file?.startsWith("/")), (el) => el.drag_paths([file]))
         .flex_1()
         .min_w(0)
         .truncate()

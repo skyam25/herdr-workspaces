@@ -4,13 +4,13 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { checkout, commitsBehind, installedVersion, installVersion, recordInstall } from '../checkout.js';
+import { appHome, forks } from '../forks.js';
 import { home } from '../paths.js';
 
 const PLUGIN_ID = 'herdr-workspaces@herdr-workspaces';
 const SHIPPED = /\.(js|json|svg|py)$/;
 const PROBE_MS = 30_000;
 
-const appHome = () => process.env.HERDR_APP_HOME || join(home(), '.config/herdr-app');
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const install = (args = '') => `Run sh ${join(checkout(), 'install.sh')}${args}`;
 
@@ -122,6 +122,15 @@ function checkUpdates() {
   return { name, ok: true, note: true, detail: `${behind} ${behind === 1 ? 'commit' : 'commits'} behind GitHub`, fix: 'Run hws update' };
 }
 
+// A fork behind Herdr still runs, so it never fails the report.
+function checkForks() {
+  const name = 'Forks';
+  const all = forks();
+  const behind = all.filter(({ state }) => state === 'behind').map(({ mod }) => mod);
+  if (behind.length === 0) return { name, ok: true, detail: `${all.length} match Herdr's shipped mods` };
+  return { name, ok: true, note: true, detail: `${behind.join(', ')} behind Herdr's shipped mods`, fix: `Run node ${join(checkout(), 'mods/sync-forks.mjs')} --merge` };
+}
+
 // A stale install is news like being behind, so it never fails the report either.
 function checkInstalled() {
   const name = 'Installed version';
@@ -157,6 +166,7 @@ export function doctor({ record = false } = {}) {
     checkApp(),
     checkPlugin(),
     checkUpdates(),
+    checkForks(),
   ];
   const ok = checks.every((check) => check.ok);
   if (ok && record) recordInstall();

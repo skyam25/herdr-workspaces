@@ -938,7 +938,7 @@ test('a reply to a closed session reopens it with the reply as its next message'
   assert.match(opened.join(' '), /\["claude","--resume","claude-1","Use the other name"\]/);
   assert.equal(reopened.column, 'doing');
   assert.notEqual(reopened.terminal, 't7');
-  assert.ok(box.actions().some((x) => x.includes('space.select')));
+  assert.ok(opened.includes('--focus'));
 });
 
 test('an agent cannot assign a card, and the Board can', (t) => {

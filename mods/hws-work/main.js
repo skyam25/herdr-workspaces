@@ -5,7 +5,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, home, layout, openOverlay, panes, props, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
-import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, cardSummary, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
+import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, cardSummary, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, outputTarget, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
 import { focusAgent, hws, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
@@ -74,7 +74,7 @@ export default class Work extends View {
     this.roster = [];
     this.rosterKey = null;
     this.dirs = new Set();
-    this.watching = new Set();
+    this.watching = new Map();
     this.remote = false;
     this.targets = [];
     this.todos = null;
@@ -478,16 +478,22 @@ export default class Work extends View {
   watchFolders(cx) {
     const folders = [...(this.found?.values() ?? [])].filter((entry) => entry.folder && entry.outputs?.length > 0).map((entry) => feedbackDir(entry.folder));
     this.dirs = new Set(folders);
+
+    // Pending watches share a limit of 64 folders, so a folder that left stops at once.
+    for (const [dir, pending] of this.watching) if (!this.dirs.has(dir)) pending?.cancel?.();
     for (const dir of this.dirs) this.watch(dir, cx);
   }
 
   watch(dir, cx) {
     if (this.watching.has(dir)) return;
-    this.watching.add(dir);
+    this.watching.set(dir, null);
     cx.spawn(async (cx) => {
       try {
         while (this.dirs.has(dir)) {
-          await watchFolder(dir);
+          const pending = watchFolder(dir);
+          this.watching.set(dir, pending);
+          await pending;
+          if (!this.dirs.has(dir)) break;
           this.poll(cx);
         }
       } catch {
@@ -911,8 +917,12 @@ export default class Work extends View {
 
   outputRow(t, group, output, now) {
     const at = lastTouched(output);
+
+    // Dragging a file row into a terminal types its path there.
+    const file = outputTarget(output.ref, group.folder);
     return h_flex()
       .id(`output-${group.agent.address}-${output.ref}`)
+      .when(file.startsWith("/"), (el) => el.drag_paths([file]))
       .h(28)
       .flex_none()
       .px(8)

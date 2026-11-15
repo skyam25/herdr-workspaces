@@ -22,7 +22,8 @@ function statusOf(terminal) {
 
 export class Flipped {
   constructor() {
-    this.looked = JSON.parse(localStorage.getItem("flipped-looked") ?? "{}");
+    try { this.looked = JSON.parse(localStorage.getItem("flipped-looked") ?? "{}"); } catch { this.looked = {}; }
+    if (!this.looked || typeof this.looked !== "object" || Array.isArray(this.looked)) this.looked = {};
   }
 
   // Each flipped agent in the shape agents() returns, plus `flipped` and `terminal`.

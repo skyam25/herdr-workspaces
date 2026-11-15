@@ -54,14 +54,28 @@ test('start opens an Orchestrator tab with the first prompt and records it', (t)
   const result = start(box, folder);
 
   assert.deepEqual(box.actions(), [
-    ['herdr-app', 'do', 'tab.new', '--name', 'Orchestrator', '--space', 'sp1', '--folder', folder, '--argv', '["claude","--model","opus","--effort","high"]', '--task', PROMPT],
-    ['herdr-app', 'do', 'space.select', '--id', 'sp1'],
+    ['herdr-app', 'do', 'tab.new', '--name', 'Orchestrator', '--space', 'sp1', '--folder', folder, '--argv', '["claude","--model","opus","--effort","high"]', '--task', PROMPT, '--focus', 'false'],
   ]);
   assert.deepEqual(result, { terminal: 't101', started: true });
   const { orchestrator } = readTodos(box);
   assert.equal(orchestrator.terminal, 't101');
   assert.ok(orchestrator.startedAt >= before);
   assert.equal(box.state().spaces[0].tabs.at(-1).name, 'Orchestrator');
+});
+
+test('start on a Herdr without focus opens the tab and puts the selection back', (t) => {
+  const { box, folder } = board(t);
+  box.setState({ ...box.state(), oldHerdr: true });
+  box.clearCalls();
+
+  const result = start(box, folder);
+
+  const opens = tabsOpened(box);
+  assert.equal(opens.length, 2);
+  assert.ok(opens[0].includes('--focus'));
+  assert.ok(!opens[1].includes('--focus'));
+  assert.deepEqual(box.actions().at(-1), ['herdr-app', 'do', 'space.select', '--id', 'sp1']);
+  assert.equal(result.started, true);
 });
 
 test('start with a live orchestrator pastes the note and opens nothing', (t) => {

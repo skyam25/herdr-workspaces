@@ -88,7 +88,7 @@ export default class Panel extends View {
       this.placeSaved = Object.fromEntries(ROLES.map((role) => [role, ""]));
       for (const role of ROLES) makeInput(this, `place-${role}`, { placeholder: ROLE_DEFAULTS[role], submit: (cx) => this.savePlace(this.placesFor, role, cx) });
       this.placesFor = null;
-      this.watching = new Set();
+      this.watching = new Map();
       this.refresh(cx);
       cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
     }
@@ -216,15 +216,19 @@ export default class Panel extends View {
 
   // Reloads when this workspace's manifest changes. Surfaces write constantly
   // under the same folder, so other paths are ignored. A missing folder ends
-  // the watch, and the next render arms it again.
+  // the watch, and the next render arms it again. Switching folders cancels
+  // the old watch, because pending watches share a limit of 64 folders.
   watch(dir, cx) {
     this.watchDir = dir;
+    for (const [other, pending] of this.watching) if (other !== dir) pending?.cancel?.();
     if (this.watching.has(dir)) return;
-    this.watching.add(dir);
+    this.watching.set(dir, null);
     cx.spawn(async (cx) => {
       try {
         while (this.watchDir === dir) {
-          const changed = await watchFolder(dir);
+          const pending = watchFolder(dir);
+          this.watching.set(dir, pending);
+          const changed = await pending;
           if (this.watchDir === dir && changed.some((p) => p === dir || p.endsWith("/workspace.json"))) this.refresh(cx);
         }
       } catch {

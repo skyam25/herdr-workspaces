@@ -234,9 +234,9 @@ const VARIANTS = [
   } },
   { mod: "hws-agents", name: "agents-flipped", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("this.folded = new Set();", 'this.folded = new Set(); this.hovered = "t22";') },
   { mod: "hws-agents", name: "agents-spaces-named", props: {}, header: FLIP_HEADER, patch: (s) => {
-    const anchor = "const oneSpace = new Set(list.map((a) => a.space)).size <= 1;";
+    const anchor = "const full = byPriority || isPinned;";
     if (!s.includes(anchor)) throw new Error(`hws-agents/main.js has no "${anchor}" to force a state on`);
-    return flipWorld(s).replace(anchor, "const oneSpace = false;");
+    return flipWorld(s).replace(anchor, "const full = true;");
   } },
   { mod: "hws-agents", name: "agents-rail", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("const narrow = () =>", "const narrow = () => true || ") },
   { mod: "hws-spaces", name: "spaces-hidden", props: {}, header: FLIP_HEADER, patch: (s) => s.replaceAll("spaces()", '[...__spaces(), { id: "spc2", name: "hidden", active: false, machine: null, tabs: [] }, { id: "spc3", name: "other", active: false, machine: null, tabs: [] }]').replace("shared(WORKSPACE_SPACES)", '["spc2"]') },

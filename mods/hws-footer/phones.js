@@ -3,7 +3,7 @@
 
 import { div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { theme, exec, home, closeOverlay, shared, setShared } from "herdr";
+import { theme, exec, home, closeOverlay, shared, setShared, checking } from "herdr";
 
 // The footer row reads the paired names from here, so it updates when the popup forgets a phone.
 export const DEVICES_KEY = "hws-footer.devices";
@@ -38,6 +38,8 @@ const DAY = 24 * HOUR;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export async function hws(args) {
+  // hws prunes as it runs, so `herdr-app check` never starts it.
+  if (checking()) return null;
   for (const bin of [`${home()}/.local/bin/hws`, "hws"]) {
     try {
       const r = await exec(bin, [...args, "--json"]);

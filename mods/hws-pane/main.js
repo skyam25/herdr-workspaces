@@ -5,7 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { props, run, theme, home, exec, hc, nextCommand, shared, setShared, openOverlay } from "herdr";
+import { props, run, theme, home, exec, hc, nextCommand, shared, setShared, openOverlay, checking } from "herdr";
 import { panes, terminals, spaces, inRender } from "./live.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { LABEL, sweep } from "./parked.js";
@@ -124,6 +124,9 @@ export default class Pane extends View {
     this.busy = false;
     this.ending = false;
     this.born = Date.now();
+
+    // `herdr-app check` draws the header only. The sweep and hws calls would act on the live app.
+    if (checking()) return;
 
     cx.timer.every(SWEEP_MS, () => {
       if (Date.now() - lastSweep < SWEEP_MS / 2) return;

@@ -1,7 +1,10 @@
 // Works out a telling title for a tab from the program in front of it.
-// hws-agents and hws-tabs hold identical copies, and a test compares them.
+// Herdr's agents mod holds the same helpers, and the tab bar passes flipped agents in too.
 
-const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+// Drops what an agent puts before its title: a status glyph or spinner and the separator
+// after it ("✦  Working", "⠋ - Thinking"), and Codex's blinking "[ ! ] " / "[ . ] " mark.
+// Stops at an opening bracket or quote, so a title that starts with one ("[web] login") keeps it.
+const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}\p{Ps}\p{Pi}]+/u, "").replace(/^\[ [!.] \] /, "").trim();
 
 // The pane that speaks for each tab. Entries need `terminal`, `tab`, `program`, `title` and `focused`.
 export function leadPanes(all) {
@@ -16,10 +19,12 @@ export function leadPanes(all) {
 }
 
 // A tab nobody named, or one named after its program, reads its lead's own title.
-// A title that is a path, a user@host prompt or the program's name says nothing, so the tab keeps its name.
+// A title that is the terminal's address, a path, a user@host prompt or the program's name says nothing, so the tab keeps its name.
 export function title(tab, l) {
   const prog = l?.program?.name;
   const live = clean(l?.title);
-  const telling = live && live !== prog && !/^[~/]|^[A-Za-z]:\\/.test(live) && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
+  // clean() would strip a path's leading ~ or /, so test the title with only its status glyph gone.
+  const path = /^[~/]|^[A-Za-z]:\\/.test((l?.title ?? "").replace(/^[^\p{L}\p{N}~/]+/u, ""));
+  const telling = live && live !== (l?.terminal ?? l?.address) && live !== prog && !path && !live.includes("@") && live.toLowerCase() !== l?.program?.key;
   return (tab.name === prog || !tab.named) && telling ? live : tab.name;
 }

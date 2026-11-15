@@ -39,6 +39,11 @@ function flagsOf(words) {
 
 const [command, action, ...rest] = argv;
 
+if (command === '--version') {
+  process.stdout.write(`herdr-app ${state.version ?? '0.1.16'}\n`);
+  process.exit(0);
+}
+
 if (command === 'ls') {
   if (state.lsFails) process.exit(1);
   reply({ spaces: state.spaces, recent: [] });
@@ -54,11 +59,14 @@ if (state.failDo?.includes(action)) fail(`${action} refused`);
 
 const flags = flagsOf(rest);
 
+// Herdr before 0.1.16 rejects `focus` as an unknown argument.
+if (state.oldHerdr && 'focus' in flags) fail(`unknown argument focus for ${action}; valid: name, space, folder, argv, task`);
+
 if (action === 'space.new') {
   const tab = newTab();
   const id = `sp${nextId()}`;
   state.spaces.push({ id, name: flags.name, folder: flags.folder, tabs: [tab] });
-  state.selected = id;
+  if (flags.focus !== 'false') state.selected = id;
   save();
   reply({ space: id, tab: tab.id, terminal: tab.terminals[0].terminal });
 }

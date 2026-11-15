@@ -1,6 +1,6 @@
 // Opens outputs and agent sessions. A page opens beside its agent and other outputs open in macOS.
 
-import { exec, home, panes, run, spaces, terminals, window } from "herdr";
+import { checking, exec, home, panes, run, spaces, terminals, window } from "herdr";
 import { locateTerminal, opensAsPage, outputTarget, surfaceArgs } from "./data.js";
 
 let found = null;
@@ -9,6 +9,8 @@ let found = null;
 const pagePanes = new Map();
 
 async function runHws(args) {
+  // hws prunes as it runs, so `herdr-app check` never starts it.
+  if (checking()) throw new Error("hws does not run during a check.");
   for (const bin of found ? [found] : [`${home()}/.local/bin/hws`, "hws"]) {
     try {
       const r = await exec(bin, [...args, "--json"]);

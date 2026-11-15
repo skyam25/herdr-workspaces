@@ -399,9 +399,9 @@ test('start writes the packet, opens a Tidy tab and records the pass', (t) => {
   const { terminal } = result;
   assert.deepEqual(result, { terminal, started: true, packet: path });
   assert.deepEqual(box.actions(), [
-    ['herdr-app', 'do', 'tab.new', '--name', 'Tidy', '--space', manifest.id, '--folder', manifest.folder, '--argv', ARGV, '--task', `Use the herdr-workspaces:tidy skill. The packet is at ${path}.`],
-    ['herdr-app', 'do', 'space.select', '--id', selected],
+    ['herdr-app', 'do', 'tab.new', '--name', 'Tidy', '--space', manifest.id, '--folder', manifest.folder, '--argv', ARGV, '--task', `Use the herdr-workspaces:tidy skill. The packet is at ${path}.`, '--focus', 'false'],
   ]);
+  assert.equal(box.state().selected, selected);
 
   const recorded = box.manifest(manifest.id);
   assert.equal(recorded.tidy.terminal, terminal);

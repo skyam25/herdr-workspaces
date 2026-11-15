@@ -3,11 +3,13 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
-import { closeOverlay, exec, home, openOverlay, pickFolder, props } from "herdr";
+import { checking, closeOverlay, exec, home, openOverlay, pickFolder, props } from "herdr";
 
 let found = null;
 
 async function start(args) {
+  // hws prunes as it runs, so `herdr-app check` never starts it.
+  if (checking()) throw new Error("hws does not run during a check.");
   for (const bin of found ? [found] : [`${home()}/.local/bin/hws`, "hws"]) {
     try {
       const r = await exec(bin, args);

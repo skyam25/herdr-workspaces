@@ -808,6 +808,37 @@ test("the watch reloads for manifest changes and ignores surface writes", async 
   assert.equal(args(H).filter((a) => a[0] === "list").length, 2);
 });
 
+test("the panel and the sidebar start no hws during herdr-app check", async () => {
+  const H = inWorkspace(APP, { checking: true });
+  const panel = await mount("hws-panel", {});
+  panel.render();
+  const sidebar = await mount("hws-panel", { view: "sidebar" });
+  sidebar.render();
+  await settle();
+  assert.deepEqual(hwsCalls(H), []);
+});
+
+test("watching another folder cancels the old watch, and the new one keeps going", async () => {
+  const cancelled = [];
+  const watchResult = (dir) => {
+    let finish;
+    const pending = new Promise((resolve) => { finish = resolve; });
+    pending.cancel = () => { cancelled.push(dir); finish([]); };
+    return pending;
+  };
+  const H = inWorkspace(APP, { watchResult });
+  const m = await mount("hws-panel", {});
+  m.view.watch("/a", m.cx);
+  await settle();
+  m.view.watch("/b", m.cx);
+  await settle();
+  assert.ok(cancelled.includes("/a"));
+  assert.ok(!cancelled.includes("/b"));
+  assert.equal(m.view.watching.has("/a"), false);
+  assert.equal(m.view.watching.has("/b"), true);
+  assert.ok(H.watches.includes("/b"));
+});
+
 test("a space change refreshes and clears the panel's note", async () => {
   const H = inWorkspace();
   const m = await mount("hws-panel", {});
@@ -1604,11 +1635,10 @@ test("keys.example.json avoids the chords Herdr binds", () => {
 
 const SIDEBAR_LAYOUT = { id: "root", children: [{ id: "sidebar", size: { px: 268 }, children: [{ id: "workspaces", size: { px: 69 } }] }] };
 
-test("the sidebar shares the Board tab ids and watches the manifests", async () => {
+test("the sidebar watches the manifests", async () => {
   const H = setup({ hws: { list: [{ ...THROWAWAY, board: { space: "spb", tab: "tbb" }, dir: "/state/workspaces/spc1" }] }, sharedSets: [], sharedValues: {} });
   await mount("hws-panel", { view: "sidebar" });
   await settle();
-  assert.deepEqual(H.sharedSets.find((x) => x.key === "hws.board.tabs").value, ["tbb"]);
   assert.ok(H.watches.includes("/state/workspaces"));
 });
 
@@ -1981,6 +2011,17 @@ test("the sidebar counts Waiting on you per Board and shares the map by space", 
   assert.match(m.text(), /Tasks \| 2/);
   assert.equal(m.has("sidebar-waiting-spc1"), true);
   assert.equal(m.has("sidebar-waiting-spc2"), false);
+  assert.equal(H.badge, "2");
+  assert.equal(H.windowTitle, "checkout demo");
+
+  // The title follows the shown space, and a space outside every workspace gives it back.
+  H.spaces = WITH_BOARD.map((s) => ({ ...s, active: s.id === "spc3" }));
+  m.render();
+  assert.equal(H.windowTitle, null);
+  H.spaces = WITH_BOARD.map((s) => ({ ...s, active: s.id === "spb" }));
+  m.render();
+  assert.equal(H.windowTitle, "checkout demo");
+  H.spaces = WITH_BOARD;
 
   H.sharedValues["hws.tasks.waiting"] = { spb: 2, spc1: 2, spq: 0, spc2: 0 };
   const before = sets().length;
@@ -1994,6 +2035,7 @@ test("a failed task list counts as zero and leaves the list in place", async () 
   assert.match(m.text(), /checkout demo \| Tasks/);
   assert.doesNotMatch(m.text(), /board is locked/);
   assert.deepEqual(H.sharedSets.find((x) => x.key === "hws.tasks.waiting").value, { spc1: 0, spb: 0 });
+  assert.equal(H.badge, null);
 });
 
 const TALL_LAYOUT = {

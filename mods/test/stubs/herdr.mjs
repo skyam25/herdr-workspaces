@@ -30,3 +30,6 @@ export const notify = (n) => { H().notices?.push(n); return null; };
 export const settings = () => ({});
 export const layout = () => H().layout ?? null;
 export const updates = () => H().updates ?? { app: { version: "1", ready: null, updates: true } };
+export const checking = () => Boolean(H()?.checking);
+export const setWindowTitle = (title) => { if (H()) H().windowTitle = title; return null; };
+export const setBadge = (text) => { if (H()) H().badge = text; return null; };

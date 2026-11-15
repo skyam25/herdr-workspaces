@@ -3,7 +3,7 @@
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { appHome, exec, layout, readTextFile, run, setShared, shared, spaces, theme, watchFolder, window } from "herdr";
+import { appHome, exec, layout, readTextFile, run, setBadge, setShared, setWindowTitle, shared, spaces, theme, watchFolder, window } from "herdr";
 import { hws, message, openWorkspaceForm } from "./hws.js";
 import { freshness } from "./context.js";
 import { freshnessDot } from "./sections.js";
@@ -38,7 +38,6 @@ const SYSTEM_TITLEBAR_PX = 28;
 
 // hws-tabs reads the first key. The second lists every space in an open workspace.
 // The third maps each space of a workspace with a Board to its Waiting on you count.
-const BOARD_TABS = "hws.board.tabs";
 const WORKSPACE_SPACES = "hws.workspace.spaces";
 const TASKS_WAITING = "hws.tasks.waiting";
 
@@ -146,12 +145,6 @@ async function windowHeight() {
   }
 }
 
-// The tab bar hides these, because this list already shows each Board.
-function publishBoardTabs(workspaces) {
-  const tabs = workspaces.flatMap((w) => (w.board ? [w.board.tab] : []));
-  if (JSON.stringify(tabs) !== JSON.stringify(shared(BOARD_TABS) ?? [])) setShared(BOARD_TABS, tabs);
-}
-
 // Sorted, Board spaces included, and set only when it changes.
 function publishWorkspaceSpaces(workspaces) {
   const ids = [...new Set(workspaces.flatMap((w) => [...w.spaces, ...(w.board ? [w.board.space] : [])]))].sort();
@@ -170,6 +163,27 @@ function publishWaiting(workspaces, waiting) {
   const current = shared(TASKS_WAITING);
   const isObject = current !== null && typeof current === "object" && !Array.isArray(current);
   if (!isObject || sortedEntries(current) !== sortedEntries(map)) setShared(TASKS_WAITING, map);
+}
+
+// The Dock badge counts cards in Waiting on you across every workspace with a Board.
+// It is set only when it changes, and none clears it.
+function publishBadge(state) {
+  const total = state.workspaces.reduce((sum, w) => sum + (w.board ? Number(state.waiting[w.id]) || 0 : 0), 0);
+  const text = total > 0 ? String(total) : null;
+  if (text === state.badge) return;
+  state.badge = text;
+  setBadge(text);
+}
+
+// The window title names the workspace on screen, for window switchers and time trackers.
+// A space outside every workspace gives the title back to Herdr.
+function publishTitle(state) {
+  const active = spaces().find((s) => s.active)?.id;
+  const workspace = active ? (state.workspaces ?? []).find((w) => w.spaces.includes(active) || w.board?.space === active) : null;
+  const title = workspace?.name ?? null;
+  if (title === state.title) return;
+  state.title = title;
+  setWindowTitle(title);
 }
 
 // An agent or the CLI can change who is in a workspace with no change to the spaces.
@@ -202,7 +216,6 @@ function load(state, cx, { listOnly = false } = {}) {
       state.workspaces = await hws(["list"]);
       state.archived = await hws(["list", "--archived"]);
       state.problem = null;
-      publishBoardTabs(state.workspaces);
       publishWorkspaceSpaces(state.workspaces);
       watchManifests(state, cx);
 
@@ -219,6 +232,7 @@ function load(state, cx, { listOnly = false } = {}) {
         state.unfiled = unfiled;
         state.openWindows = open;
         publishWaiting(state.workspaces, state.waiting);
+        publishBadge(state);
         state.windowPx = await windowHeight();
       }
     } catch (e) {
@@ -701,6 +715,7 @@ function list(t, state) {
 export function drawSidebar(state) {
   const t = theme();
   const isCollapsed = isNarrow();
+  if (state.workspaces) publishTitle(state);
   return v_flex()
     .id("sidebar-root")
     .size_full()

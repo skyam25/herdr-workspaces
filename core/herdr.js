@@ -52,13 +52,39 @@ export function listLive() {
   return liveListing;
 }
 
-// Herdr selects every new tab, so this puts the window back where the person was.
+const OPENERS = new Set(['tab.new', 'space.new']);
+let quiet = false;
+let shownAnyway = false;
+let focusRejected = false;
+
+// Opens the tabs and spaces in `work` without showing them, through `focus: false`.
+// Herdr before 0.1.16 rejects that flag and shows each new tab, so then the
+// window goes back to where the person was.
 export function keepingSelection(work) {
   const before = windowStatus();
-  const result = work();
-  if (before?.space) act('space.select', { id: before.space });
-  if (before?.tab) act('tab.select', { id: before.tab });
-  return result;
+  quiet = true;
+  shownAnyway = false;
+  try {
+    return work();
+  } finally {
+    quiet = false;
+    if (shownAnyway && before?.space) act('space.select', { id: before.space });
+    if (shownAnyway && before?.tab) act('tab.select', { id: before.tab });
+  }
+}
+
+export function act(command, args = {}) {
+  if (!quiet || !OPENERS.has(command) || args.focus !== undefined) return send(command, args);
+  if (!focusRejected) {
+    try {
+      return send(command, { ...args, focus: false });
+    } catch (error) {
+      if (!/\bfocus\b/.test(error.message)) throw error;
+      focusRejected = true;
+    }
+  }
+  shownAnyway = true;
+  return send(command, args);
 }
 
 export function requireLive() {
@@ -73,7 +99,7 @@ export function windowStatus() {
   return result.ok ? parseJson(result.stdout) : null;
 }
 
-export function act(command, args = {}) {
+function send(command, args) {
   liveListing = undefined;
   const argv = ['do', command];
   for (const [name, value] of Object.entries(args)) {
