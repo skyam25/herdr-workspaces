@@ -16,7 +16,7 @@ import { openCite, openExternally, revealPath, showBoard } from "./cites.js";
 import { renderArtifactMenu } from "./artifactmenu.js";
 import { initMoveSpace, initSpaceMenu, renderMoveSpace, renderSpaceMenu, spaceRef } from "./spacemenu.js";
 import { initMoveItem, initUnfiled, renderMoveItem, renderUnfiled } from "./unfiled.js";
-import { artifactsSection, currentSection, headerSection, historySection, notesSection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
+import { agentsSection, artifactsSection, currentSection, headerSection, historySection, notesSection, placesSection, readerView, recordSection, sectionTitle, sinceSection } from "./sections.js";
 
 const MOD = "hws-panel";
 const REFRESH_MS = 20000;
@@ -76,6 +76,9 @@ export default class Panel extends View {
       this.context = null;
       this.tasks = null;
       this.tasksAsk = 0;
+      this.agentLog = null;
+      this.agentsAsk = 0;
+      this.showAllAgents = false;
       this.match = null;
       this.showSuperseded = false;
       this.showRounds = new Set();
@@ -124,6 +127,7 @@ export default class Panel extends View {
         cx.notify();
         const workspace = this.manifests.find((m) => m.spaces.includes(this.spaceId));
         this.loadTasks(workspace, cx);
+        this.loadAgents(workspace, cx);
         if (!workspace) this.match = await this.loadMatch(this.spaceId);
         this.context = await this.loadContext(workspace);
         if (workspace && workspace.kind !== "throwaway") this.syncPlaces(workspace);
@@ -186,6 +190,22 @@ export default class Panel extends View {
       const list = await hws(["todo", "list", "--space", workspace.board.space]).catch(() => null);
       if (ask !== this.tasksAsk) return;
       this.tasks = { workspaceId: workspace.id, counts: list ? taskCounts(list.items) : null };
+      cx.notify();
+    });
+  }
+
+  // Runs beside the context like the task list. A failure keeps the last answer.
+  loadAgents(workspace, cx) {
+    if (!workspace) {
+      this.agentLog = null;
+      return;
+    }
+    this.agentsAsk += 1;
+    const ask = this.agentsAsk;
+    cx.spawn(async (cx) => {
+      const answer = await hws(["agents", "--workspace", workspace.id]).catch(() => null);
+      if (ask !== this.agentsAsk || !Array.isArray(answer?.agents)) return;
+      this.agentLog = { workspaceId: workspace.id, agents: answer.agents };
       cx.notify();
     });
   }
@@ -460,7 +480,7 @@ export default class Panel extends View {
     if (this.reading) return readerView(view);
     const isThrowaway = workspace.kind === "throwaway";
     const sections = [
-      ...(isThrowaway ? [recordSection(view)] : [currentSection(view), sinceSection(view), historySection(view), notesSection(view), artifactsSection(view)]),
+      ...(isThrowaway ? [recordSection(view)] : [currentSection(view), sinceSection(view), historySection(view), notesSection(view), artifactsSection(view), agentsSection(view)]),
       this.surfacesSection(t, workspace),
       ...(isThrowaway ? [] : [placesSection(view)]),
     ].filter(Boolean);

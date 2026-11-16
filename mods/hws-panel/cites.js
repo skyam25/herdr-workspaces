@@ -87,14 +87,14 @@ function openCard(id, workspace, space) {
 }
 
 // A session still running in this workspace is focused, so it never runs twice.
-// Otherwise it resumes with Claude Code in a new tab of this space.
-export function resumeSession(id, workspace, space) {
+// Otherwise it resumes with Claude Code in a new tab of this space, in the folder it started in.
+export function resumeSession(id, workspace, space, folder = null) {
   const live = (workspace.terminals ?? []).find((x) => x.sessionId === id && agents().some((a) => a.address === x.terminal));
   if (live) {
     run("agent.focus", { terminal: live.terminal });
     return null;
   }
-  run("tab.new", { name: `Resume ${id.slice(0, 8)}`, space, folder: workspace.folder, argv: ["claude", "--resume", id] });
+  run("tab.new", { name: `Resume ${id.slice(0, 8)}`, space, folder: folder ?? workspace.folder, argv: ["claude", "--resume", id] });
   return null;
 }
 
@@ -103,7 +103,7 @@ export function resumeSession(id, workspace, space) {
 export async function openCite(cite, { workspace, target, space }) {
   if (cite.kind === "url") return openExternally(cite.value);
   if (cite.kind === "card") return openCard(cite.value, workspace, space);
-  if (cite.kind === "session") return resumeSession(cite.value, workspace, space);
+  if (cite.kind === "session") return resumeSession(cite.value, workspace, space, cite.folder);
   if (cite.kind === "commit") {
     await copy(cite.value);
     return `Copied ${cite.value.slice(0, 7)}.`;

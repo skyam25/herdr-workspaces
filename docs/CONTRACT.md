@@ -864,7 +864,7 @@ Each section is a function in `mods/hws-panel/sections.js` that takes `{ t, host
 | Workspace | Sections, top to bottom |
 |---|---|
 | Reading a document | Back, its title, Show in Finder and the rendered text, in place of every other section. History rows, and Open note with no agent, open here |
-| Kept | Header, Current note, Not in the note yet, History once a log exists, Notes once there are any, Artifacts, Open now once something is open, Where files go |
+| Kept | Header, Current note, Not in the note yet, History once a log exists, Notes once there are any, Artifacts, Agents once a session is logged, Open now once something is open, Where files go |
 | Throwaway | Header, Record, Open now once something is open |
 | Plain space | A dim Not in a workspace title, a sentence naming the workspaces that hold its folder or saying none does, Add this space to NAME for up to three candidates, filled when there is exactly one, then Make this space a workspace… |
 
@@ -874,6 +874,7 @@ Reads, on each `hws list` refresh:
 
 - A kept workspace runs `hws tidy status --workspace W` and reads `line`, `live`, `places` and `writers` from it. It then reads the file at `places.current`.
 - A kept workspace with a Board runs `hws todo list --space <Board space>` beside the status call. Nothing else waits for it, and a failure leaves out the counts.
+- Any workspace runs `hws agents --workspace W` beside the status call. Nothing else waits for it, and a failure keeps the last answer.
 - A plain space runs `hws space match --space S`. A failure counts as no candidates.
 - When status fails, `hws place current --workspace W` supplies the note's path, and Not in the note yet shows the failure.
 - A throwaway runs no `hws` call for its Record. Its scratch folder is its manifest `folder`, checked with `test -d`.
@@ -897,7 +898,7 @@ Reads, on each `hws list` refresh:
 | History rows | Decision log and Updates read in the panel |
 | Current note | The first 24 non-blank lines of the note, and a button that shows the rest in place. Each cite becomes a chip. The note's own `# Current` title is left out. With no note, says what the note is and where Tidy writes it |
 | `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |
-| `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID` |
+| `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID`, in the workspace folder unless the caller names the session's own |
 | `[commit:SHA]` chip | Copies the sha with `pbcopy` |
 | `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board opens its `comments.md`, or its sketch in the default app when it has none. Another Done bundle opens the first it has of `review.md`, `annotations.md`, `comments.md` and `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
 | Artifact title and Open | Run the `[artifact:ID]` action. A `file` artifact is the page itself, so its row opens the page |
@@ -913,7 +914,9 @@ Reads, on each `hws list` refresh:
 | Place field | Holds the manifest's path, with the role's default as placeholder. Enter or Save runs `hws set --workspace W --place ROLE=PATH`. An emptied field shows Clear and runs `--place ROLE=`. The label's tooltip is the resolved path from `places` |
 | Place another tool writes | Read only, with its path and `written by NAME`, when `writers` or the stored entry names a writer other than `hws` |
 | Suggest from folder | `hc send T` with a prompt asking the agent to propose a place map and record it with `hws set --place` |
-| Record session row | The `[session:ID]` action |
+| Agents | `N running · N ended`, zeros left out. Running sessions, then the five newest ended ones and `N more`. Each row has a dot, green while running, the title on one line or `Session <id>`, a role pill, and `also in NAME` with `running` or how long ago it was active |
+| Agent row | The `[session:ID]` action, resuming in the session's own `folder` when it has one |
+| Record session row | The `[session:ID]` action. Record lists the agent log once it loads, and the terminals' sessions before that |
 | Record scratch folder | macOS `open` on the folder, shown when it exists |
 | Promote… | Opens the Promote dialog |
 

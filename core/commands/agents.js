@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { sessionOfTerminal } from '../agent-session.js';
 import { agentTranscript, findTranscript, logAgent, workspaceAgents } from '../agents.js';
 import { HwsError, UsageError } from '../errors.js';
+import { listLocalTerminals } from '../herdr.js';
 import { listManifests, updateManifest } from '../manifest.js';
 import { expandFolder, transcriptPath } from '../paths.js';
 import { modifiedAt } from '../retired.js';
@@ -23,10 +24,14 @@ function membership() {
   return found;
 }
 
-// A session is active while its terminal still runs it. Each terminal is asked once.
+// A session is active while its terminal still runs it. One listing finds the live terminals,
+// so a long log of ended sessions costs one call.
 function activeSessions(agents) {
   const active = new Set();
-  for (const terminal of new Set(agents.map((item) => item.terminal).filter(Boolean))) {
+  const known = new Set(agents.map((item) => item.terminal).filter(Boolean));
+  if (known.size === 0) return active;
+  const live = listLocalTerminals().map((item) => item.address).filter((terminal) => known.has(terminal));
+  for (const terminal of live) {
     const running = sessionOfTerminal(terminal);
     if (running) active.add(running.id);
   }

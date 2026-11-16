@@ -445,6 +445,56 @@ export function artifactsSection({ t, host, workspace, now }) {
     .children(loose.map((round) => roundRow(t, host, round, now, round.title || round.id)));
 }
 
+// Agents
+
+const AGENT_ROWS = 5;
+
+// One row per logged session. A click focuses a running one or resumes it in its own folder.
+function agentRow(t, host, workspace, agent, now) {
+  const isActive = agent.status === "active";
+  const title = (agent.title ?? "").replace(/\s+/g, " ").trim() || `Session ${agent.session.slice(0, 8)}`;
+  const also = agent.alsoIn?.length ? `also in ${agent.alsoIn.map((w) => w.name).join(", ")}` : null;
+  const when = isActive ? "running" : agent.activeAt ? ago(now - agent.activeAt) : null;
+  return h_flex()
+    .id(`agent-${agent.session}`)
+    .h(22)
+    .px(8)
+    .gap(6)
+    .items_center()
+    .rounded(6)
+    .cursor_pointer()
+    .hover((st) => st.bg(t.hover))
+    .on_click((_e, cx) => host.citeAction({ kind: "session", value: agent.session, folder: agent.folder }, workspace, cx))
+    .child(div().size(6).rounded(3).flex_none().bg(isActive ? t.ansi2 : t.border))
+    .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(isActive ? t.foreground : t.muted).child(title))
+    .when(Boolean(agent.role), (el) => el.child(pill(t, agent.role)))
+    .child(div().flex_none().text_size(11).text_color(t.dim).child([also, when].filter(Boolean).join(" · ")));
+}
+
+const agentLogFor = (host, workspace) => (host.agentLog?.workspaceId === workspace.id ? host.agentLog.agents : null);
+
+// Every session the workspace has seen. Running ones first, then the newest ended ones.
+export function agentsSection({ t, host, workspace, now }) {
+  const log = agentLogFor(host, workspace);
+  if (!log || log.length === 0) return null;
+  const active = log.filter((a) => a.status === "active");
+  const ended = log.filter((a) => a.status !== "active");
+  const shown = host.showAllAgents ? ended : ended.slice(0, AGENT_ROWS);
+  return v_flex()
+    .flex_none()
+    .gap(1)
+    .child(sectionTitle(t, "Agents"))
+    .child(div().px(8).pb(2).text_size(11.5).text_color(t.muted).child([active.length && `${active.length} running`, ended.length && `${ended.length} ended`].filter(Boolean).join(" · ")))
+    .children(active.map((a) => agentRow(t, host, workspace, a, now)))
+    .children(shown.map((a) => agentRow(t, host, workspace, a, now)))
+    .when(ended.length > AGENT_ROWS, (el) =>
+      el.child(smallButtonRow(t, "agents-more", host.showAllAgents ? "Show fewer" : `${ended.length - AGENT_ROWS} more`, (_e, cx) => {
+        host.showAllAgents = !host.showAllAgents;
+        cx.notify();
+      })),
+    );
+}
+
 // Reader
 
 // A document opened from the panel, rendered in place of the panel's sections.
@@ -580,7 +630,8 @@ export function placesSection({ t, host, workspace, target }) {
 
 export function recordSection({ t, host, workspace, now }) {
   const context = isCurrentFor(host, workspace);
-  const sessions = recordedSessions(workspace);
+  const log = agentLogFor(host, workspace);
+  const sessions = log ? [] : recordedSessions(workspace);
   const scratch = context?.scratch ?? null;
   const artifacts = artifactRows(t, host, workspace, now, workspace.artifacts ?? []);
   return v_flex()
@@ -588,7 +639,8 @@ export function recordSection({ t, host, workspace, now }) {
     .gap(4)
     .child(sectionTitle(t, "Record"))
     .child(div().px(8).text_size(11).text_color(t.dim).child("Sessions"))
-    .when(sessions.length === 0, (el) => el.child(dimLine(t, "None recorded.")))
+    .when(sessions.length === 0 && !log?.length, (el) => el.child(dimLine(t, "None recorded.")))
+    .children((log ?? []).map((a) => agentRow(t, host, workspace, a, now)))
     .children(
       sessions.map((s) =>
         h_flex()
