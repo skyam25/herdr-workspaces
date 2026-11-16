@@ -17,7 +17,7 @@ function write(path, content) {
 }
 
 // A checkout with one fork of Herdr's `tabs`, synced at 0.1.16, and Herdr's shipped copy.
-function world(t, { fork = BASE.replace('const a = 1;', 'const a = 10;'), shipped = BASE } = {}) {
+function world(t, { fork = BASE.replace('const a = 1;', 'const a = 10;'), shipped = BASE, herdr = '0.1.17' } = {}) {
   const box = sandbox(t);
   const checkout = join(box.dir, 'checkout');
   const appHome = join(box.dir, 'app-home');
@@ -27,7 +27,7 @@ function world(t, { fork = BASE.replace('const a = 1;', 'const a = 10;'), shippe
   write(join(checkout, 'mods/hws-plain/mod.json'), '{"place":"none"}');
   write(join(checkout, 'mods/upstream/tabs.js'), BASE);
   write(join(appHome, 'mods/tabs/main.js'), shipped);
-  box.setState({ version: '0.1.17' });
+  box.setState({ version: herdr });
   const env = { ...box.environment, HWS_CHECKOUT: checkout, HERDR_APP_HOME: appHome };
   const sync = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', env });
   const read = (path) => readFileSync(join(checkout, path), 'utf8');
@@ -50,10 +50,12 @@ test('a report names a fork whose Herdr original changed, and changes nothing', 
   assert.equal(read('mods/upstream/tabs.js'), BASE);
 });
 
-test('a merge carries Herdr changes into the fork and moves the base and version', (t) => {
+test('a merge carries Herdr changes into the fork and moves the base, version and minimum Herdr', (t) => {
   const shipped = BASE.replace('const e = 5;', 'const e = 50;');
-  const { sync, read } = world(t, { shipped });
+  const { env, sync, read } = world(t, { shipped });
+  writeFileSync(join(env.HWS_CHECKOUT, 'package.json'), '{ "engines": { "node": ">=20", "herdr": ">=0.1.16" } }\n');
   const result = sync('--merge');
+  assert.equal(read('package.json'), '{ "engines": { "node": ">=20", "herdr": ">=0.1.17" } }\n');
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /merged cleanly to tabs 0\.1\.17/);
   assert.match(read('mods/hws-tabs/main.js'), /const a = 10;[\s\S]*const e = 50;/);
@@ -77,6 +79,27 @@ test('doctor notes a fork behind Herdr without failing', (t) => {
   assert.equal(forks.note, true);
   assert.match(forks.detail, /hws-tabs behind/);
   assert.match(forks.fix, /sync-forks\.mjs --merge/);
+});
+
+test('an older Herdr is never merged into a fork, and doctor says to update Herdr', (t) => {
+  const { box, env, sync, read } = world(t, { shipped: BASE.replace('const e = 5;', 'const e = 4;'), herdr: '0.1.15' });
+  const fork = read('mods/hws-tabs/main.js');
+
+  const result = sync('--merge');
+
+  assert.match(result.stdout, /hws-tabs: herdr older/);
+  assert.equal(read('mods/hws-tabs/main.js'), fork);
+  assert.equal(read('mods/upstream/tabs.js'), BASE);
+  const forks = JSON.parse(box.hws(['doctor', '--json'], env).stdout).checks.find((check) => check.name === 'Forks');
+  assert.match(forks.detail, /come from Herdr 0\.1\.16, which is newer than this Herdr/);
+  assert.match(forks.fix, /Update Herdr to 0\.1\.16/);
+});
+
+test('doctor says to restart a Herdr whose shipped mods predate its version', (t) => {
+  const { box, env } = world(t, { shipped: BASE.replace('const e = 5;', 'const e = 4;'), herdr: '0.1.16' });
+  const forks = JSON.parse(box.hws(['doctor', '--json'], env).stdout).checks.find((check) => check.name === 'Forks');
+  assert.equal(forks.ok, true);
+  assert.equal(forks.fix, 'Restart Herdr');
 });
 
 test('every fork in this checkout records its origin and keeps that base', () => {

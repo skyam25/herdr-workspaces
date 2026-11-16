@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { checkout, commitsBehind, installedVersion, installVersion, recordInstall } from '../checkout.js';
 import { appHome, forks } from '../forks.js';
+import { compareVersions, herdrVersion, requiredHerdr } from '../herdr-version.js';
 import { home } from '../paths.js';
 
 const PLUGIN_ID = 'herdr-workspaces@herdr-workspaces';
@@ -40,6 +41,18 @@ function checkNode() {
 
 function checkTool(name, bin) {
   return { name, ok: !probe(bin, ['--version']).error, detail: bin, fix: `Install Herdr and put ${bin} on PATH` };
+}
+
+// Mods import from the `herdr` module, so a Herdr older than the checkout's minimum fails to load them.
+function checkHerdr() {
+  const name = 'Herdr app';
+  const bin = process.env.HWS_HERDR_APP || 'herdr-app';
+  if (probe(bin, ['--version']).error) return { name, ok: false, detail: bin, fix: `Install Herdr and put ${bin} on PATH` };
+  const found = herdrVersion();
+  const required = requiredHerdr();
+  if (!found || !required) return { name, ok: true, detail: found ? `${bin} ${found}` : bin };
+  const ok = compareVersions(found, required) >= 0;
+  return { name, ok, detail: ok ? `${bin} ${found}` : `${bin} ${found}, and this checkout needs ${required} or newer`, fix: `Update Herdr to ${required} or newer and restart it` };
 }
 
 // Mods run hws from this exact path.
@@ -122,13 +135,17 @@ function checkUpdates() {
   return { name, ok: true, note: true, detail: `${behind} ${behind === 1 ? 'commit' : 'commits'} behind GitHub`, fix: 'Run hws update' };
 }
 
-// A fork behind Herdr still runs, so it never fails the report.
+// A fork that differs from Herdr still runs, so it never fails the report.
+// A merge applies only when Herdr is the newer side.
 function checkForks() {
   const name = 'Forks';
   const all = forks();
-  const behind = all.filter(({ state }) => state === 'behind').map(({ mod }) => mod);
-  if (behind.length === 0) return { name, ok: true, detail: `${all.length} match Herdr's shipped mods` };
-  return { name, ok: true, note: true, detail: `${behind.join(', ')} behind Herdr's shipped mods`, fix: `Run node ${join(checkout(), 'mods/sync-forks.mjs')} --merge` };
+  const named = (state) => all.filter((fork) => fork.state === state).map(({ mod }) => mod).join(', ');
+  const version = all.find(({ version }) => version)?.version;
+  if (named('herdr older')) return { name, ok: true, note: true, detail: `${named('herdr older')} come from Herdr ${version}, which is newer than this Herdr`, fix: `Update Herdr to ${version} or newer and restart it` };
+  if (named('not restarted')) return { name, ok: true, note: true, detail: `Herdr's shipped mods are older than its version says`, fix: 'Restart Herdr' };
+  if (named('behind')) return { name, ok: true, note: true, detail: `${named('behind')} behind Herdr's shipped mods`, fix: `Run node ${join(checkout(), 'mods/sync-forks.mjs')} --merge` };
+  return { name, ok: true, detail: `${all.length} match Herdr's shipped mods` };
 }
 
 // A stale install is news like being behind, so it never fails the report either.
@@ -156,7 +173,7 @@ function report(checks) {
 export function doctor({ record = false } = {}) {
   const checks = [
     checkNode(),
-    checkTool('Herdr app', process.env.HWS_HERDR_APP || 'herdr-app'),
+    checkHerdr(),
     checkTool('hc', process.env.HWS_HC || 'hc'),
     checkLink(),
     checkMods(),

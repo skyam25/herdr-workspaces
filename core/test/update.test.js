@@ -39,9 +39,9 @@ exit "$code"
   git(seed, 'push', '-q', 'origin', 'main');
   git(box.dir, 'clone', '-q', origin, checkout);
   let edits = 0;
-  const publish = (folder = 'mods') => {
+  const publish = (folder = 'mods', file = 'file', content = String(++edits)) => {
     mkdirSync(join(seed, folder), { recursive: true });
-    writeFileSync(join(seed, folder, 'file'), String(++edits));
+    writeFileSync(join(seed, folder, file), content);
     git(seed, 'add', '.');
     git(seed, 'commit', '-q', '-m', `edit ${edits}`);
     git(seed, 'push', '-q', 'origin', 'main');
@@ -53,7 +53,7 @@ exit "$code"
     rmSync(log);
   }
   const failInstalls = (fail) => writeFileSync(exit, fail ? '1' : '0');
-  return { checkout, log, publish, update, failInstalls, stamp: join(box.root, 'install-version') };
+  return { box, checkout, log, publish, update, failInstalls, stamp: join(box.root, 'install-version') };
 }
 
 test('update pulls main and reinstalls with --force', (t) => {
@@ -67,6 +67,23 @@ test('update pulls main and reinstalls with --force', (t) => {
   assert.deepEqual(JSON.parse(result.stdout), { updated: true, from: before, commit, installed: true });
   assert.match(result.stderr, /installing/);
   assert.equal(git(checkout, 'rev-parse', '--short', 'HEAD'), commit);
+  assert.equal(readFileSync(log, 'utf8').trim(), '--force');
+});
+
+test('update installs nothing when Herdr is older than the new commit needs, then installs once it is not', (t) => {
+  const { box, log, publish, update } = cloned(t);
+  box.setState({ version: '0.1.15' });
+  const commit = publish('.', 'package.json', '{"engines":{"herdr":">=0.1.16"}}');
+
+  const result = update();
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, new RegExp(`updated to ${commit}, but this checkout needs Herdr 0\\.1\\.16 or newer, and herdr-app is 0\\.1\\.15`));
+  assert.match(result.stderr, /Nothing was installed/);
+  assert.equal(existsSync(log), false);
+
+  box.setState({ version: '0.1.16' });
+  assert.equal(update().code, 0);
   assert.equal(readFileSync(log, 'utf8').trim(), '--force');
 });
 

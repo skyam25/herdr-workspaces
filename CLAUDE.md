@@ -53,6 +53,7 @@ Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.m
 - `hws-tabs`, `hws-agents` and `hws-spaces` are clones of Herdr's `tabs`, `agents` and `spaces`. `hws-pane` shares almost no code with Herdr's `pane`, so it is our own mod.
 - Each fork's `mod.json` records `cloned_from` {name, version}, and `mods/upstream/<name>.js` holds Herdr's file at that version. `hws doctor` notes a fork behind Herdr.
 - After a Herdr update, run `node mods/sync-forks.mjs --merge`. It merges Herdr's changes with `git merge-file`, moves the base and leaves conflict markers to resolve. Then run the mod tests, `herdr-app check` and the install.
+- `engines.herdr` in `package.json` is the oldest Herdr the mods load in. `install.sh`, `hws update` and `hws doctor` refuse an older one. A merge raises it to the merged version. Raise it by hand when a mod starts using an API from a newer Herdr.
 - Keep a fork's changes to what Herdr offers no other way to do. Put new features in our own mods. Drop a change once Herdr ships its own version of it.
 - Each fork still exists for one of three reasons.
   - Agents flipped to Chat are parked, and `agents()` and tab status count only terminals with a pane. That needs `hws-tabs` and `hws-agents`.

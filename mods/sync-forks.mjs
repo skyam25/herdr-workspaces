@@ -3,6 +3,7 @@
 // Usage: node mods/sync-forks.mjs [--merge]
 
 import { forks, herdrVersion, syncFork } from '../core/forks.js';
+import { raiseRequiredHerdr } from '../core/herdr-version.js';
 
 const merge = process.argv.includes('--merge');
 const version = herdrVersion();
@@ -28,6 +29,8 @@ for (const entry of forks()) {
   console.log(count ? `${entry.mod}: merged with ${count} conflict(s) to resolve in ${entry.fork}` : `${entry.mod}: merged cleanly to ${entry.name} ${version}`);
 }
 
+// The merged forks may use what this Herdr added, so older ones must not load them.
+if (merge && behind && raiseRequiredHerdr(version)) console.log(`Raised engines.herdr in package.json to >=${version}.`);
 if (merge && behind) console.log('Next run the mod tests and herdr-app check, then install with sh mods/install.sh --force.');
 if (!merge && behind) console.log('Run node mods/sync-forks.mjs --merge to bring them up to date.');
 process.exitCode = conflicts || (!merge && behind) ? 1 : 0;

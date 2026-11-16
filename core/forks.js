@@ -7,21 +7,29 @@ import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } fr
 import { join } from 'node:path';
 
 import { checkout } from './checkout.js';
+import { compareVersions, herdrVersion } from './herdr-version.js';
 import { home } from './paths.js';
 
 export const appHome = () => process.env.HERDR_APP_HOME || join(home(), '.config/herdr-app');
 
+export { herdrVersion };
+
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
 
-// The Herdr version on PATH, or null when herdr-app does not answer.
-export function herdrVersion() {
-  const result = spawnSync(process.env.HWS_HERDR_APP || 'herdr-app', ['--version'], { encoding: 'utf8', timeout: 10_000 });
-  return /(\d+\.\d+\.\d+)/.exec(result.stdout ?? '')?.[1] ?? null;
+// Names why Herdr's shipped file differs from the fork's base.
+// `behind` means Herdr is newer than the base, or its version is unknown, so a merge applies.
+// `herdr older` means the installed Herdr predates the base, so Herdr needs an update.
+// `not restarted` means Herdr matches the base's version but still runs an older build.
+function difference(version, herdr) {
+  if (!herdr || !version) return 'behind';
+  const order = compareVersions(herdr, version);
+  return order > 0 ? 'behind' : order < 0 ? 'herdr older' : 'not restarted';
 }
 
-// Each fork with its paths and state. `behind` means Herdr's shipped file changed since the sync.
+// Each fork with its paths and state.
 export function forks() {
   const mods = join(checkout(), 'mods');
+  const herdr = herdrVersion();
   return readdirSync(mods)
     .filter((dir) => dir.startsWith('hws-') && existsSync(join(mods, dir, 'mod.json')))
     .flatMap((dir) => {
@@ -30,7 +38,7 @@ export function forks() {
       const fork = join(mods, dir, 'main.js');
       const base = join(mods, 'upstream', `${from.name}.js`);
       const shipped = join(appHome(), 'mods', from.name, 'main.js');
-      const state = !existsSync(base) ? 'no base' : !existsSync(shipped) ? 'not shipped' : readFileSync(base, 'utf8') === readFileSync(shipped, 'utf8') ? 'current' : 'behind';
+      const state = !existsSync(base) ? 'no base' : !existsSync(shipped) ? 'not shipped' : readFileSync(base, 'utf8') === readFileSync(shipped, 'utf8') ? 'current' : difference(from.version, herdr);
       return [{ mod: dir, name: from.name, version: from.version, fork, base, shipped, state }];
     });
 }

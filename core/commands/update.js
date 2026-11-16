@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { checkout, git, installedVersion, installVersion } from '../checkout.js';
 import { HwsError } from '../errors.js';
+import { herdrTooOld } from '../herdr-version.js';
 
 const PULL_MS = 120_000;
 
@@ -27,6 +28,10 @@ export function update() {
     if (!pulled) return { data: { updated: false, commit: after }, text: `Already up to date at ${after}` };
     return { data: { updated: true, from: before, commit: after, installed: false }, text: `Updated from ${before} to ${after}, with nothing to install` };
   }
+
+  // Installed mods stay at the older version, which still loads, until Herdr is new enough.
+  const tooOld = herdrTooOld();
+  if (tooOld) throw new HwsError(`${pulled ? `updated to ${after}, but ` : ''}${tooOld}. Nothing was installed`);
 
   // The installer's output goes to stderr, so stdout holds only the result.
   const install = spawnSync('sh', [join(checkout(), 'install.sh'), '--force'], { stdio: ['ignore', 2, 2] });

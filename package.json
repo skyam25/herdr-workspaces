@@ -2,7 +2,7 @@
   "name": "herdr-workspaces",
   "private": true,
   "license": "MIT",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=20", "herdr": ">=0.1.16" },
   "bin": { "hws": "bin/hws" },
   "scripts": {
     "test": "node --test core/test/*.test.js"

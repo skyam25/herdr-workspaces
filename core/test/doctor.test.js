@@ -112,6 +112,26 @@ test('missing tools fail instead of crashing', (t) => {
   assert.deepEqual(failed(report), ['Herdr app', 'hc', 'Claude plugin']);
 });
 
+test('a Herdr older than the checkout needs fails and names the version', (t) => {
+  const box = sandbox(t);
+  const { checkout, env } = installed(box);
+  write(join(checkout, 'package.json'), '{"engines":{"herdr":">=0.1.16"}}');
+  box.setState({ version: '0.1.15' });
+  const report = run(box, env);
+  assert.deepEqual(failed(report), ['Herdr app']);
+  const herdr = report.checks.find((check) => check.name === 'Herdr app');
+  assert.match(herdr.detail, /0\.1\.15, and this checkout needs 0\.1\.16 or newer/);
+  assert.match(herdr.fix, /Update Herdr to 0\.1\.16/);
+});
+
+test('a Herdr at the checkout minimum passes', (t) => {
+  const box = sandbox(t);
+  const { checkout, env } = installed(box);
+  write(join(checkout, 'package.json'), '{"engines":{"herdr":">=0.1.16"}}');
+  box.setState({ version: '0.1.16' });
+  assert.deepEqual(failed(run(box, env)), []);
+});
+
 function herdrStatus(box, env, output, code = 0) {
   const herdr = join(box.dir, 'herdr-status');
   writeFileSync(herdr, `#!/bin/sh\necho '${output}'\nexit ${code}\n`, { mode: 0o755 });

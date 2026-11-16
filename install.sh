@@ -34,6 +34,10 @@ check_prerequisites() {
   node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)' || stop "Node 20 or newer is required"
   command -v npm >/dev/null || stop "npm is required"
   command -v herdr-app >/dev/null || stop "herdr-app is not on PATH. Install Herdr from https://herdr.dev first"
+
+  # Mods built for a newer Herdr fail to load in an older one.
+  too_old="$(HWS_CHECKOUT="$ROOT" node --input-type=module -e 'const { herdrTooOld } = await import(process.argv[1]); process.stdout.write(herdrTooOld() ?? "")' "$ROOT/core/herdr-version.js")" || stop "could not read the Herdr version"
+  [ -z "$too_old" ] || stop "$too_old"
 }
 
 link_cli() {
