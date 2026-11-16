@@ -25,7 +25,8 @@ const REFRESH_MS = 60000;
 const GIT_TIMEOUT_MS = 5000;
 const FOLDED_KEY = "sidebar.folded";
 const ARCHIVED_OPEN_KEY = "sidebar.archived.open";
-const CAP_KEY = "sidebar.workspaces.cap";
+const HELD_KEY = "sidebar.workspaces.cap";
+const SNAP_PX = 10;
 const STATUS_ORDER = ["blocked", "done", "working", "idle"];
 
 // Child glyphs center under the workspace tile.
@@ -280,20 +281,22 @@ export function overflows(state) {
 }
 
 // A height this mod neither set nor is still waiting on came from a drag on the divider.
-// Dragging up caps the list, which then scrolls. Dragging down to every row clears the cap.
+// The dragged height holds in either direction. The list scrolls when it is shorter than
+// the rows. A drag within SNAP_PX of the rows' height lets the block fit its rows again.
 function takeDrag(state, now, full) {
   if (state.fitPx == null || now == null || now === state.fitPx || now === state.fitFrom) return;
   const dragged = now - HEADING_PX - BOTTOM_PX;
-  state.capPx = dragged < full ? Math.max(ROW_PX, dragged) : null;
+  state.heldPx = Math.abs(dragged - full) <= SNAP_PX ? null : Math.max(ROW_PX, dragged);
   try {
-    if (state.capPx == null) localStorage.removeItem(CAP_KEY);
-    else localStorage.setItem(CAP_KEY, String(state.capPx));
+    if (state.heldPx == null) localStorage.removeItem(HELD_KEY);
+    else localStorage.setItem(HELD_KEY, String(state.heldPx));
   } catch {
-    // The cap still holds for this window.
+    // The height still holds for this window.
   }
 }
 
-// Sizes the block to its rows, so an empty section leaves no gap above Spaces.
+// Sizes the block to its rows, so an empty section leaves no gap above Spaces,
+// or to the height a drag left it at.
 function fit(state) {
   const block = findNode(layout(), NODE);
   if (!block || !state.workspaces) return;
@@ -302,7 +305,8 @@ function fit(state) {
   if (!isNarrow()) {
     const full = listPx(state);
     takeDrag(state, now, full);
-    px = HEADING_PX + Math.min(full, state.capPx ?? Infinity) + BOTTOM_PX;
+    const list = state.heldPx == null ? full : Math.min(state.heldPx, maxListPx(state));
+    px = HEADING_PX + list + BOTTOM_PX;
   }
   if (now === px) {
     state.fitPx = px;
@@ -316,9 +320,9 @@ function fit(state) {
   run("layout.resize", { id: NODE, px });
 }
 
-function savedCap() {
+function savedHeight() {
   try {
-    const px = Number(localStorage.getItem(CAP_KEY));
+    const px = Number(localStorage.getItem(HELD_KEY));
     return px > 0 ? px : null;
   } catch {
     return null;
@@ -359,7 +363,7 @@ export function startSidebar(cx) {
     windowPx: null,
     blockPx: null,
     hovered: null,
-    capPx: savedCap(),
+    heldPx: savedHeight(),
     fitPx: null,
     fitFrom: null,
   };

@@ -1843,7 +1843,7 @@ test("the sidebar section sizes its block to its rows and hides them when narrow
   assert.equal(m.has("sidebar-workspace-spc1"), false);
 });
 
-test("a drag on the divider caps the list, and a drag past every row clears the cap", async () => {
+test("a drag on the divider holds in either direction, and a drag near the rows fits them again", async () => {
   localStorage.removeItem("sidebar.workspaces.cap");
   const H = setup({ hws: { list: [APP, THROWAWAY] }, spaces: [{ id: "spc1", active: true, tabs: [] }], layout: structuredClone(SIDEBAR_LAYOUT) });
   const m = await mount("hws-panel", { view: "sidebar" });
@@ -1860,12 +1860,18 @@ test("a drag on the divider caps the list, and a drag past every row clears the 
   block.size.px = 69;
   await m.fireTimer(1000);
   await m.fireTimer(1000);
-  assert.deepEqual(resizes(), [], "the dragged height holds");
+  assert.deepEqual(resizes(), [], "a drag up holds");
   assert.equal(localStorage.getItem("sidebar.workspaces.cap"), "30");
 
-  block.size.px = 160;
+  block.size.px = 220;
   await m.fireTimer(1000);
-  assert.deepEqual(resizes().at(-1).args, { id: "workspaces", px: 151 }, "past every row it fits the rows again");
+  await m.fireTimer(1000);
+  assert.deepEqual(resizes(), [], "a drag down past every row holds");
+  assert.equal(localStorage.getItem("sidebar.workspaces.cap"), "181");
+
+  block.size.px = 158;
+  await m.fireTimer(1000);
+  assert.deepEqual(resizes().at(-1).args, { id: "workspaces", px: 151 }, "near the rows it fits them again");
   assert.equal(localStorage.getItem("sidebar.workspaces.cap"), null);
 });
 
