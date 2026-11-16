@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
+import { logSpaceAgents } from '../agents.js';
 import { HwsError } from '../errors.js';
 import { act, keepingSelection, listLive, requireLive } from '../herdr.js';
 import { withLock } from '../lock.js';
@@ -69,6 +70,7 @@ export function spaceMove(flags) {
     draft.spaces.push(space.id);
     draft.terminals.push(...records);
   });
+  logSpaceAgents(target.id, space);
   if (ownBoard) moveCards(ownBoard, target.id);
   return { data, text: `moved ${space.name} to ${target.name}` };
 }

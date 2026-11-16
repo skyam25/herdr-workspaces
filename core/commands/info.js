@@ -1,3 +1,4 @@
+import { logAgent, seedAgents } from '../agents.js';
 import { listManifests, updateManifest, writeJsonAtomic } from '../manifest.js';
 import { terminalSessionPath, workspaceDir } from '../paths.js';
 import { callingTerminal, locateTerminal, requireCallingTerminal, requireFlag, workspaceOfTerminal } from '../resolve.js';
@@ -36,6 +37,7 @@ export function list(flags) {
 }
 
 // A terminal outside a workspace records only its session, and still succeeds.
+// The terminal keeps its latest session. The agent log keeps every one.
 export function register(flags) {
   const terminal = requireFlag(flags, 'terminal');
   const session = requireFlag(flags, 'session');
@@ -43,6 +45,7 @@ export function register(flags) {
   const { manifest, tabId } = locateTerminal(terminal);
   if (!manifest) return { data: { registered: false }, text: `${terminal} is not in a workspace` };
   updateManifest(manifest.id, (draft) => {
+    seedAgents(draft);
     let record = draft.terminals.find((item) => item.terminal === terminal);
     if (!record) {
       record = { terminal, tabId, sessionId: null, role: null };
@@ -50,6 +53,7 @@ export function register(flags) {
     }
     record.sessionId = session;
     if (flags.role) record.role = flags.role;
+    logAgent(draft, { session, folder: flags.folder ?? null, terminal, role: record.role ?? null });
   });
   return {
     data: { registered: true, workspace: manifest.id, terminal, session },

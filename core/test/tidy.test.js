@@ -117,16 +117,16 @@ test('a first prompt with real words stays the title', (t) => {
 test('a session without a transcript and the tidy pass session are left out', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
-  box.transcript(manifest, 'mine');
-  box.transcript(manifest, 'tidy-session');
   box.rewriteManifest(manifest.id, (draft) => ({
     ...draft,
     terminals: [
-      { ...draft.terminals[0], sessionId: 'mine' },
-      { terminal: 't900', tabId: 'tb900', sessionId: 'tidy-session', role: 'tidy' },
+      ...draft.terminals,
+      { terminal: 't900', tabId: 'tb900', sessionId: null, role: 'tidy' },
       { terminal: 't901', tabId: 'tb901', sessionId: 'never-written', role: null },
     ],
   }));
+  box.transcript(manifest, 'mine');
+  box.transcript(manifest, 'tidy-session', { terminal: 't900' });
 
   assert.deepEqual(status(box, manifest).items.map((item) => item.id), ['mine']);
 });
@@ -343,7 +343,7 @@ test('the line names each source behind and leaves out zero sources', (t) => {
   box.rewriteManifest(manifest.id, (draft) => ({ ...draft, artifacts: draft.artifacts.map((item) => ({ ...item, status: 'draft' })) }));
   assert.equal(line(box, ['--workspace', manifest.id]), `Nothing has landed since ${shortDate(tidiedAt)}`);
 
-  box.rewriteManifest(manifest.id, (draft) => ({ ...draft, artifacts: [], terminals: draft.terminals.map((item) => ({ ...item, sessionId: null })) }));
+  box.rewriteManifest(manifest.id, (draft) => ({ ...draft, artifacts: [], agents: [], terminals: draft.terminals.map((item) => ({ ...item, sessionId: null })) }));
   assert.equal(line(box, ['--workspace', manifest.id]), `Current is up to date, last tidied ${shortDate(tidiedAt)}`);
 });
 

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 
+import { logSpaceAgents } from '../agents.js';
 import { UsageError } from '../errors.js';
 import { act } from '../herdr.js';
 import { createManifest, manifestOfSpace, updateManifest } from '../manifest.js';
@@ -94,6 +95,7 @@ function adoptSpace({ name, kind, folder, instructions }, spaceId) {
   const id = adoptedId(space, ownBoard);
   const tabs = (space.tabs ?? []).map((tab) => ({ tabId: tab.id, name: tab.name ?? null, role: null }));
   const manifest = createManifest({ id, name, kind, folder, instructions: instructions ?? '', spaces: [space.id], tabs, terminals });
+  logSpaceAgents(id, space);
   if (ownBoard !== id) moveCards(ownBoard, id);
   return manifest;
 }

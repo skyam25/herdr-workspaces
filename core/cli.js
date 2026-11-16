@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 
 import { artifactAdd, artifactList, artifactMove, artifactScan, artifactSet, artifactTerminal, artifactTrash, link, review } from './commands/artifact.js';
+import { agentAdd, agentsList } from './commands/agents.js';
 import { archive, unarchive } from './commands/archive.js';
 import { doctor } from './commands/doctor.js';
 import { update } from './commands/update.js';
@@ -57,6 +58,8 @@ const ROUTES = [
   { path: ['list'], run: list, prunes: true, options: { archived: flag } },
   { path: ['register'], run: register, options: { terminal: text, session: text, role: text, folder: text } },
   { path: ['outputs'], run: outputs, options: { terminals: text } },
+  { path: ['agents'], run: agentsList, options: { workspace: text, session: text } },
+  { path: ['agent', 'add'], run: agentAdd, options: { session: text, folder: text, tool: text, workspace: text } },
   {
     path: ['surface', 'open'],
     run: surfaceOpen,

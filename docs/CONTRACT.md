@@ -76,6 +76,9 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
   "terminals": [
     { "terminal": "t13", "tabId": "tb...", "sessionId": "uuid or null", "role": "planner or null" }
   ],
+  "agents": [
+    { "session": "uuid", "tool": "claude", "folder": "/abs or null", "terminal": "t13 or null", "role": "planner or null", "firstSeen": 1794200000000, "source": "hook" }
+  ],
   "surfaces": [
     {
       "id": "s1a2b3",
@@ -115,6 +118,12 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `current.covers` | The newest stream item each source had absorbed at that pass. Any key may be null |
 | `tidy` | The tidy pass `hws tidy start` opened. Absent when none was started |
 | `terminals[].role` | `tidy` on the terminal `hws tidy start` opened. Freshness leaves its session out |
+| `terminals[].sessionId` | The terminal's latest registered session. A new session on the same terminal replaces it |
+| `agents` | Every agent session the workspace has seen, oldest first. Entries are only ever added. A session sits in each workspace that logged it. Absent on manifests written before the log, which read their `terminals[].sessionId` values as entries with `source` `terminal` |
+| `agents[].source` | `hook` from `hws register`, `space` when a space carried it in, `manual` from `hws agent add`, `terminal` for a session read from an older manifest |
+| `agents[].role` | The terminal's role when the session registered. `tidy` keeps the session out of freshness |
+| `agents[].folder` | Where the session started, so `claude --resume` works there. Null when unknown, and the transcript is then looked up under the workspace folder |
+| `agents[].transcript` | The transcript's absolute path, when it is not where `folder` puts it. Absent otherwise |
 | `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. `feedback` on the Done bundle of any other page that shows a file. Freshness and `hws artifact scan` leave both out, and the panel lists neither as an artifact of its own. Absent on other artifacts |
 | `artifacts[].file` | On a `feedback` round, the absolute path of the file the page showed. Absent otherwise |
 | `artifacts[].reviewOf` | On a `feedback` round, the id of the `file` artifact that tracked that file at Done, or null when none did. Absent otherwise |
@@ -191,7 +200,10 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws new throwaway [--name N]` | Creates a throwaway with one tab running `claude` in its scratch folder. The space opens on a shell in the parent folder, which closes once the tab is open |
 | `hws current [--terminal T] [--line]` | The manifest for T, default `$HC_TERMINAL_ID`. `--line` prints one sentence for agents followed by the workspace instructions, or nothing outside a workspace |
 | `hws list [--archived]` | Every open manifest, each with `dir` set to its state folder. `dir` is not stored in the manifest. `--archived` lists only archived workspaces |
-| `hws register --terminal T --session S [--role R] [--folder F]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal. The terminal's record is `{ id, folder }`, and `folder` is left out when `--folder` is not given |
+| `hws register --terminal T --session S [--role R] [--folder F]` | Records a Claude session against its terminal, in `<state root>/terminal-sessions/` for any terminal and in the manifest for a workspace's terminal. The terminal's record is `{ id, folder }`, and `folder` is left out when `--folder` is not given. In a workspace it also adds the session to `agents` once |
+| `hws agents [--workspace W]` | Prints `{ workspace, agents }`, each entry as stored plus `title`, `activeAt` (the transcript's modified time), `status` and `alsoIn`. `status` is `active` while the entry's terminal still runs that session and `ended` otherwise. `alsoIn` lists `{ id, name }` for every other workspace whose log holds the session. Active entries come first, then the rest newest first |
+| `hws agents --session S` | Prints `{ session, workspaces }`, every workspace whose log holds S. Needs no calling terminal |
+| `hws agent add --session S [--folder F] [--tool claude\|codex] [--workspace W]` | Logs a session started outside the workspace's terminals, with `source` `manual`. A Claude session is looked up at F, then by id under every Claude project folder, and its folder is read from the transcript's `cwd`. It fails when no transcript is found. A Codex session needs `--folder` and is not checked. Logging a known session changes nothing and prints `existing: true` |
 | `hws outputs --terminals T1,T2` | Read-only. Prints `{ agents }`, one `{ terminal, session, folder, file, outputs }` per terminal in the order given. See Outputs under Right panel |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board or note opens in its own window and a page splits a pane beside T. `--window` and `--in-pane` choose the place, and both together exit 2. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. One file is one surface per workspace. A file already open in a pane gets the focus, and one already open in a window is raised, whatever the flags say. The result then has `focused: true`, and `raised` for a window. A file whose window is closed starts again on the same data in the place the flags or the default give |
 | `hws review FILE\|ARTIFACT [--title X] [--terminal T] [--window]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T --in-pane` does. `--window` opens it in its own window. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane or window with no agent attached. Never opens standalone |
@@ -375,7 +387,7 @@ Counted on read against `current.covers`.
 
 | Source | Behind when |
 |---|---|
-| Sessions | A session recorded in `terminals` has a transcript modified after `sessionsThrough`. The tidy terminal's session and sessions with no transcript are left out |
+| Sessions | A session in `agents` has a transcript modified after `sessionsThrough`. Sessions with role `tidy` and sessions with no transcript are left out |
 | Artifacts | `createdAt` is after `artifactsThrough`, or the file changed after it, which sets `editedAt`. An artifact with a `role` is left out, which covers tidy reviews and feedback rounds |
 | Commits | In `git log covers.commit..HEAD` in the workspace folder, limited to `home` when the workspace has one of its own. With no `covers.commit`, every commit since the workspace's `createdAt`. A commit whose files all sit under the `scratch`, `current`, `decisions` or `history` place is left out |
 | Cards | A Done card on the workspace's task list that is not archived |

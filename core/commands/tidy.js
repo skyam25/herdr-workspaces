@@ -4,12 +4,13 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync } fr
 import { basename, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
+import { agentTranscript, workspaceAgents } from '../agents.js';
 import { freeName, isInside, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, listLive, sendText } from '../herdr.js';
 import { withLock } from '../lock.js';
 import { TIDY_ROLE, updateManifest, writeJsonAtomic, writeTextAtomic } from '../manifest.js';
-import { STANDALONE, transcriptPath, workspaceDir } from '../paths.js';
+import { STANDALONE, workspaceDir } from '../paths.js';
 import { ROLES, allPlaces, hasOwnHome, homeOf, isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { scanWorkspace } from '../scan.js';
 import { locateTerminal, requireFlag, resolveWorkspace, spaceOfTerminal, splitList, workspaceByRef } from '../resolve.js';
@@ -82,7 +83,7 @@ function entryOf(line) {
 // The first typed prompt, when it has real words. Otherwise Claude's own title,
 // then the first typed prompt with real words. The first prompt sits near the
 // start, so most transcripts are read only that far.
-function sessionTitle(path) {
+export function sessionTitle(path) {
   let seenPrompt = false;
   let aiTitle = null;
   let fallback = null;
@@ -109,9 +110,9 @@ function sessionTitle(path) {
 }
 
 function trackedSessions(manifest) {
-  const ids = manifest.terminals.filter((item) => item.sessionId && item.role !== TIDY_ROLE).map((item) => item.sessionId);
-  return [...new Set(ids)]
-    .map((id) => ({ id, transcript: transcriptPath(manifest.folder, id) }))
+  return workspaceAgents(manifest)
+    .filter((item) => item.role !== TIDY_ROLE)
+    .map((item) => ({ id: item.session, transcript: agentTranscript(manifest, item) }))
     .map((item) => ({ ...item, modifiedAt: modifiedAt(item.transcript) }))
     .filter((item) => item.modifiedAt !== null);
 }
