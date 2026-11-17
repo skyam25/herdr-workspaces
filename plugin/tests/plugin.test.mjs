@@ -117,12 +117,14 @@ function assertSilent(result) {
 
 const HERDR_APP = "dev.herdr.app";
 const NOTE_EDITOR =
-  "To show the person a Markdown file to read or edit, run `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn. It opens in a Herdr note window, in a workspace or not. Never open the file with `open`, VS Code or another editor.";
+  "To show the person a Markdown file to read or edit, run `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn. It opens in a Herdr note window, in a workspace or not. When you want their comments on something you wrote, run `hws review FILE` instead. Never open the file with `open`, VS Code or another editor.";
+const OUTPUTS =
+  "When the person asks for a doc, brief, report, spec, page or deck, run `hws output add --title T --path P --status drafting` as you start it, and run it again with `--status ready` when it is done. Use `--url U` in place of `--path` for a web document. The work then shows under Outputs in Herdr's right panel. Never declare code, config or tests.";
 const PHONE =
-  'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn. Their markup arrives as your next prompt. Agent Brief\'s Outputs panel does not reach the phone. Run `~/.local/bin/hws` if `hws` is not on PATH.';
+  'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn. Their markup arrives as your next prompt. Run `~/.local/bin/hws` if `hws` is not on PATH.';
 
-// Every Herdr app terminal ends with these two paragraphs, in a workspace or not.
-const HERDR_TAIL = `${NOTE_EDITOR}\n\n${PHONE}`;
+// Every Herdr app terminal ends with these three paragraphs, in a workspace or not.
+const HERDR_TAIL = `${NOTE_EDITOR}\n\n${OUTPUTS}\n\n${PHONE}`;
 
 function contextOf(result) {
   assert.equal(result.status, 0);
@@ -348,8 +350,18 @@ describe("session-start hook", () => {
     homeStub();
     const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
 
-    assert.ok(context.endsWith("To show the person a page or document for comments, run `hws review FILE` with an .html or .md file, then end the turn. It opens beside this agent, and their comments arrive as your next prompt. Never open it with --standalone, because that pane has no agent to answer." + `\n\n${HERDR_TAIL}`));
+    assert.ok(context.endsWith("To get the person's comments on a page or document you wrote, run `hws review FILE` with an .html or .md file, then end the turn. It opens beside this agent, and their comments arrive as your next prompt. Never open it with --standalone, because that pane has no agent to answer. When the person only wants to read or edit a Markdown file, open it in a note instead." + `\n\n${HERDR_TAIL}`));
     assert.ok(!contextOf(run(HOOK)).includes("hws review"));
+  });
+
+  it("never mentions Agent Brief", () => {
+    homeStub();
+    assert.ok(!contextOf(run(HOOK, { bundle: HERDR_APP })).includes("Agent Brief"));
+  });
+
+  it("leaves out the outputs paragraph in another app's terminal", () => {
+    homeStub({ current: ":", match: matchBody("checkout demo") });
+    assert.ok(!contextOf(run(HOOK, { bundle: "com.apple.Terminal" })).includes("hws output add"));
   });
 
   it("teaches only the note editor and the phone outside a workspace in a Herdr app terminal", () => {

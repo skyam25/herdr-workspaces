@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane or window, asks to open a note or file in the Herdr editor rather than VS Code, asks to look over, comment on or give feedback on a page or document, or asks to see or review something on their phone, iPhone or iPad. Explains how to read the workspace, use the space's task list, hand a page to the user for review and ask for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane or window, asks to open a note or file in the Herdr editor rather than VS Code, asks to look over, comment on or give feedback on a page or document, asks to reopen a sketch, note or page from earlier, or asks to see or review something on their phone, iPhone or iPad. Explains how to read the workspace, use the space's task list, hand a page to the user for review, reopen earlier work, declare outputs, ask the user questions and ask for input through a surface.
 ---
 
 # Herdr workspace
@@ -114,6 +114,15 @@ Sort the context by where it lives.
 - Point to what has a stable home, such as artifacts, docs and screenshots.
 - Leave out what a worker can find in the repo.
 
+## Review a page or open a note
+
+| The person wants | Run |
+|---|---|
+| To comment on a page or document you wrote | `hws review FILE` |
+| To read or edit a Markdown file themselves | `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` |
+
+Use `hws review` when you want comments back on your own work. Use a note when the file is the person's to read or change. Never open either kind of file with macOS `open`, VS Code or another editor.
+
 ## Hand a page to the user for review
 
 Use this when the user wants to look over a page or document you wrote, and again after you change one they commented on.
@@ -151,20 +160,76 @@ After opening a surface, end the turn and wait. The user presses Done and the fe
 
 The user can move a surface between a pane and a window with Pop out and Pop in. When they ask you to move one, find its id under `surfaces` in `hws current --json` and run `hws surface pop --id S`. Add `--to pane` or `--to window` to choose the place. Without it the surface moves to the other place.
 
+## Reopen earlier work
+
+| Work | Run |
+|---|---|
+| An `.md` or `.html` file, or the artifact that tracks one | `hws review ARTIFACT` |
+| A sketch or note draft listed under `surfaces` in `hws current --json` | `hws surface resume --id S` |
+
+`hws surface resume` brings an open window forward, or starts a closed one again on the same data. Never reopen work with macOS `open`.
+
+## Drive a surface
+
+```bash
+hws surface cli -- VERB [ARGS]
+```
+
+This runs the surface command line against this terminal's open surface. Add `--title X` before `--` when this terminal has more than one surface open, and `--terminal T` to drive another terminal's surface. Load the skill for the verb you need.
+
+| Verbs | Skill |
+|---|---|
+| `read`, `png`, `draw`, `update`, `delete`, `snap` | `herdr-workspaces:sketch-board` |
+| `outline` | `herdr-workspaces:outline-first` |
+| `behavior` | `herdr-workspaces:behavior-review` |
+| `feedback` | `herdr-workspaces:feedback-items` |
+
+For a UI mockup that needs no surface, load `herdr-workspaces:wireframe`. It renders an SVG with `${CLAUDE_PLUGIN_ROOT}/bin/wireframe-render.mjs`.
+
+## Declare outputs
+
+When the person asks for a doc, brief, report, spec, page or deck, list it under Outputs in Herdr's right panel.
+
+```bash
+hws output add --title "Pricing memo" --path docs/pricing.md --status drafting
+```
+
+- Run it with `--status drafting` when you start the work.
+- Run it again with `--status ready` when the work is done.
+- Use `--url U` in place of `--path` for a web document, such as a claude.ai artifact.
+- Never declare code, config, tests or other files that serve the code.
+
+## Ask the user questions
+
+Ask only when the request is underspecified and the answers change what you build.
+
+```bash
+hws ask --title "Pricing memo" --file .feedback/scratch/questions.json
+```
+
+The file holds a list of questions. `hws ask` also reads the list on stdin.
+
+```json
+[
+  {"id": "audience", "text": "Who reads the memo first?", "kind": "options", "options": ["Leadership", "Sales", "Support"]},
+  {"id": "deadline", "text": "When does it need to be ready?", "kind": "text"}
+]
+```
+
+| Kind | Use for |
+|---|---|
+| `options` | 2 to 4 short choices |
+| `select` | Up to 6 choices |
+| `text` | An open answer |
+
+Explain each option in your reply before you ask, so the person can choose without asking what an option means. End the turn after `hws ask`, because the answers arrive as your next prompt.
+
 ## Send to the phone
 
-Use this only when the user asks to review something on their phone or iPad. Agent Brief's Outputs panel, `declare_output` and its iPad button do not reach a phone paired with Herdr, so use `hws phone send`.
+Use this only when the user asks to review something on their phone or iPad.
 
 ```sh
 hws phone send FILE_OR_ARTIFACT_ID --prompt "What to look at"
 ```
 
 The phone opens `.html` and `.excalidraw` files. Render a Markdown note to HTML first. End the turn after sending, because the user's markup arrives as the next prompt. If no phone is paired, run `hws phone pair`, which opens a tab with a QR code for the user to scan. The user can also pair from Phone at the bottom of the Herdr sidebar.
-
-## Draw on a surface
-
-```bash
-COMPANION_SOCKET=$(hws surface socket --terminal $HC_TERMINAL_ID) agent-brief draw ...
-```
-
-Add `--title X` to `hws surface socket` when this terminal has more than one surface open. Use the `agent-brief:sketch-board` skill for the drawing format and the other `agent-brief` commands, and keep the same `COMPANION_SOCKET` prefix on each of them.
