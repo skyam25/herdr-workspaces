@@ -29,6 +29,13 @@ const NOTE_EDITOR = [
   "Never open the file with `open`, VS Code or another editor.",
 ].join(" ");
 
+const PASTE = [
+  "When the person asks for text to paste somewhere else, such as a message, an email or a post, write it to a Markdown file instead of printing it, and open it with `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn.",
+  "In a workspace, put the file in `hws place scratch`.",
+  "The note's Copy button copies it as rich text.",
+  "When they ask for changes, edit the same file, because the open note reloads it.",
+].join(" ");
+
 const OUTPUTS = [
   "When the person asks for a doc, brief, report, spec, page or deck, run `hws output add --title T --path P --status drafting` as you start it, and run it again with `--status ready` when it is done.",
   "Use `--url U` in place of `--path` for a web document. The work then shows under Outputs in Herdr's right panel.",
@@ -168,7 +175,7 @@ async function main() {
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PASTE, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

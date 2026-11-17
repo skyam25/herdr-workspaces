@@ -126,7 +126,9 @@ const PHONE =
 // Every Herdr app terminal ends with these three paragraphs, in a workspace or not.
 const ASK =
   "When a request leaves real choices open and the answers would change what you build, run `hws ask` with 1 to 8 questions as JSON on stdin or with `--file`, then end the turn. Each question is `{id, text, kind, options}`, where kind is `options` for 2 to 4 short choices, `select` for up to 6 or `text` for an open answer. The answers arrive as your next prompt.";
-const HERDR_TAIL = `${NOTE_EDITOR}\n\n${OUTPUTS}\n\n${ASK}\n\n${PHONE}`;
+const PASTE =
+  "When the person asks for text to paste somewhere else, such as a message, an email or a post, write it to a Markdown file instead of printing it, and open it with `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn. In a workspace, put the file in `hws place scratch`. The note's Copy button copies it as rich text. When they ask for changes, edit the same file, because the open note reloads it.";
+const HERDR_TAIL = `${NOTE_EDITOR}\n\n${PASTE}\n\n${OUTPUTS}\n\n${ASK}\n\n${PHONE}`;
 
 function contextOf(result) {
   assert.equal(result.status, 0);

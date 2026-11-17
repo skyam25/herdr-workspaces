@@ -120,8 +120,11 @@ Sort the context by where it lives.
 |---|---|
 | To comment on a page or document you wrote | `hws review FILE` |
 | To read or edit a Markdown file themselves | `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` |
+| Text to paste somewhere else, such as a message, an email or a post | Write it to a Markdown file, then open it as a note with the same command |
 
 Use `hws review` when you want comments back on your own work. Use a note when the file is the person's to read or change. Never open either kind of file with macOS `open`, VS Code or another editor.
+
+Paste-ready text goes in a note instead of the chat. In a workspace, put the file in `hws place scratch`. The note's Copy button copies it as rich text. When the person asks for changes, edit the same file, because the open note reloads it. Keep one file per message, so they never have two copies.
 
 ## Hand a page to the user for review
 
