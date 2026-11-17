@@ -253,6 +253,23 @@ describe('SurfaceHost', () => {
     expect(existsSync(join(h.dataDir, 'handed-off.json'))).toBe(false);
   });
 
+  it('opens the file again for a page that loads later', async () => {
+    const h = await harness({ standalone: false, artifact: 'a1', delivered: true }, { file: '/tmp/x/page.html' });
+    await h.host.ready();
+    await h.host.ready();
+    h.stop();
+    expect(h.requests.filter((r) => r === 'POST /open')).toHaveLength(2);
+    expect(h.requests.filter((r) => r === 'POST /sessions')).toHaveLength(1);
+  });
+
+  it('opens a board once, because main keeps its drawing', async () => {
+    const h = await harness(undefined, { type: 'board', file: '' });
+    await h.host.ready();
+    await h.host.ready();
+    h.stop();
+    expect(h.requests.filter((r) => r === 'POST /open')).toHaveLength(1);
+  });
+
   it('keeps the draft when hws refuses the bundle', async () => {
     const h = await harness(undefined);
     h.host.start();

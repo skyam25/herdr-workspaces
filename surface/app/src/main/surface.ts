@@ -297,12 +297,16 @@ export class SurfaceHost {
     this.stopped = true;
   }
 
-  /** Runs once the renderer listens, because `/open` pushes events a loading page would miss. */
+  /**
+   * Runs each time a page starts listening, because `/open` pushes events a loading page would miss.
+   * A later page, such as a reload or a second web view, gets the file again. A board keeps its drawing in main.
+   */
   async ready(): Promise<void> {
-    if (this.opened) return;
+    const first = !this.opened;
+    if (!first && !this.cfg.file) return;
     this.opened = true;
     try {
-      await this.register();
+      if (first) await this.register();
       await this.request('POST', '/open', openRequest(this.cfg, this.sessionId, this.cwd));
     } catch (err) {
       this.update({ notice: { text: `Could not open ${this.cfg.title}: ${(err as Error).message}`, error: true } });
