@@ -2,7 +2,7 @@
 
 Typed workspaces for the Herdr app, with boards, notes and page review glued to the terminal that asked for them.
 
-Interfaces are in `docs/CONTRACT.md`.
+`docs/GUIDE.md` explains what it does and how to move off Agent Brief. Interfaces are in `docs/CONTRACT.md`.
 
 ## Parts
 

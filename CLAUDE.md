@@ -2,7 +2,7 @@
 
 Typed workspaces for the Herdr desktop app, with boards, notes and page review in panes glued to the terminal that opened them.
 
-Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.md` is the specification for every command, path and manifest field.
+Read `docs/NEXT-STEPS.md` for current status and the task list. `docs/CONTRACT.md` is the specification for every command, path and manifest field. `docs/GUIDE.md` is the overview for people and for agent instructions. Update it when a command agents use, or an instruction source, changes.
 
 ## Layout
 
