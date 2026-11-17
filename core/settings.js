@@ -42,7 +42,7 @@ function writeSettings(changes) {
   writeFileSync(settingsFile(), JSON.stringify({ ...readSettings(), ...changes }));
 }
 
-const remembered = () => readSettings().parent;
+export const remembered = () => readSettings().parent;
 
 // The user's default place map for kept workspaces. Roles the manifest leaves out fall back to it.
 export function defaultPlaces() {

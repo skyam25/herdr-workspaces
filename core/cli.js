@@ -5,6 +5,7 @@ import { agentAdd, agentsList } from './commands/agents.js';
 import { ask } from './commands/ask.js';
 import { archive, unarchive } from './commands/archive.js';
 import { doctor } from './commands/doctor.js';
+import { migrate } from './commands/migrate.js';
 import { update } from './commands/update.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, place, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
@@ -164,6 +165,7 @@ const ROUTES = [
   { path: ['prune'], run: prune, options: {} },
   { path: ['doctor'], run: doctor, options: { record: flag } },
   { path: ['update'], run: update, options: {} },
+  { path: ['migrate', 'agent-brief'], run: migrate, options: { apply: flag, import: flag, scan: repeated } },
 ];
 
 const USAGE = `Usage: hws <command> [--json]

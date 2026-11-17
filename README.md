@@ -57,6 +57,7 @@ Update with `hws update`, which pulls `main`, reinstalls every part when the ins
 - An agent draws on a sketch or edits an outline with `hws surface cli -- VERB`.
 - `hws resume` restarts recorded Claude sessions after a reboot.
 - Delivery failures are written to `~/.local/state/herdr-workspaces/delivery.log`.
+- `hws migrate agent-brief` reports what Agent Brief left behind and the instructions that still name it. `--import` keeps its boards and drafts as Unfiled work, and `--apply` uninstalls the plugin and moves the rest to the Trash.
 
 ## License
 

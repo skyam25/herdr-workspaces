@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { conflictingParts } from '../agent-brief.js';
 import { checkout, commitsBehind, installedVersion, installVersion, recordInstall } from '../checkout.js';
 import { appHome, forks } from '../forks.js';
 import { compareVersions, herdrVersion, requiredHerdr } from '../herdr-version.js';
@@ -126,6 +127,15 @@ function checkPlugin() {
   return { name, ok: plugin.version === version, detail: `installed ${plugin.version}, checkout ${version}`, fix: install(' --force') };
 }
 
+// Agent Brief's instructions compete with this plugin's in every session, but Herdr Workspaces still works.
+function checkAgentBrief() {
+  const name = 'Agent Brief';
+  const parts = conflictingParts();
+  if (parts.length === 0) return { name, ok: true, detail: 'not installed' };
+  const listed = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+  return { name, ok: true, note: true, detail: `${listed}, and its instructions conflict with Herdr Workspaces`, fix: 'Run hws migrate agent-brief' };
+}
+
 // Being behind is news, not a broken install, so it never fails the report.
 function checkUpdates() {
   const name = 'Updates';
@@ -182,6 +192,7 @@ export function doctor({ record = false } = {}) {
     checkPixel(),
     checkApp(),
     checkPlugin(),
+    checkAgentBrief(),
     checkUpdates(),
     checkForks(),
   ];

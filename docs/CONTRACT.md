@@ -179,8 +179,9 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 
 | Command | Result |
 |---|---|
-| `hws doctor [--record]` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, the layout the window shows, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. `Herdr app` fails when `herdr-app --version` is older than `engines.herdr` in the checkout's `package.json`. It compares the install version with the recorded one, and each fork's saved Herdr original with the one Herdr ships now. A fork that differs gets a note by version. A newer Herdr suggests `sync-forks.mjs --merge`, an older Herdr suggests updating Herdr, and the same version suggests restarting Herdr. Being behind, a stale install, a fork that differs, or a window on another layout prints a `note` and never fails. `--record` writes the install version once every other check passes, or removes it when tracked files have uncommitted changes. Only `install.sh` passes `--record`, after a run that skipped and failed nothing. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
+| `hws doctor [--record]` | Checks Node, `herdr-app`, `hc`, the `~/.local/bin/hws` link, installed mods and layout against this checkout, the layout the window shows, Pixel, the surface build and the Claude plugin, and counts the commits on GitHub's `main` that the checkout lacks. `Herdr app` fails when `herdr-app --version` is older than `engines.herdr` in the checkout's `package.json`. It compares the install version with the recorded one, and each fork's saved Herdr original with the one Herdr ships now. A fork that differs gets a note by version. A newer Herdr suggests `sync-forks.mjs --merge`, an older Herdr suggests updating Herdr, and the same version suggests restarting Herdr. `Agent Brief` names any of its plugin enabled or installed, its `~/.local/bin/agent-brief` link and its app, and suggests `hws migrate agent-brief`. Being behind, a stale install, a fork that differs, Agent Brief left installed, or a window on another layout prints a `note` and never fails. `--record` writes the install version once every other check passes, or removes it when tracked files have uncommitted changes. Only `install.sh` passes `--record`, after a run that skipped and failed nothing. No answer from GitHub skips that check. Prints `{ok,checks:[{name,ok,detail,fix}]}` and exits 1 when any check fails |
 | `hws update` | Pulls `main` with `--ff-only`, then runs `install.sh --force` with its output on stderr when the checkout's install version differs from `<state root>/install-version` or that file is missing. Prints `{updated,from,commit,installed}`, or `{updated:false,commit}` when the pull found nothing and the install is current. Fails with no change on another branch or with uncommitted changes to tracked files. When `herdr-app` is older than the pulled checkout's `engines.herdr`, it keeps the pull, installs nothing and fails, so the installed mods keep loading until Herdr is updated. A failed install records nothing, so the next `hws update` installs again |
+| `hws migrate agent-brief [--import] [--apply] [--scan DIR]...` | Reports what the retired Agent Brief app and plugin left on this Mac, whether Herdr Workspaces is ready, and stale instructions with their replacements. Changes nothing without a flag. `--import` files old boards and drafts as Unfiled artifacts. `--apply` uninstalls the plugin and moves the rest to the Trash. Prints `{agentBrief,herdrWorkspaces,instructions,imported,skipped,actions,guide}`. See [Moving off Agent Brief](#moving-off-agent-brief) |
 | `hws new terminal [--folder F]` | Opens a normal tab. No manifest |
 | `hws new workspace --name N --folder F [--home H] [--kind K] [--tabs Plan,Build] [--instructions X]` | F must exist. Creates one space and the manifest, and remembers F as the parent folder. The space has one unnamed tab unless `--tabs` names some. Each tab starts a shell in F. K defaults to `general` |
 | `hws new workspace --name N --folder F --space S [--home H] [--kind K] [--instructions X]` | Makes the workspace from the open local space S and opens nothing. S keeps its name, tabs and terminals. A plain space's cards become the workspace's Board. A space leaving another workspace brings its terminal records and leaves its cards there, and fails when it is that workspace's last space or its Board space. `--tabs` with `--space` exits 2 |
@@ -867,9 +868,84 @@ An answer from the phone follows these steps.
 
 The original `.excalidraw` file is never overwritten. The bundle's `board.excalidraw` holds the phone's version.
 
+## Moving off Agent Brief
+
+`hws migrate agent-brief` finds each part below. `docs/GUIDE.md` explains the move for people.
+
+| Part | Where | Present when |
+|---|---|---|
+| Plugin enabled | `<claude home>/settings.json` | `enabledPlugins["agent-brief@agent-brief"]` is true |
+| Plugin installed | `<claude home>/plugins/installed_plugins.json` | `plugins` holds `agent-brief@agent-brief` |
+| Plugin marketplace | `<claude home>/plugins/known_marketplaces.json` | It holds the key `agent-brief` |
+| Plugin cache | `<claude home>/plugins/cache/agent-brief` | The folder exists |
+| CLI link | `~/.local/bin/agent-brief` | Anything is there, even a broken link |
+| App | `/Applications/Agent Brief.app` | The bundle exists. It runs while `ps` lists `Agent Brief.app/Contents/MacOS/Agent Brief` |
+| Data, Old data | `~/Library/Application Support/Agent Brief` and `.../AgentBrief` | The folder exists. The report counts `boards/*.excalidraw` and `drafts/*.json` |
+| Preferences | `~/Library/Preferences/com.agentbrief.app.plist` | The file exists |
+| Cache | `~/Library/Caches/` `com.agentbrief.app`, `com.agentbrief.app.ShipIt` and `agent-brief-app-updater` | The folder exists |
+| Feedback inbox | `~/Downloads/feedback-inbox` | The folder exists |
+
+The Claude home is `CLAUDE_CONFIG_DIR` or `~/.claude`.
+
+The report also checks that Herdr Workspaces is ready.
+
+- `~/.local/bin/hws` exists.
+- `herdr-app --version` answers, or `/Applications/Herdr.app` exists.
+- Every `hws-*` mod in the checkout has a folder under `<HERDR_APP_HOME or ~/.config/herdr-app>/mods`.
+- `enabledPlugins["herdr-workspaces@herdr-workspaces"]` is true.
+
+### Stale instructions
+
+The scan reads these files and never changes them.
+
+- `<claude home>/CLAUDE.md`, `<claude home>/settings*.json`, and every file under `<claude home>/skills`, `agents` and `commands`
+- `CLAUDE.md`, `AGENTS.md` and every file under `.claude/` in each open workspace's folder, the remembered parent folder and each `--scan DIR`
+- Only `.md`, `.json`, `.sh`, `.mjs` and `.js` files under a folder. It skips `node_modules`, `.git`, `worktrees`, files over 1 MiB and this checkout. A folder whose `.claude` is the Claude home reads only the files in the first item
+
+| Reference | Replacement |
+|---|---|
+| `declare_output`, `agent-brief output` | `hws output add` |
+| `ask_questions` | `hws ask` |
+| `show_image`, `agent-brief show` | Name the file, or `hws review` an `.md` that embeds it |
+| `feedback_latest` | `hws review FILE` |
+| `agent-brief draw`, `read`, `png`, `snap`, `update`, `delete`, `boards`, `status` | `hws surface cli --type board -- VERB` |
+| `agent-brief outline`, `feedback`, `behavior` | `hws surface cli --type page -- VERB` |
+| `agent-brief note`, `agent-brief open --note` | A Markdown file and `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` |
+| `agent-brief open --output` | `hws review FILE` |
+| `agent-brief open` otherwise | `hws surface open --type board --terminal $HC_TERMINAL_ID` |
+| `agent-brief handoff` | `hws phone send` |
+| `agent-brief initiative`, `agent-brief open --initiative` | The workspace's current note and `herdr-workspaces:tidy` |
+| Any other `mcp__agent-brief__` tool | The matching `hws` command in `docs/GUIDE.md` |
+| `agent-brief@agent-brief` | `herdr-workspaces@herdr-workspaces` |
+| `Agent Brief`, case-sensitive | Herdr Workspaces, or delete the line |
+
+A verb matches only after `agent-brief` and a space, so a file name such as `agent-brief.md` never matches. Each finding is `{file,line,term,replacement}`, once per term on a line.
+
+### Import
+
+`--import` reads `boards/` and `drafts/` in both data folders before anything moves.
+
+- Each `boards/<name>.excalidraw` becomes a `board` artifact in the standalone store, titled `<name>`. Its bundle holds `board.excalidraw`, `comments.json` from `<name>.comments.json`, `notes.md` from `<name>.notes.md`, and a `prompt.md` that links them. `hws surface open --type board --artifact A --standalone` reopens it.
+- Each `drafts/<id>.json` with a non-empty `body` becomes a `file` artifact at `<standalone artifacts>/<slug of title>.md`. The title is the draft's `title`, else its first line with words, else its id. A titled draft gets a `# title` heading unless the body opens with one. Pasted pictures go inline as data URLs.
+- Each record carries `importedFrom`, the source path. A source that any manifest or retired record already names is skipped, so a second import adds nothing.
+- An invalid scene, an unreadable draft and an empty draft are skipped with a reason. An outline draft is empty, because its text lives in its outline file.
+- `createdAt` is the board file's modified time, or the draft's own `createdAt`.
+
+### Apply
+
+`--apply` runs these steps in order and prints each one.
+
+1. While the app runs, it asks it once to quit with `osascript -e 'tell application "Agent Brief" to quit'` and waits up to 10 seconds. If the app still runs, the command exits 1 and changes nothing.
+2. `--import`, when given.
+3. `claude plugin uninstall agent-brief@agent-brief` when the plugin is enabled or installed, and `claude plugin marketplace remove agent-brief` when the marketplace is known. A failure or a missing `claude` is printed, and the rest still runs.
+4. The `agent-brief` link goes when it is a symlink whose target holds `Agent Brief.app` or `agent-brief`. Any other file there stays, and the output says so.
+5. The app, both data folders, the preferences, the caches, the plugin cache and the feedback inbox go to the Trash in one call. A data folder that held boards or drafts names how many, and says `--import` would have kept them when it did not run.
+
+The command exits 1 when any step failed. The report printed afterwards shows what is left. Stale instructions stay for the person to edit.
+
 ## External commands
 
-Binaries resolve from `HWS_HERDR_APP`, default `herdr-app`, and `HWS_HC`, default `hc`. `HWS_CLAUDE`, `HWS_GIO` and `HWS_CHECKOUT` override `claude`, `gio` and the checkout that `hws doctor` inspects. `HWS_PLATFORM` overrides the platform the plugin hooks see. Tests point these at fakes.
+Binaries resolve from `HWS_HERDR_APP`, default `herdr-app`, and `HWS_HC`, default `hc`. `HWS_CLAUDE`, `HWS_GIO` and `HWS_CHECKOUT` override `claude`, `gio` and the checkout that `hws doctor` inspects. `HWS_PLATFORM` overrides the platform the plugin hooks see. `HWS_TRASH` and `HWS_OSASCRIPT` override `/usr/bin/trash` and `/usr/bin/osascript`. `HWS_PS` overrides `/bin/ps`, `HWS_APPLICATIONS` overrides `/Applications`, and `HWS_QUIT_WAIT_MS` shortens the wait for Agent Brief to quit. Tests point these at fakes.
 
 macOS trashes with `/usr/bin/trash` or Finder. Linux trashes with `gio trash`. A failed trash stops the command and leaves the files in place.
 

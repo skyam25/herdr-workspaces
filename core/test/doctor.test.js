@@ -241,3 +241,21 @@ test('no answer from GitHub skips the update check and passes', (t) => {
   assert.equal(report.code, 0);
   assert.match(updates(report).detail, /not checked/);
 });
+
+test('Agent Brief left on the Mac gets a note that names the migration', (t) => {
+  const box = sandbox(t);
+  const { env } = installed(box);
+  const clean = run(box, env).checks.find((check) => check.name === 'Agent Brief');
+  assert.deepEqual([clean.ok, clean.note, clean.detail], [true, undefined, 'not installed']);
+
+  write(join(box.homeDir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'agent-brief@agent-brief': true } }));
+  write(join(box.dir, 'Applications/Agent Brief.app/Contents/MacOS/Agent Brief'));
+  symlinkSync('/nowhere/agent-brief', join(box.homeDir, '.local/bin/agent-brief'));
+  const report = run(box, env);
+  const check = report.checks.find((item) => item.name === 'Agent Brief');
+  assert.equal(report.ok, true);
+  assert.equal(check.note, true);
+  assert.equal(check.detail, 'the plugin is enabled, the agent-brief CLI link exists and the app is installed, and its instructions conflict with Herdr Workspaces');
+  assert.equal(check.fix, 'Run hws migrate agent-brief');
+  assert.match(box.hws(['doctor'], env).stdout, /note\s+Agent Brief\s+.*\n\s+Run hws migrate agent-brief/);
+});
