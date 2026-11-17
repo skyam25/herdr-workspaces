@@ -1,14 +1,19 @@
+import { useEffect, useRef } from 'react';
 import type { Answers, Question } from '../shared/questions';
 import { answeredCount, choose, clearAnswer, isAnswered, openOther, typeOther } from '../shared/questions';
+import { claimFooter } from './footer-send';
 
 const OTHER = '__other__';
 
-/** A round from `hws ask`: each question with its answer control. Done sits in the composer below. */
-export function QuestionsView(props: { questions: Question[]; answers: Answers; onChange: (answers: Answers) => void }) {
+/** A round from `hws ask`: each question with its answer control. It claims Done, which sits in the composer below. */
+export function QuestionsView(props: { questions: Question[]; answers: Answers; onChange: (answers: Answers) => void; onSend: () => void; onBlur: () => void }) {
   const { questions, answers } = props;
   const answered = answeredCount(questions, answers);
+  const sendRef = useRef(props.onSend);
+  sendRef.current = props.onSend;
+  useEffect(() => claimFooter({ holds: 'answers', count: answered, send: () => sendRef.current() }), [answered]);
   return (
-    <div className="questions" data-testid="questions">
+    <div className="questions" onBlur={props.onBlur} data-testid="questions">
       <div className="questions-column">
         <p className="questions-lead muted" data-testid="questions-count">
           {answered === 0 ? `${questions.length} ${questions.length === 1 ? 'question' : 'questions'} from the agent` : `${answered} of ${questions.length} answered`}

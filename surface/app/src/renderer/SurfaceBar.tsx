@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SurfaceAction, SurfaceState, SurfaceTargets } from '../shared/ipc';
+import type { FooterClaim } from './footer-send';
 import { usePointerOutside } from './hooks';
 import { ChevronIcon, FolderIcon, InboxIcon, PopInIcon, PopOutIcon } from './Icons';
 
@@ -117,11 +118,15 @@ export function SurfacePlace(props: {
   );
 }
 
-/** Done's label, with the count when a Feedback view's decisions ride on it. */
-export const doneLabel = (decisions?: number) => (decisions ? `Done · ${decisions} decision${decisions === 1 ? '' : 's'}` : 'Done');
+/** Done's label, with the count of what a view's claim sends on it. */
+export function doneLabel(claim?: Pick<FooterClaim, 'holds' | 'count'>): string {
+  if (!claim?.count) return 'Done';
+  const noun = claim.holds === 'decisions' ? 'decision' : 'answer';
+  return `Done · ${claim.count} ${noun}${claim.count === 1 ? '' : 's'}`;
+}
 
 /** The composer's right end on a surface: the mic, then Done, or Open terminal and Copy link when no terminal waits. */
-export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; decisions?: number; onDone: () => void; onAct: (action: SurfaceAction) => void }) {
+export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; claim?: FooterClaim; onDone: () => void; onAct: (action: SurfaceAction) => void }) {
   const { surface } = props;
   const blocked = !!surface.busy || !!surface.delivered;
   return (
@@ -143,7 +148,7 @@ export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; deci
         </>
       ) : (
         <button className="primary send-named" disabled={blocked} title="Hand this to the terminal that opened it (⌘↩)" onClick={props.onDone} data-testid="surface-done">
-          {doneLabel(props.decisions)}
+          {doneLabel(props.claim)}
         </button>
       )}
     </div>

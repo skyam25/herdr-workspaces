@@ -38,7 +38,7 @@ import {
 } from '../src/protocol';
 import { BOARD_PNG_KEEP, feedbackDir, trimPngs } from '../src/server/feedback-dir';
 import { formatBoards, formatElement, formatRead, formatSessions, formatStatus } from './format';
-import { cliFor, SURFACE_CWD_ENV, surfaceRefusal, type Cli } from './command';
+import { cliFor, SESSION_FOLDER_ENV, surfaceRefusal, type Cli } from './command';
 import { COMMAND_NAMES, commandHelp, topHelp } from './help';
 import { apply, FORCE_VAR, isOn, shellFiles } from './herdr';
 import { ApiError, call, callJson, NotRunningError } from './http';
@@ -299,7 +299,7 @@ const allInitiatives = (ctx: Ctx) => initiativeRead<InitiativeSummary[]>(ctx, '/
 async function initiativeNamed(ctx: Ctx, key: string): Promise<InitiativeSummary> {
   if (!key.trim()) throw new UsageError('name an initiative by its id or title');
   const found = resolveInitiative(await allInitiatives(ctx), key);
-  if (!found) throw new ApiError('not_found', `no initiative matches "${key}". Run "${ctx.cli.line('initiative list')}".`);
+  if (!found) throw new ApiError('not_found', `no initiative matches "${key}". Run "agent-brief initiative list".`);
   return found;
 }
 
@@ -346,10 +346,12 @@ async function followBoard(ctx: Ctx): Promise<void> {
   await callJson<OpenResponse>(ctx.socket, 'POST', '/open', body).catch(() => undefined);
 }
 
-/** A path as the session's project names it. Relative paths count from the shell's folder. */
+/**
+ * A path as the session's project names it. A relative path counts from the shell's folder. Both
+ * sides resolve to real paths, so a symlinked folder still matches. A path outside `root` exits 2.
+ */
 function projectPath(ctx: Ctx, root: string, file: string): string {
-  const full = path.resolve(cwdOf(ctx), file);
-  const rel = path.relative(root, full);
+  const rel = path.relative(realPathOf(root), realPathOf(path.resolve(cwdOf(ctx), file)));
   if (rel === '' || rel === '..' || rel.startsWith('../') || path.isAbsolute(rel)) {
     throw new UsageError(`${file} is outside the session's project, ${root}`);
   }
@@ -367,22 +369,22 @@ function realPathOf(full: string): string {
   return path.join(realpathSync(at), ...rest);
 }
 
-/**
- * An absolute path becomes relative to the session's folder, which a surface's stand-in session
- * may not share with the shell. Under `hws surface cli` a relative path counts from the shell's
- * folder first. Otherwise it is already project-relative and passes as it is.
- */
-async function sessionRelative(ctx: Ctx, raw: string, verb: string): Promise<string> {
-  const shell = ctx.io.env[SURFACE_CWD_ENV];
-  if (!path.isAbsolute(raw) && !shell) return raw;
-  const full = path.resolve(shell ?? '', raw);
+/** The session's folder: `HWS_SESSION_FOLDER` when `hws` names it, else the app's record of the session. */
+async function sessionFolder(ctx: Ctx, verb: string): Promise<string> {
+  const named = ctx.io.env[SESSION_FOLDER_ENV];
+  if (named) return named;
   const session = requireSession(ctx, verb);
-  const { cwd } = await callJson<SessionInfo>(ctx.socket, 'GET', `/sessions/${encodeURIComponent(session)}`);
-  const rel = path.relative(realPathOf(cwd), realPathOf(full));
-  if (rel === '' || rel === '..' || rel.startsWith('../') || path.isAbsolute(rel)) {
-    throw new UsageError(`${raw} is outside the session's project, ${cwd}`);
-  }
-  return rel;
+  return (await callJson<SessionInfo>(ctx.socket, 'GET', `/sessions/${encodeURIComponent(session)}`)).cwd;
+}
+
+/**
+ * The project path a session verb sends. A surface's stand-in session may not share the shell's
+ * folder, so under a surface every path goes through `projectPath`. Elsewhere only an absolute
+ * path does, and a relative one is already project-relative.
+ */
+async function sessionPath(ctx: Ctx, raw: string, verb: string): Promise<string> {
+  if (!path.isAbsolute(raw) && !ctx.cli.surface) return raw;
+  return projectPath(ctx, await sessionFolder(ctx, verb), raw);
 }
 
 /** `Claude · <session>` from Claude Code's shell, else `PM`. */
@@ -411,7 +413,7 @@ const INITIATIVE_VERBS: Record<string, (ctx: Ctx, words: string[]) => Promise<vo
     const q = words.join(' ').trim();
     if (!q) throw new UsageError('find needs words to match');
     const res = await initiativeRead(ctx, `/initiatives/find?q=${encodeURIComponent(q)}`, (s) => s.find(q));
-    show(ctx, res, (l) => formatSummaries(l, `no match. Run "${ctx.cli.line('initiative list')}" to see them all.`));
+    show(ctx, res, (l) => formatSummaries(l, `no match. Run "agent-brief initiative list" to see them all.`));
   },
 
   async show(ctx, words) {
@@ -451,7 +453,7 @@ const INITIATIVE_VERBS: Record<string, (ctx: Ctx, words: string[]) => Promise<vo
     const { id } = await initiativeNamed(ctx, words.join(' '));
     const patch = await readJsonObject(ctx);
     if (!Number.isInteger(patch.revision)) {
-      throw new InputError(`the JSON needs "revision", the one you read. "${ctx.cli.line('initiative show')}" prints it.`);
+      throw new InputError(`the JSON needs "revision", the one you read. "agent-brief initiative show" prints it.`);
     }
     const body = { updatedBy: initiativeAuthor(ctx), ...patch } as InitiativeUpdateRequest;
     const res = await callJson<Initiative>(ctx.socket, 'PUT', `/initiatives/${encodeURIComponent(id)}`, body);
@@ -713,7 +715,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     if (id !== undefined) {
       if (str(ctx.args, 'session') !== undefined) throw new UsageError('--id keeps the note where it is filed, so it takes no --session');
       const res = await callJson<NoteResponse>(ctx.socket, 'POST', '/notes', { text, ...(title ? { title } : {}), draftId: id });
-      show(ctx, res, () => `Updated note ${res.draftId} in place in Agent Brief.\nTo show it, run: ${ctx.cli.line(`open --note ${res.draftId}`)}`);
+      show(ctx, res, () => `Updated note ${res.draftId} in place in Agent Brief.\nTo show it, run: agent-brief open --note ${res.draftId}`);
       return;
     }
     const flag = str(ctx.args, 'session');
@@ -734,8 +736,8 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     const where = filed ? "this session's tab" : 'Notes';
     show(ctx, { ...res, ...(filed ? { sessionId: filed } : {}) }, () =>
       `Saved "${title || 'Untitled note'}" to ${where} in Agent Brief, Write mode. The user can edit it there and press Copy.\n` +
-      `To show it, run: ${ctx.cli.line(`open --note ${res.draftId}`)}\n` +
-      `To change it later, run: ${ctx.cli.line(`note --id ${res.draftId}`)} with the full new text`,
+      `To show it, run: agent-brief open --note ${res.draftId}\n` +
+      `To change it later, run: agent-brief note --id ${res.draftId} with the full new text`,
     );
   },
 
@@ -802,7 +804,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
   async initiative(ctx) {
     const [verb, ...words] = ctx.positional;
     const run = verb ? INITIATIVE_VERBS[verb] : undefined;
-    if (!run) throw new UsageError(`initiative takes ${Object.keys(INITIATIVE_VERBS).join(', ')}. Run "${ctx.cli.line('initiative --help')}".`);
+    if (!run) throw new UsageError(`initiative takes ${Object.keys(INITIATIVE_VERBS).join(', ')}. Run "agent-brief initiative --help".`);
     await run(ctx, words);
   },
 
@@ -810,7 +812,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     const [verb, html] = ctx.positional;
     if (!['show', 'update', 'export'].includes(verb) || !html) throw new UsageError('behavior needs show|update|export and a project-relative HTML path');
     const session = requireSession(ctx, 'behavior');
-    const file = await sessionRelative(ctx, html, 'behavior');
+    const file = await sessionPath(ctx, html, 'behavior');
     const route = `/sessions/${encodeURIComponent(session)}/behavior?path=${encodeURIComponent(file)}`;
     const doc = await callJson<BehaviorDocument>(ctx.socket, verb === 'update' ? 'PUT' : 'GET', route, verb === 'update' ? await readInput(ctx) : undefined);
     if (verb === 'export') {
@@ -836,7 +838,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     const run = verb ? FEEDBACK_VERBS[verb] : undefined;
     if (!run) throw new UsageError(`feedback takes list, graph, ${Object.keys(FEEDBACK_VERBS).join(', ')}. Run "${ctx.cli.line('feedback --help')}".`);
     if (!output) throw new UsageError(`feedback ${verb} needs a project-relative output path`);
-    await run(ctx, await sessionRelative(ctx, output, 'feedback'), words);
+    await run(ctx, await sessionPath(ctx, output, 'feedback'), words);
   },
 
   async outline(ctx) {
@@ -846,7 +848,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
       flag: (name) => str(ctx.args, name),
       has: (name) => ctx.args.flags.has(name),
       session: sessionOf(ctx),
-      relative: (raw) => sessionRelative(ctx, raw, 'outline'),
+      relative: (raw) => sessionPath(ctx, raw, 'outline'),
       cwd: cwdOf(ctx),
       stdin: ctx.io.stdin,
       out: ctx.out,
@@ -904,7 +906,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     // A dev server's address goes as it is. The app opens it in the review pane.
     const link = output !== undefined && /^https?:\/\//i.test(output);
     if (link && feedback) throw new UsageError('--feedback needs a project file, not a link');
-    if (output !== undefined) body.output = { path: link ? output : projectPath(ctx, session!.cwd!, output), ...(feedback ? { tab: 'feedback' } : {}) };
+    if (output !== undefined) body.output = { path: link ? output : projectPath(ctx, ctx.io.env[SESSION_FOLDER_ENV] || session!.cwd!, output), ...(feedback ? { tab: 'feedback' } : {}) };
 
     // A bare open shows what the session last had open, never a new board.
     if (session && output === undefined && !named && !board && !layout) body.reopen = true;

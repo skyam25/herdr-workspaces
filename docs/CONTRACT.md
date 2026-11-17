@@ -271,7 +271,16 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | Note with no file | Asks the agent to write the revised text to a Markdown file and open it with `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` |
 | Behavior decisions | Names `hws surface cli --type page -- behavior` |
 | File with an outline | Names `(outline-first)` and `hws surface cli --type page -- outline apply`, and says the person accepts the direction in Herdr |
-| Feedback decisions | Starts with `@<output>.feedback.md`, then `Feedback decisions on F from Herdr, ...`, and names `hws surface cli --type page -- feedback done`. Done sends it while the Feedback view shows unsent decisions, and then reads `Done · N decisions` |
+| Feedback decisions | Starts with `@<output>.feedback.md`, then `Feedback decisions on F from Herdr, ...`, and names `hws surface cli --type page -- feedback done`. Done sends it while the Feedback view shows unsent decisions, and then reads `Done · N decisions`. See [Done claims](#done-claims) |
+
+### Done claims
+
+A view on show can claim Done, so Done sends what that view holds. Outside a surface, a Feedback view's claim turns Send into Send decisions. The newest claim wins, and `surface/app/src/renderer/footer-send.ts` holds them.
+
+| View | Claims Done | Label |
+|---|---|---|
+| Feedback | While it holds unsent decisions and its session can take them | `Done · N decisions` |
+| Questions | Always, so Done with nothing answered can say so | `Done · N answers`, or `Done` before the first answer |
 
 ### Feedback rounds
 
@@ -293,11 +302,11 @@ A page that shows a file is a round of feedback on that file. Tidy reviews are t
 |---|---|
 | Round | `[{id, text, kind, options?}]`, or `{questions: [...]}`, with 1 to 8 questions. `id` is unique and `text` is the question. `kind` is `options` (buttons), `select` (a dropdown) or `text` (a free answer). `options` lists 2 to 4 distinct choices for `options` and 2 to 6 for `select`, and a `text` question takes none. Strings are trimmed |
 | Other | Each `options` and `select` question ends with Other…, which opens a field for the person's own words |
-| Data folder | `hws` writes `questions.json` as `{questions}` and an empty `answers.json` before the host starts. The host rewrites `answers.json` as `{answers: {<id>: {answer, other?}}}` on each change |
+| Data folder | `hws` writes `questions.json` as `{questions}` and an empty `answers.json` before the host starts. The host rewrites `answers.json` whole as `{answers: {<id>: {answer, other?}}}`. The page sends a change at most every 300 ms while the person types, and at once when a field loses focus or Done is pressed |
 | One per terminal | A terminal's rounds share one surface id per workspace. A new round ends the open one, keeps its answered questions that the new round does not ask again, and puts them first |
 | Eight at most | The new questions always stay. Kept answers fill the room left up to 8, newest first, and `dropped` counts the older ones that left |
 | Failed open | A round that fails to open exits 1 and leaves the earlier round's record, questions and answers as they were, so the next `hws ask` still keeps them |
-| Done | Refused with `Answer a question first, then press Done.` until one question has an answer. Then delivers the prompt below and closes the pane, as other surfaces do |
+| Done | Refused with `Answer a question first, then press Done.` until one question has an answer. Then delivers the prompt below and closes the pane, as other surfaces do. Done reads `Done · N answers` once N questions have one |
 | Record | `type: questions`, `role: answers`, titled as the surface |
 | Draft | A closed window with an answer stays a draft. One with none goes at the next prune |
 
@@ -321,10 +330,10 @@ Answers to your questions:
 | Terminal | `--terminal T`, default `$HC_TERMINAL_ID`, or `--standalone`. Neither exits 2, so no terminal is guessed |
 | Superseded A | Opens the newest artifact down A's `supersedes` chain that is not itself superseded, and the text's first line says `A is superseded, so this opens its newest version B`. The surface records `reopens: B` and `--json` adds `newestOf: A`. A with no such version in its workspace opens itself |
 | One surface | A's surface id comes from its artifact id, and F's from its path. A surface whose `reopens` is A counts as A's too. An open one gets the focus or is raised, and a closed draft starts again on its own edits |
-| Seed | Otherwise `hws` copies the drawing to `<data folder>/seed/board.excalidraw`, with `comments.json`, `comments.md` and `notes.md` from A's bundle when they exist. The host loads the seed into its board on start, deletes it and writes `<data folder>/seeded.json` as `{board, elements, comments}`. `elements` lists each live element as `id:version`, sorted, with a missing version read as 1, and `comments` is what it saved, or null. The source is only read |
+| Seed | Otherwise `hws` copies the drawing to `<data folder>/seed/board.excalidraw`, with `comments.json`, `comments.md` and `notes.md` from A's bundle when they exist. The host loads the seed into its board on start, deletes it and writes `<data folder>/seeded.json` as `{board, elements, comments}`. `elements` lists each live element as `id:version`, sorted, with a missing version read as 1, and `comments` is what it saved, or null. The host deletes `seeded.json` at the first save of that board whose elements or comments differ from it. The source is only read |
 | Comments | From `comments.json`, which a sketch's Done bundle writes beside `comments.md`, else read back from `comments.md` |
 | Done | Delivers and files a new bundle as any board does. The new artifact gets `supersedes: A`, A becomes `superseded`, and the surface's `reopens` moves to the new id, so a second press replaces the first. An A no longer in the surface's workspace gives `supersedes: null` and changes nothing |
-| Close early | The window stays as a draft when its drawing or comments differ from `seeded.json`. A board still as seeded is no work, so the window goes at the next prune like an empty one |
+| Close early | While `seeded.json` exists, `hws` counts its board's drawing and comments as no work, so the window goes at the next prune like an empty one. Once the host has deleted it, the window stays as a draft |
 
 The board takes its name from the title, with characters other than letters, digits, spaces, dots, dashes and underscores turned into spaces.
 
@@ -639,6 +648,10 @@ The host registers a stand-in session `surface-<surface id>` on the surface sock
 | File inside `HWS_FOLDER`, which is not the home folder, on a path with no dot folder | `HWS_FOLDER` |
 | Any other file | The file's folder |
 
+The host takes the session folder from `HWS_SESSION_FOLDER` when it is set and not empty, and works it out from the table above otherwise.
+
+The first page to load opens the surface's file with `POST /open`. The host's state then names the file as `/open` did, so a later page, such as a reload or a second web view, opens it itself.
+
 ## Surface CLI
 
 `hws surface cli [--terminal T] [--title X] [--type K] -- VERB [ARGS...]` runs `surface/app/bin/agent-brief.mjs`, the surface's copy of the Agent Brief CLI, with Node. `HWS_SURFACE_CLI` names another script, for tests.
@@ -646,10 +659,10 @@ The host registers a stand-in session `surface-<surface id>` on the surface sock
 | Item | Behaviour |
 |---|---|
 | Surface | The newest surface of T, default `$HC_TERMINAL_ID`, whose title is X and type is K when given, whose window is open or which has a pane, and whose socket exists |
-| Environment | `COMPANION_SOCKET` is the surface socket and `CLAUDE_CODE_SESSION_ID` is `surface-<id>`, so session verbs act on the surface's stand-in session. `HWS_SURFACE_CLI_CWD` is the folder `hws` ran in |
+| Environment | `COMPANION_SOCKET` is the surface socket and `CLAUDE_CODE_SESSION_ID` is `surface-<id>`, so session verbs act on the surface's stand-in session. `HWS_SURFACE_CLI_CWD` marks a run under a surface, and only its presence counts. `HWS_SESSION_FOLDER` names the surface's session folder, or is empty for a surface with no file |
 | Pass-through | Everything after `--` reaches the CLI unchanged, `--json` and `--help` included. stdin, stdout, stderr and the exit code are the CLI's own |
 | Failures | No `--`, no verb or a bad flag exits 2. No matching open surface, or no built CLI, exits 1 with the reason |
-| Paths | The paths `outline`, `feedback` and `behavior` send to the app count from `HWS_SURFACE_CLI_CWD`, as the shell names them. That covers outline paths, `--path`, `--target`, feedback outputs and behavior prototypes. Each is then made relative to the [session folder](#host-environment), and one outside it exits 2. Files the CLI reads itself, such as `--ops`, `--items` and `--file`, count from the current folder. Without `HWS_SURFACE_CLI_CWD` a relative path passes as it is |
+| Paths | The paths `outline`, `feedback` and `behavior` send to the app count from the current folder, which is the one `hws` ran in. That covers outline paths, `--path`, `--target`, feedback outputs and behavior prototypes. Each is then made relative to the [session folder](#host-environment), taken from `HWS_SESSION_FOLDER`, else from the app's record of the session, and one outside it exits 2. Both sides resolve symlinks first. Files the CLI reads itself, such as `--ops`, `--items` and `--file`, count from the current folder too. Without `HWS_SURFACE_CLI_CWD` a relative path passes as it is |
 | Text | With `HWS_SURFACE_CLI_CWD` set, help, hints and errors name `hws surface cli -- VERB`, with `--type board` before `--` for board verbs and `--type page` for `outline`, `feedback` and `behavior`. `surface/app/cli/command.ts` builds each line. A closed socket exits 3 with `The surface is not running.`, `hws surface list` and `hws surface resume --id S`. `status` prints `Surface running`. Without it the CLI names `agent-brief` and Agent Brief |
 
 | Verbs | Surface | State |
@@ -724,7 +737,7 @@ Herdr resends a pane's whole image for each change to the page, so a surface in 
 
 `hws surface open` shows a board or a note in an ordinary window that other windows can cover, and a page too with `--window`. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The window draws the page directly, with no Pixel stream. The surface record has `pane: null`, `host`, that terminal's address, and `file` when the surface shows one.
 
-Closing the window quits the host. A closed window with a drawing, comments, a note or an answer stays in the manifest as a draft, with its data folder. A reopened sketch's drawing and comments count only when they differ from its seed. Prune drops a closed window with no work. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host and moves drafts to the Trash.
+Closing the window quits the host. A closed window with a drawing, comments, a note or an answer stays in the manifest as a draft, with its data folder. A reopened sketch's drawing and comments count only once the host has deleted `seeded.json`. Prune drops a closed window with no work. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host and moves drafts to the Trash.
 
 A running host raises its window on `POST /open`. The Window menu's Keep on Top floats it on request.
 

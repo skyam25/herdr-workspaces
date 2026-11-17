@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import type { SessionsResponse } from '../protocol';
 import type { Launcher, LaunchOptions } from '../shared/ipc';
 import type { SessionInfo } from '../protocol';
-import type { DecisionsClaim } from './decisions-send';
+import type { FooterClaim } from './footer-send';
 import { activeAgo, folderName, hostLabel, hueOf, shortFolder } from '../shared/sessions';
 import { CheckIcon, ChevronIcon, IpadIcon, TerminalIcon } from './Icons';
 import { usePointerOutside } from './hooks';
@@ -43,7 +43,7 @@ export function SendTo(props: {
   /** Sits before the chip and Send, set apart by a divider. */
   mic?: ReactNode;
   /** A Feedback view's decisions, which Send hands its own session in place of the chooser. */
-  decisions?: DecisionsClaim;
+  decisions?: FooterClaim;
   /** Set while the board can go to a paired iPad. Without a session, it asks the chooser for one. */
   onIpad?: (sessionId: string | undefined) => void;
   /** The chooser is picking a session for the iPad, so it offers only running sessions. */

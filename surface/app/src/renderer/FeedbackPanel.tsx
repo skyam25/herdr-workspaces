@@ -14,7 +14,7 @@ import { decisionsPrompt, pendingDecisions, receiptBatches, type PendingDecision
 import { workspaceSummary } from '../shared/feedback-workspace';
 import { concerns, type CompanionApi } from '../shared/ipc';
 import { BeforeAfter, type PictureHost } from './BeforeAfter';
-import { claimDecisions } from './decisions-send';
+import { claimFooter } from './footer-send';
 import { acceptLabel, decisionText, historyLines, inOpenFilter, isClosed, latestSaid, markSeen, needsLook, seenCount, sourceTime, updatedSince, type FeedbackFilter } from './feedback-cards';
 import { FeedbackGraph } from './FeedbackGraph';
 import { ExternalIcon, LinkIcon, MicIcon, ReloadIcon } from './Icons';
@@ -308,7 +308,7 @@ export function FeedbackPanel(props: {
   sendRef.current = send;
   const blocked = readOnly ? 'This feedback is read-only, since its output is gone.' : !props.canSend ? 'This session has ended. Resume it to send.' : undefined;
   const yieldSend = !!props.yieldSend;
-  useEffect(() => (yieldSend ? undefined : claimDecisions({ count: waiting, blocked, send: () => sendRef.current() })), [waiting, blocked, yieldSend]);
+  useEffect(() => (yieldSend ? undefined : claimFooter({ holds: 'decisions', count: waiting, blocked, send: () => sendRef.current() })), [waiting, blocked, yieldSend]);
 
   const rounds = [...(doc?.rounds ?? [])].sort((a, b) => b.n - a.n);
   const known = new Set(rounds.map((r) => r.n));

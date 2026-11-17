@@ -54,8 +54,14 @@ describe('absolute paths on session verbs', () => {
 });
 
 describe('relative paths under hws surface cli', () => {
-  /** The shell sits one folder above the session's project, as `hws review project/x` leaves it. */
-  const shell = () => ({ ...SESSION, HWS_SURFACE_CLI_CWD: app.dir });
+  /** The shell, the CLI's own folder, sits one folder above the session's project, as `hws review project/x` leaves it. */
+  const shell = () => ({ ...SESSION, HWS_SURFACE_CLI_CWD: '1' });
+
+  it('takes the session folder from HWS_SESSION_FOLDER, with no session lookup', async () => {
+    const root = project();
+    await run(['outline', 'show', 'project/docs/memo.outline.md'], '', { ...shell(), HWS_SESSION_FOLDER: root });
+    expect(routes()).toEqual(['/sessions/surface-s1/outline?path=docs/memo.outline.md']);
+  });
 
   it('counts an outline path and --target from the shell folder', async () => {
     project();
