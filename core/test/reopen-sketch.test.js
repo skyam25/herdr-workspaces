@@ -174,14 +174,17 @@ test('a reopened sketch closed without edits goes at prune, and an edited one st
   assert.deepEqual(listed(), []);
   assert.deepEqual(box.manifest(manifest.id).surfaces, []);
 
+  // The host deletes seeded.json at the first save that changes the drawing or its comments.
   const moved = openSeeded();
   writeFileSync(join(moved.data, 'boards', 'flow.excalidraw'), scene([{ id: 'r2', version: 5 }, { id: 'r1' }]));
+  rmSync(join(moved.data, 'seeded.json'));
   box.json(['prune']);
   assert.deepEqual(listed(), [moved.surface.id]);
   box.json(['surface', 'discard', '--id', moved.surface.id]);
 
   const commented = openSeeded();
   writeFileSync(join(commented.data, 'boards', 'flow.comments.json'), JSON.stringify({ overall: 'Tighter.', pins: [pin] }));
+  rmSync(join(commented.data, 'seeded.json'));
   box.json(['prune']);
   assert.deepEqual(listed(), [commented.surface.id]);
 });

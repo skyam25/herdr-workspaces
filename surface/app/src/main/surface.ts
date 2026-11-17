@@ -18,7 +18,9 @@ import type { SurfaceAction, SurfaceState, SurfaceTargets, SurfaceType } from '.
 import { isLocalUrl } from '../shared/outputs';
 import { ANSWERS_FILE, QUESTIONS_FILE, readAnswers, readQuestions, type Answers } from '../shared/questions';
 import { portablePrompt } from '../shared/sessions';
+import { writeAtomic } from './files';
 import type { HandedDraft } from './sender';
+import { nameFrom } from './store';
 
 export interface SurfaceConfig {
   id: string;
@@ -37,6 +39,8 @@ export interface SurfaceConfig {
   web?: boolean;
   /** The workspace that holds the surface. An empty name means Unfiled. */
   workspace?: { id: string; name: string };
+  /** The stand-in session's folder, as `hws` names it. Unset leaves `sessionCwd` to work it out. */
+  sessionFolder?: string;
 }
 
 /** The surface this process hosts, or undefined when it runs as the plain app. */
@@ -60,24 +64,30 @@ export function surfaceFromEnv(env: NodeJS.ProcessEnv): SurfaceConfig | undefine
     shown: env.HWS_SURFACE_WINDOW === '1' ? 'window' : 'pane',
     ...(env.HWS_SURFACE_WEB === '1' ? { web: true } : {}),
     ...(env.HWS_WORKSPACE_ID ? { workspace: { id: env.HWS_WORKSPACE_ID, name: env.HWS_WORKSPACE_NAME ?? '' } } : {}),
+    ...(env.HWS_SESSION_FOLDER ? { sessionFolder: env.HWS_SESSION_FOLDER } : {}),
   };
 }
 
 const inside = (root: string, target: string) => target === root || target.startsWith(root + sep);
+
+/** The real path, so a symlinked folder and its target compare equal. A missing path stays as it is. */
+const realOrSame = (path: string) => (existsSync(path) ? realpathSync(path) : path);
 
 /** True when a path under the folder passes through a dot folder, which feedback, behavior and outline stores refuse. */
 const throughDotFolder = (folder: string, file: string) => relative(folder, file).split(sep).some((part) => part.startsWith('.'));
 
 /**
  * The stand-in session's folder. The app only opens files inside its session's folder, and writes
- * the bundle there. A file under the workspace keeps its workspace-relative path in the prompt,
- * unless that path crosses a dot folder such as `.herdr-workspace`.
+ * the bundle there. `hws` names it in `HWS_SESSION_FOLDER`. Without that, a file under the workspace
+ * keeps its workspace-relative path in the prompt, unless that path crosses a dot folder such as
+ * `.herdr-workspace`.
  */
 export function sessionCwd(cfg: SurfaceConfig): string {
+  if (cfg.sessionFolder) return realOrSame(cfg.sessionFolder);
   const work = join(cfg.dataDir, 'work');
   if (!cfg.file || isLocalUrl(cfg.file) || !isAbsolute(cfg.file)) return work;
-  const file = existsSync(cfg.file) ? realpathSync(cfg.file) : cfg.file;
-  const folder = existsSync(cfg.folder) ? realpathSync(cfg.folder) : cfg.folder;
+  const file = realOrSame(cfg.file);
+  const folder = realOrSame(cfg.folder);
   return inside(folder, file) && folder !== homedir() && !throughDotFolder(folder, file) ? folder : dirname(file);
 }
 
@@ -85,8 +95,7 @@ export function sessionCwd(cfg: SurfaceConfig): string {
 export function openRequest(cfg: SurfaceConfig, sessionId: string, cwd: string): OpenRequest {
   if (cfg.file) {
     if (isLocalUrl(cfg.file)) return { sessionId, output: { path: cfg.file } };
-    const file = existsSync(cfg.file) ? realpathSync(cfg.file) : cfg.file;
-    return { sessionId, output: { path: relative(cwd, file) } };
+    return { sessionId, output: { path: relative(cwd, realOrSame(cfg.file)) } };
   }
   if (cfg.type === 'note') return { sessionId, mode: 'write' };
   if (cfg.type === 'page') return { sessionId, prompt: 'This page has no file to show.' };
@@ -96,17 +105,9 @@ export function openRequest(cfg: SurfaceConfig, sessionId: string, cwd: string):
   return { sessionId, board: boardName(cfg.title) };
 }
 
-/**
- * The board a sketch's title names. A board name is a file name, so other characters become spaces.
- * A title that is already a valid name stays as it is.
- */
+/** The board a sketch's title names. A title that is already a valid name stays as it is. */
 export function boardName(title: string): string {
-  const name = title
-    .replace(/[^\w .-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/^[ .-]+/, '')
-    .slice(0, 64)
-    .trim();
+  const name = nameFrom(title);
   return !name || name === CURRENT_BOARD ? 'Sketch' : name;
 }
 
@@ -122,6 +123,14 @@ export interface SeedStore {
 
 const readIfThere = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : undefined);
 
+/** A JSON file's value, or undefined when it is absent or does not parse. */
+const readJson = (path: string): unknown => {
+  const text = readIfThere(path);
+  return text === undefined ? undefined : parseJson(text);
+};
+
+const EMPTY_COMMENTS: BoardComments = { overall: '', pins: [] };
+
 /** The seed's comments, from comments.json when the bundle has it, else from comments.md. */
 function seedComments(dir: string): BoardComments | undefined {
   const json = readIfThere(join(dir, 'comments.json'));
@@ -132,21 +141,18 @@ function seedComments(dir: string): BoardComments | undefined {
 
 /**
  * What a seed put on its board: the board's name, each live element as `id:version`, and the comments as saved.
- * `hws` compares the board with it, so a reopened sketch closed without edits leaves no draft.
+ * The host deletes it at the first save that changes either, so while it exists `hws` counts the board as unedited.
  */
 export const SEEDED_FILE = 'seeded.json';
 
-export interface Seeded {
+interface Seeded {
   board: string;
   elements: string[];
   comments: BoardComments | null;
 }
 
-/**
- * Each live element as `id:version`, sorted. An edit raises an element's version, and Excalidraw
- * reads a missing version as 1. `core/surface-windows.js` computes the same list.
- */
-export function elementSignature(elements: unknown[]): string[] {
+/** Each live element as `id:version`, sorted. An edit raises an element's version, and Excalidraw reads a missing version as 1. */
+function elementSignature(elements: unknown[]): string[] {
   return elements
     .filter((e): e is { id: string; version?: number; isDeleted?: boolean } => typeof e === 'object' && e !== null && typeof (e as { id?: unknown }).id === 'string')
     .filter((e) => !e.isDeleted)
@@ -167,15 +173,46 @@ export function importSeed(cfg: Pick<SurfaceConfig, 'type' | 'title' | 'dataDir'
   const parsed = parseJson(scene) as { elements?: unknown } | undefined;
   if (!Array.isArray(parsed?.elements)) throw new Error('the seeded drawing is not an Excalidraw scene');
   const name = store.create(boardName(cfg.title));
-  const comments = cleanBoardComments(seedComments(dir) ?? { overall: '', pins: [] }) ?? null;
+  const comments = cleanBoardComments(seedComments(dir)) ?? null;
   store.saveScene(name, scene);
   store.saveNotes(name, readIfThere(join(dir, 'notes.md')) ?? '');
-  store.saveComments(name, comments ?? { overall: '', pins: [] });
+  store.saveComments(name, comments ?? EMPTY_COMMENTS);
   const seeded: Seeded = { board: name, elements: elementSignature(parsed.elements), comments };
   writeFileSync(join(cfg.dataDir, SEEDED_FILE), JSON.stringify(seeded, null, 2));
   rmSync(dir, { recursive: true, force: true });
   return name;
 }
+
+/**
+ * Watches saves to the board a seed filled. The first save whose elements or comments differ from
+ * `seeded.json` deletes it, so `hws` keeps the closed window as a draft.
+ */
+export class SeedWatch {
+  private seeded: Seeded | undefined;
+
+  constructor(private readonly dataDir: string) {
+    const raw = dataDir ? (readJson(join(dataDir, SEEDED_FILE)) as Partial<Seeded> | undefined) : undefined;
+    if (typeof raw?.board === 'string' && Array.isArray(raw.elements)) this.seeded = { board: raw.board, elements: raw.elements, comments: raw.comments ?? null };
+  }
+
+  sceneSaved(board: string, json: string): void {
+    if (board !== this.seeded?.board) return;
+    const elements = (parseJson(json) as { elements?: unknown } | undefined)?.elements;
+    if (!Array.isArray(elements) || !sameJson(elementSignature(elements), this.seeded.elements)) this.edited();
+  }
+
+  commentsSaved(board: string, comments: BoardComments): void {
+    if (board !== this.seeded?.board) return;
+    if (!sameJson(cleanBoardComments(comments) ?? null, this.seeded.comments)) this.edited();
+  }
+
+  private edited(): void {
+    this.seeded = undefined;
+    rmSync(join(this.dataDir, SEEDED_FILE), { force: true });
+  }
+}
+
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
  * Moves a delivered bundle under `root`, writes prompt.md with absolute paths, and points the bundle's
@@ -229,28 +266,17 @@ export interface SurfaceDeps {
   flush?: () => Promise<unknown>;
 }
 
-function readJsonFile(path: string): unknown {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
-    return undefined;
-  }
-}
-
 /** The round `hws ask` wrote to the data folder, with the answers held so far. */
 export function readRound(dataDir: string): Pick<SurfaceState, 'questions' | 'answers'> {
   return {
-    questions: readQuestions(readJsonFile(join(dataDir, QUESTIONS_FILE))),
-    answers: readAnswers(readJsonFile(join(dataDir, ANSWERS_FILE))),
+    questions: readQuestions(readJson(join(dataDir, QUESTIONS_FILE))),
+    answers: readAnswers(readJson(join(dataDir, ANSWERS_FILE))),
   };
 }
 
 /** Writes the answers whole, so a hangup mid-write never leaves half a file. */
-export function writeAnswers(dataDir: string, answers: Answers): void {
-  const path = join(dataDir, ANSWERS_FILE);
-  const temp = `${path}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify({ answers }, null, 2)}\n`);
-  renameSync(temp, path);
+function writeAnswers(dataDir: string, answers: Answers): void {
+  writeAtomic(join(dataDir, ANSWERS_FILE), `${JSON.stringify({ answers }, null, 2)}\n`);
 }
 
 /** Names the draft `hws` is being handed. `hws` closes the pane on success, which ends this process before it can settle. */
@@ -266,6 +292,8 @@ export class SurfaceHost {
   private readonly cwd: string;
   private state: SurfaceState;
   private opened = false;
+  /** The output path `/open` shows, which a page that loads later opens itself. */
+  private readonly file: string | undefined;
   private stopped = false;
   private action: SurfaceAction | undefined;
   /** The signature of what the current artifact holds. */
@@ -277,6 +305,7 @@ export class SurfaceHost {
   ) {
     this.sessionId = `surface-${cfg.id}`;
     this.cwd = sessionCwd(cfg);
+    this.file = openRequest(cfg, this.sessionId, this.cwd).output?.path;
     this.state = {
       type: cfg.type,
       title: cfg.title,
@@ -325,15 +354,16 @@ export class SurfaceHost {
   }
 
   /**
-   * Runs each time a page starts listening, because `/open` pushes events a loading page would miss.
-   * A later page, such as a reload or a second web view, gets the file again. A board keeps its drawing in main.
+   * Opens the surface once the first page listens, because `/open` pushes events a loading page would miss.
+   * Once the session is registered, `info()` names the file, so a later page, such as a reload or a
+   * second web view, opens it itself. A board keeps its drawing in main.
    */
   async ready(): Promise<void> {
-    const first = !this.opened;
-    if (!first && !this.cfg.file) return;
+    if (this.opened) return;
     this.opened = true;
     try {
-      if (first) await this.register();
+      await this.register();
+      if (this.file) this.state = { ...this.state, file: this.file };
       await this.request('POST', '/open', openRequest(this.cfg, this.sessionId, this.cwd));
     } catch (err) {
       this.update({ notice: { text: `Could not open ${this.cfg.title}: ${(err as Error).message}`, error: true } });
@@ -557,13 +587,9 @@ export function runHws(bin: string, args: string[], options: { detached?: boolea
 }
 
 function readHanded(path: string): HandedDraft | undefined {
-  try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<HandedDraft>;
-    if (typeof raw.draftId !== 'string') return undefined;
-    return { draftId: raw.draftId, ...(typeof raw.draftRevision === 'number' ? { draftRevision: raw.draftRevision } : {}) };
-  } catch {
-    return undefined;
-  }
+  const raw = readJson(path) as Partial<HandedDraft> | undefined;
+  if (typeof raw?.draftId !== 'string') return undefined;
+  return { draftId: raw.draftId, ...(typeof raw.draftRevision === 'number' ? { draftRevision: raw.draftRevision } : {}) };
 }
 
 function parseJson(text: string): HwsResult | undefined {

@@ -1,7 +1,10 @@
 /** The command lines and names the CLI prints, which differ under `hws surface cli`. */
 
-/** `hws surface cli` sets it to the shell folder it ran in. */
+/** `hws surface cli` sets it, so the CLI knows it runs under a surface. Only its presence counts. */
 export const SURFACE_CWD_ENV = 'HWS_SURFACE_CLI_CWD';
+
+/** The surface's session folder, which `hws surface cli` names when the surface has a file. */
+export const SESSION_FOLDER_ENV = 'HWS_SESSION_FOLDER';
 
 const BOARD_VERBS = new Set(['status', 'sessions', 'boards', 'read', 'png', 'draw', 'snap', 'update', 'delete']);
 const PAGE_VERBS = new Set(['outline', 'feedback', 'behavior']);

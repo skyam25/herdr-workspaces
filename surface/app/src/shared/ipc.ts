@@ -325,6 +325,8 @@ export interface SurfaceState {
   workspace?: { id: string; name: string };
   /** A web view shows this surface, so it offers no Pop. */
   web?: boolean;
+  /** The file the surface shows, as `/open` names it. A page that loads after the first opens it. */
+  file?: string;
   busy?: boolean;
   delivered?: boolean;
   artifact?: string;

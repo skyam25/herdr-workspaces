@@ -47,6 +47,7 @@ test('a questions surface holds answers as they change and Done hands hws one pr
   await page.getByTestId('question-tone-other-toggle').click();
   await page.getByTestId('question-tone-other').fill('Warm but brief');
   await expect(page.getByTestId('questions-count')).toContainText('3 of 4 answered');
+  await expect(page.getByTestId('surface-done')).toHaveText('Done · 3 answers');
   await expect.poll(() => JSON.parse(readFileSync(join(dataDir, 'answers.json'), 'utf8')).answers.tone).toEqual({ answer: 'Warm but brief', other: true });
 
   for (const theme of ['light', 'dark']) {

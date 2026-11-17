@@ -4,7 +4,7 @@ import { BoardCanvas, openBoardSearch } from './BoardCanvas';
 import { workspaceComments } from './workspace-boards';
 import { BoardCommentsStore } from './board-comments';
 import { CommentColumn, CommentToggle, useCommentKeys } from './BoardComments';
-import { decisionsClaim, subscribeDecisions } from './decisions-send';
+import { footerClaim, subscribeFooter } from './footer-send';
 import { BoardPicker, LayoutSwitch } from './BoardPicker';
 import { fallbackBoard } from './boardScope';
 import { BoardController, parseScene, type LoadedScene } from './controller';
@@ -42,6 +42,10 @@ import { WriteView } from './WriteView';
 import { deliveryOf } from './delivery';
 import { cleanError } from './ipc-error';
 import { NOTHING_ANSWERED, answersPrompt, type Answers } from '../shared/questions';
+import { throttledWrite } from './throttled-write';
+
+/** Answers save at most this often while someone types. */
+const ANSWER_SAVE_MS = 300;
 
 interface Boot {
   info: InitInfo;
@@ -189,6 +193,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   const [answers, setAnswers] = useState<Answers>(info.surface?.answers ?? {});
   const answersRef = useRef(answers);
   answersRef.current = answers;
+  const [answerSaver] = useState(() => throttledWrite((next: Answers) => void host.surfaceAnswer(next).catch(report('save the answers')), ANSWER_SAVE_MS));
   const [settings, setSettings] = useState<Settings>(info.settings);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ipadSheetOpen, setIpadSheetOpen] = useState(false);
@@ -302,22 +307,24 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   const reviewError = useCallback((message: string) => notify(message, 'error'), [notify]);
   const [reviewProps] = useState(() => ({ host, voice: reviewVoice, onError: reviewError }));
 
-  // A Feedback view on show turns Send into its Send decisions.
-  const decisions = useSyncExternalStore(subscribeDecisions, decisionsClaim);
+  // A Feedback view on show turns Send into its Send decisions, and a round of questions takes Done.
+  const claim = useSyncExternalStore(subscribeFooter, footerClaim);
   const holder = mode === 'sketch' ? boardList.boards.find((b) => b.name === board)?.sessionId : book.selected?.sessionId;
   const changeAnswers = (next: Answers) => {
     setAnswers(next);
-    void host.surfaceAnswer(next).catch(report('save the answers'));
+    answerSaver.push(next);
   };
-  const sendAnswers = () =>
-    sendText(info.surface!.sessionId, async () => {
+  const sendAnswers = () => {
+    answerSaver.flush();
+    void sendText(info.surface!.sessionId, async () => {
       const text = answersPrompt(surface?.questions ?? [], answersRef.current);
       return text ? { text } : NOTHING_ANSWERED;
     });
+  };
 
-  // A Feedback view with unsent decisions gets Done, as it gets Send outside a surface.
-  const claimed = mode === 'review' && decisions && decisions.count > 0 && !decisions.blocked ? decisions : undefined;
-  const done = () => void (questioning ? sendAnswers() : claimed ? claimed.send() : send());
+  // A round always takes Done, so Done can ask for an answer first. A Feedback view takes it while it holds unsent decisions.
+  const claimed = claim && (claim.holds === 'answers' || (mode === 'review' && claim.count > 0 && !claim.blocked)) ? claim : undefined;
+  const done = () => void (claimed ? claimed.send() : send());
   const surfaceDone = useRef(() => {});
   surfaceDone.current = done;
   const surfaceSettle = useRef(() => {});
@@ -356,7 +363,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
     <SurfacePlace surface={surface} onAct={surfaceAct} onTargets={() => host.surfaceTargets()} onMove={(workspace) => void host.surfaceMove(workspace)} />
   );
   const sendBar = surface ? (
-    <SurfaceBar surface={surface} mic={questioning ? undefined : micButton} decisions={claimed?.count} onDone={done} onAct={surfaceAct} />
+    <SurfaceBar surface={surface} mic={questioning ? undefined : micButton} claim={claimed} onDone={done} onAct={surfaceAct} />
   ) : (
     <SendTo
       sessions={sessions}
@@ -373,7 +380,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
       loadOptions={() => host.launchOptions()}
       loadPlaces={() => host.sessionPlaces()}
       chooseFolder={() => host.chooseFolder()}
-      decisions={mode === 'review' ? decisions : undefined}
+      decisions={mode === 'review' && claim?.holds === 'decisions' ? claim : undefined}
       ipadPicking={ipadPicking}
       onIpad={sessions.ipadPaired && (mode === 'sketch' || (mode === 'review' && !!openPage)) ? (id) => {
         if (id) void handOffToIpad(id);
@@ -612,7 +619,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
             {/* The canvas stays mounted under Write and Review, so a view switch keeps its scene and undo. */}
             <BoardCanvas controller={controller} scene={scene} theme={theme} active={mode === 'sketch' && !questioning} onReady={onReady} comments={comments} board={board} />
           </div>
-          {questioning && <QuestionsView questions={surface.questions ?? []} answers={answers} onChange={changeAnswers} />}
+          {questioning && <QuestionsView questions={surface.questions ?? []} answers={answers} onChange={changeAnswers} onSend={sendAnswers} onBlur={answerSaver.flush} />}
           {commenting && (
             <CommentColumn
               comments={comments}

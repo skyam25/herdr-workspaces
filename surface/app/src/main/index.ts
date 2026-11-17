@@ -84,7 +84,7 @@ import { TemplateStore } from './templates';
 import { Terminals } from './terminals';
 import { fileLog } from './update-log';
 import { Updater } from './updater';
-import { importSeed, SurfaceHost, surfaceFromEnv } from './surface';
+import { importSeed, SeedWatch, SurfaceHost, surfaceFromEnv } from './surface';
 import { BoardStore, cleanName, migrateData, StateFile } from './store';
 import { mainIpc, teeTransport } from './ipc';
 import { WebHost } from './web-host';
@@ -130,6 +130,7 @@ if (surfaceConfig) {
     console.error(`[companion] could not load the seeded drawing: ${(err as Error).message}`);
   }
 }
+const seedWatch = surfaceConfig && new SeedWatch(surfaceConfig.dataDir);
 const state = new StateFile(dataDir);
 const history = new SendHistory(dataDir);
 const drafts = new DraftStore(dataDir);
@@ -752,6 +753,7 @@ async function start(): Promise<void> {
   ipc.handle('loadBoard', (name: string) => store.load(name));
   ipc.handle('saveBoard', (name: string, json: string) => {
     store.saveScene(name, json);
+    seedWatch?.sceneSaved(name, json);
     briefs.touched({ board: name });
   });
   ipc.handle('saveNotes', (name: string, text: string) => {
@@ -759,7 +761,10 @@ async function start(): Promise<void> {
     briefs.touched({ board: name });
   });
   ipc.handle('listBoardComments', () => store.listComments());
-  ipc.handle('saveBoardComments', (board, comments) => store.saveComments(board, comments));
+  ipc.handle('saveBoardComments', (board, comments) => {
+    store.saveComments(board, comments);
+    seedWatch?.commentsSaved(board, comments);
+  });
   ipc.handle('createBoard', (name: string) => store.create(name));
   ipc.handle('renameBoard', (from: string, to: string) => {
     const name = store.rename(from, to);

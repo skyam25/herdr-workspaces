@@ -7,7 +7,7 @@ import type { SurfaceState } from '../shared/ipc';
 import { answersPrompt, type Question } from '../shared/questions';
 import { boardCommentsMarkdown } from '../shared/board-comments';
 import { BoardStore } from './store';
-import { boardName, bundleSignature, importSeed, openRequest, prepareBundle, readRound, SEED_DIR, SEEDED_FILE, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
+import { boardName, bundleSignature, importSeed, openRequest, prepareBundle, readRound, SEED_DIR, SEEDED_FILE, SeedWatch, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
 
 const QUESTIONS: Question[] = [
   { id: 'audience', text: 'Who reads it?', kind: 'options', options: ['Engineers', 'Managers'] },
@@ -58,6 +58,12 @@ describe('surfaceFromEnv', () => {
 });
 
 describe('sessionCwd and openRequest', () => {
+  it('takes the session folder hws names', () => {
+    const cfg = surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_TYPE: 'page', HWS_SURFACE_FILE: '/work/docs/a.html', HWS_FOLDER: '/work', HWS_SESSION_FOLDER: '/work/docs' })!;
+    expect(sessionCwd(cfg)).toBe('/work/docs');
+    expect(sessionCwd(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SESSION_FOLDER: '', COMPANION_DATA_DIR: '/data' })!)).toBe('/data/work');
+  });
+
   it('puts a board in the data folder', () => {
     expect(sessionCwd(config())).toBe('/data/work');
     expect(openRequest(config(), 'x', '/data/work')).toEqual({ sessionId: 'x', board: 'flow' });
@@ -183,6 +189,47 @@ describe('importSeed', () => {
   });
 });
 
+describe('SeedWatch', () => {
+  const pin = { id: 'p1', elementId: 'r1', x: 10, y: 20, text: 'Bigger.', createdAt: 1 };
+  const drawn = (elements: object[]) => JSON.stringify({ type: 'excalidraw', elements, appState: { scrollX: 40 } });
+
+  function watched() {
+    const dataDir = temp();
+    mkdirSync(join(dataDir, SEED_DIR));
+    writeFileSync(join(dataDir, SEED_DIR, 'board.excalidraw'), drawn([{ id: 'r2', version: 4 }, { id: 'r1' }]));
+    writeFileSync(join(dataDir, SEED_DIR, 'comments.json'), JSON.stringify({ overall: '', pins: [pin] }));
+    importSeed(config({ title: 'flow', dataDir }), new BoardStore(dataDir));
+    return { dataDir, watch: new SeedWatch(dataDir), marked: () => existsSync(join(dataDir, SEEDED_FILE)) };
+  }
+
+  it('keeps the record through saves that change nothing the seed put there', () => {
+    const { watch, marked } = watched();
+    watch.sceneSaved('flow', drawn([{ id: 'r1', version: 1 }, { id: 'r2', version: 4 }, { id: 'gone', isDeleted: true }]));
+    watch.commentsSaved('flow', { overall: '', pins: [pin] });
+    watch.sceneSaved('other', drawn([{ id: 'x1' }]));
+    expect(marked()).toBe(true);
+  });
+
+  it('deletes the record at the first edit to the drawing', () => {
+    const { watch, marked } = watched();
+    watch.sceneSaved('flow', drawn([{ id: 'r2', version: 5 }, { id: 'r1' }]));
+    expect(marked()).toBe(false);
+  });
+
+  it('deletes the record at the first edit to the comments', () => {
+    const { watch, marked } = watched();
+    watch.commentsSaved('flow', { overall: 'Tighter.', pins: [pin] });
+    expect(marked()).toBe(false);
+  });
+
+  it('reads the record a host before it left', () => {
+    const { dataDir, watch } = watched();
+    watch.sceneSaved('flow', drawn([{ id: 'r2', version: 4 }, { id: 'r1' }]));
+    new SeedWatch(dataDir).commentsSaved('flow', { overall: '', pins: [] });
+    expect(existsSync(join(dataDir, SEEDED_FILE))).toBe(false);
+  });
+});
+
 describe('prepareBundle', () => {
   const bundle = (root: string, id: string, draftMd = `![](.feedback/sketches/${id}/images/p.png)`) => {
     const dir = join(root, 'project/.feedback/sketches', id);
@@ -266,21 +313,24 @@ describe('SurfaceHost', () => {
     expect(existsSync(join(h.dataDir, 'handed-off.json'))).toBe(false);
   });
 
-  it('opens the file again for a page that loads later', async () => {
-    const h = await harness({ standalone: false, artifact: 'a1', delivered: true }, { file: '/tmp/x/page.html' });
+  it('opens the file once, then names it for a page that loads later', async () => {
+    const h = await harness({ standalone: false, artifact: 'a1', delivered: true }, { file: '/tmp/x/page.html', sessionFolder: '/tmp/x' });
+    expect(h.host.info().file).toBeUndefined();
     await h.host.ready();
     await h.host.ready();
     h.stop();
-    expect(h.requests.filter((r) => r === 'POST /open')).toHaveLength(2);
+    expect(h.requests.filter((r) => r === 'POST /open')).toHaveLength(1);
     expect(h.requests.filter((r) => r === 'POST /sessions')).toHaveLength(1);
+    expect(h.host.info().file).toBe('page.html');
   });
 
-  it('opens a board once, because main keeps its drawing', async () => {
+  it('opens a board once and names no file, because main keeps its drawing', async () => {
     const h = await harness(undefined, { type: 'board', file: '' });
     await h.host.ready();
     await h.host.ready();
     h.stop();
     expect(h.requests.filter((r) => r === 'POST /open')).toHaveLength(1);
+    expect(h.host.info().file).toBeUndefined();
   });
 
   it('keeps the draft when hws refuses the bundle', async () => {

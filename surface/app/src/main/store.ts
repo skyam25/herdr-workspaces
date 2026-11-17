@@ -51,16 +51,35 @@ export function emptyScene(): string {
   );
 }
 
+/** A board name is a file name, so it holds only these characters and starts with a word character. */
+const NAME_CHARS = String.raw`\w .-`;
+const VALID_NAME = new RegExp(String.raw`^\w[${NAME_CHARS}]*$`, 'u');
+const OTHER_CHARS = new RegExp(`[^${NAME_CHARS}]+`, 'gu');
+const MAX_NAME = 64;
+
 /** Trims a board name and rejects ones that are unsafe as file names. */
 export function cleanName(raw: unknown): string {
   if (typeof raw !== 'string') throw badRequest('board name must be a string');
   const name = raw.trim();
-  if (!name || name.length > 64) throw badRequest('board name must be 1 to 64 characters');
-  if (!/^[\w][\w .-]*$/u.test(name)) {
+  if (!name || name.length > MAX_NAME) throw badRequest(`board name must be 1 to ${MAX_NAME} characters`);
+  if (!VALID_NAME.test(name)) {
     throw badRequest('board name may use letters, digits, spaces, dots, dashes and underscores');
   }
   if (name === CURRENT_BOARD) throw badRequest(`"${CURRENT_BOARD}" is reserved`);
   return name;
+}
+
+/**
+ * Turns free text into a board name's characters, cut to length. Other characters become spaces.
+ * Answers an empty string when nothing usable is left, and does not check for the reserved name.
+ */
+export function nameFrom(text: string): string {
+  return text
+    .replace(OTHER_CHARS, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[ .-]+/, '')
+    .slice(0, MAX_NAME)
+    .trim();
 }
 
 interface SceneSummary {

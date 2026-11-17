@@ -173,9 +173,13 @@ export function useWorkspace({ host, info, controller, book, shelf, comments, bo
         return controller.reply(req);
       });
       host.ready();
+
+      // A surface names its file once the first page opened it, so a later page opens it here.
+      const surface = info.surface;
+      if (surface?.file) void host.openOutput(surface.sessionId, surface.file).catch(report(`open ${surface.file}`));
       if (info.testMode) Object.assign(window, { __board: controller, __excalidraw: api, __drafts: book, __templates: shelf });
     },
-    [controller, host, book, shelf, comments, changeMode, info.testMode],
+    [controller, host, book, shelf, comments, changeMode, info.testMode, info.surface],
   );
 
   return { ...voice, ...tabs, sessions, mode, modeRef, focusRequest, newBoardRequest, changeMode, openDraft, openBoard, onMicrophone, onReady };
