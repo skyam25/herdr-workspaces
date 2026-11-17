@@ -15,22 +15,29 @@ const TASK_LIST = [
 ].join(" ");
 
 const REVIEW = [
-  "To show the person a page or document for comments, run `hws review FILE` with an .html or .md file, then end the turn.",
+  "To get the person's comments on a page or document you wrote, run `hws review FILE` with an .html or .md file, then end the turn.",
   "It opens beside this agent, and their comments arrive as your next prompt.",
   "Never open it with --standalone, because that pane has no agent to answer.",
+  "When the person only wants to read or edit a Markdown file, open it in a note instead.",
 ].join(" ");
 
 // A plain tab gets no skill hint, so without this an agent falls back to `open`, which sends .md to VS Code.
 const NOTE_EDITOR = [
   "To show the person a Markdown file to read or edit, run `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn.",
   "It opens in a Herdr note window, in a workspace or not.",
+  "When you want their comments on something you wrote, run `hws review FILE` instead.",
   "Never open the file with `open`, VS Code or another editor.",
 ].join(" ");
 
-// Agent Brief's own outputs and iPad pairing never reach a phone paired with Herdr.
+const OUTPUTS = [
+  "When the person asks for a doc, brief, report, spec, page or deck, run `hws output add --title T --path P --status drafting` as you start it, and run it again with `--status ready` when it is done.",
+  "Use `--url U` in place of `--path` for a web document. The work then shows under Outputs in Herdr's right panel.",
+  "Never declare code, config or tests.",
+].join(" ");
+
 const PHONE = [
   'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn.',
-  "Their markup arrives as your next prompt. Agent Brief's Outputs panel does not reach the phone.",
+  "Their markup arrives as your next prompt.",
   "Run `~/.local/bin/hws` if `hws` is not on PATH.",
 ].join(" ");
 
@@ -139,7 +146,7 @@ async function main() {
   const folder = typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd();
 
   // A failed register only loses resume and Outputs, so the session still learns its workspace.
-  // The folder tells Outputs where the Agent Brief plugin keeps this session's outputs file.
+  // The folder tells Outputs where this session's outputs file lives.
   const [, line] = await Promise.all([
     hws(["register", "--terminal", terminal, "--session", sessionId, "--folder", folder, "--json"]),
     hws(["current", "--line"]),
@@ -155,7 +162,7 @@ async function main() {
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && OUTPUTS, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(
