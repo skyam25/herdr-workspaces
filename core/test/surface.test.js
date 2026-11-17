@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -43,6 +43,7 @@ test('surface open splits beside the owning terminal with the host environment',
     HWS_SURFACE_TITLE: 'flow',
     HWS_SURFACE_FILE: '',
     HWS_FOLDER: manifest.folder,
+    HWS_SESSION_FOLDER: '',
     COMPANION_SOCKET: `/tmp/hws-${surface.id}.sock`,
     COMPANION_DATA_DIR: join(box.root, 'workspaces', manifest.id, 'surfaces', surface.id),
   });
@@ -70,11 +71,33 @@ test('surface open passes a note file and defaults the title to its name', (t) =
   assert.equal(surface.title, 'notes.md');
 });
 
+test('surface open gives a file inside the workspace folder that folder as its session folder', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const folder = realpathSync(manifest.folder);
+  const file = join(manifest.folder, 'docs', 'plan.md');
+  const surface = box.json(['surface', 'open', '--type', 'note', '--in-pane', '--file', file, '--terminal', manifest.terminals[0].terminal]);
+  assert.equal(hostEnvOf(box.actions()[0]).HWS_SESSION_FOLDER, folder);
+  assert.equal(surface.sessionFolder, folder);
+  assert.equal(box.manifest(manifest.id).surfaces[0].sessionFolder, folder);
+});
+
+test('surface open gives a file under a dot folder its own folder as its session folder', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const file = join(manifest.folder, '.notes', 'plan.md');
+  box.json(['surface', 'open', '--type', 'note', '--in-pane', '--file', file, '--terminal', manifest.terminals[0].terminal]);
+  assert.equal(hostEnvOf(box.actions()[0]).HWS_SESSION_FOLDER, dirname(file));
+});
+
 test('surface open keeps a page url intact', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   box.json(['surface', 'open', '--type', 'page', '--file', 'http://localhost:3000/a', '--terminal', manifest.terminals[0].terminal]);
-  assert.equal(hostEnvOf(box.actions()[0]).HWS_SURFACE_FILE, 'http://localhost:3000/a');
+  const environment = hostEnvOf(box.actions()[0]);
+  assert.equal(environment.HWS_SURFACE_FILE, 'http://localhost:3000/a');
+  assert.equal(environment.HWS_SESSION_FOLDER, '');
+  assert.equal(box.manifest(manifest.id).surfaces[0].sessionFolder, undefined);
 });
 
 test('surface open defaults to the calling terminal', (t) => {

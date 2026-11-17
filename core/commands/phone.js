@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
-import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
+import { basename, extname, join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { findArtifact, freeName, isInside, linkFor, realOf } from '../artifacts.js';
+import { findArtifact, freeName, linkFor, projectRootFor, readScene } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isAgentTerminal, isIdleShell, isTerminalAlive, listLive, listLocalTerminals, requireLive, runDetached, sendText, terminalInfo, windowStatus } from '../herdr.js';
 import { ensureStandaloneManifest, manifestOfSpace, readManifest, writeJsonAtomic } from '../manifest.js';
@@ -109,24 +109,9 @@ function resolveTarget(ref) {
   return pathTarget(artifact.path);
 }
 
-// The listener refuses paths with a dot segment, so a page under .herdr-workspace serves from its own folder.
-function pageRoot(file, workspace) {
-  const folder = realOf(workspace.folder);
-  if (folder === realOf(home()) || !isInside(folder, file)) return dirname(file);
-  const segments = relative(folder, realOf(file)).split(sep);
-  return segments.some((part) => part.startsWith('.')) ? dirname(file) : folder;
-}
-
 // Takes a copy, so a later edit of the file cannot change what the phone is reviewing.
 function snapshotBoard(file) {
-  let scene;
-  try {
-    scene = JSON.parse(readFileSync(file, 'utf8'));
-  } catch {
-    throw new HwsError(`${file} is not valid JSON`);
-  }
-  if (!Array.isArray(scene?.elements)) throw new HwsError(`${file} is not an Excalidraw scene`);
-
+  const scene = readScene(file);
   const dir = join(phoneDir(), 'boards');
   mkdirSync(dir, { recursive: true });
   const stem = basename(file, extname(file)).replace(/[^\w.-]+/g, '-').replace(/^\.+/, '') || 'board';
@@ -161,7 +146,8 @@ export async function phoneSend(flags, [ref]) {
   const title = basename(target.file);
   writeJsonAtomic(sendRecord(id), { id, workspace: workspace.id, terminal, label, type: target.type, title, file: target.file, createdAt: Date.now() });
 
-  const where = target.type === 'page' ? { page: target.file, root: pageRoot(target.file, workspace) } : { board: snapshotBoard(target.file) };
+  // The listener refuses paths with a dot segment, so a page under a dot folder serves from its own folder.
+  const where = target.type === 'page' ? { page: target.file, root: projectRootFor(workspace.folder, target.file) } : { board: snapshotBoard(target.file) };
   const handoff = await control('POST', '/handoffs', { session: id, label, ...(flags.prompt ? { prompt: flags.prompt } : {}), ...where });
   if (!handoff) throw new HwsError('the phone listener stopped answering');
   return { data: { ...handoff, send: id, type: target.type, file: target.file }, text: `${title} is on your phone. Send there returns to terminal ${terminal}.` };

@@ -4,7 +4,7 @@ import { appendFileSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFil
 import { request as httpRequest } from 'node:http';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 
-import { ANSWERS_ROLE, FEEDBACK_ROLE, artifactOfFile, linkFor, moveBundle, moveDir, realOf } from '../artifacts.js';
+import { ANSWERS_ROLE, FEEDBACK_ROLE, artifactOfFile, findArtifact, findArtifactWhere, linkFor, moveBundle, moveDir, projectRootFor, readScene, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import {
   act,
@@ -27,9 +27,9 @@ import { isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { callingTerminal, requireCallingTerminal, requireFlag, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
+import { isOutlinePath } from './outline.js';
 
 const SURFACE_TYPES = ['board', 'note', 'page'];
-const OUTLINE_FILE = /\.outline\.md$/i;
 
 // The limit for one argument on Linux, and well inside the 1 MiB macOS total.
 export const MAX_SEND_BYTES = 128 * 1024;
@@ -210,6 +210,20 @@ function paneTerminal(live, pane) {
 
 const paneIsOpen = (live, pane) => paneTerminal(live, pane) !== null;
 
+// The folder the host's stand-in session works in for a page or note on a local file.
+// Empty for anything else, so the host keeps its work folder.
+function sessionFolderOf(workspace, { type, file }) {
+  if (!file || isUrl(file) || type === 'board' || type === 'questions') return '';
+  return projectRootFor(workspace.folder, file);
+}
+
+// Records the session folder on a surface, so `hws surface cli` can pass it on.
+function withSessionFolder(workspace, surface) {
+  const { sessionFolder: _old, ...rest } = surface;
+  const sessionFolder = sessionFolderOf(workspace, surface);
+  return sessionFolder ? { ...rest, sessionFolder } : rest;
+}
+
 // `owner` is set only for a surface in its own window. A sketch's drawing arrives as a seed, never as a file.
 function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
   const environment = {
@@ -222,6 +236,7 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
     HWS_SURFACE_TITLE: title,
     HWS_SURFACE_FILE: type === 'board' ? '' : file,
     HWS_FOLDER: workspace.folder,
+    HWS_SESSION_FOLDER: sessionFolderOf(workspace, { type, file }),
     COMPANION_SOCKET: socketPath(id),
     COMPANION_DATA_DIR: surfaceDataDir(workspace.id, id),
     ...(owner === undefined ? {} : { HWS_SURFACE_WINDOW: '1', HWS_SURFACE_OWNER: owner }),
@@ -229,8 +244,12 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
   return ['env', ...Object.entries(environment).map(([key, value]) => `${key}=${value}`), HOST_SCRIPT];
 }
 
+function assertSurfaceType(type) {
+  if (!SURFACE_TYPES.includes(type)) throw new UsageError('--type must be board, note or page');
+}
+
 export function surfaceOpen(flags) {
-  if (!SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
+  assertSurfaceType(flags.type);
   if (flags.artifact !== undefined && flags.type !== 'board') throw new UsageError('--artifact reopens a sketch, so use it with --type board');
   return openSurface(flags);
 }
@@ -240,32 +259,11 @@ const BUNDLE_SCENE = 'board.excalidraw';
 const SEED_DIR = 'seed';
 const SEED_EXTRAS = ['comments.json', 'comments.md', 'notes.md'];
 
-function openManifestOf(artifactId) {
-  for (const manifest of listManifests({ includeStandalone: true })) {
-    const artifact = manifest.artifacts.find((item) => item.id === artifactId);
-    if (artifact) return { manifest, artifact };
-  }
-  return null;
-}
-
-// The board artifact whose bundle holds this drawing, or null.
+// The board artifact in an open workspace whose bundle holds this drawing, or null.
 function boardArtifactOfFile(file) {
+  if (basename(file) !== BUNDLE_SCENE) return null;
   const real = realOf(file);
-  for (const manifest of listManifests({ includeStandalone: true })) {
-    const artifact = manifest.artifacts.find((item) => item.type === 'board' && item.path && realOf(join(item.path, BUNDLE_SCENE)) === real);
-    if (artifact) return { manifest, artifact };
-  }
-  return null;
-}
-
-function assertScene(file) {
-  let scene;
-  try {
-    scene = JSON.parse(readFileSync(file, 'utf8'));
-  } catch {
-    throw new HwsError(`${file} is not valid JSON`);
-  }
-  if (!Array.isArray(scene?.elements)) throw new HwsError(`${file} is not an Excalidraw scene`);
+  return findArtifactWhere((item) => item.type === 'board' && item.path && realOf(join(item.path, BUNDLE_SCENE)) === real, { open: true });
 }
 
 // The newest sketch down A's `supersedes` chain that is not itself superseded, or null.
@@ -290,7 +288,7 @@ function artifactSource({ manifest, artifact: named }) {
   const artifact = newest ?? named;
   const file = join(artifact.path, BUNDLE_SCENE);
   if (!existsSync(file)) throw new HwsError(`sketch ${artifact.id} has no drawing to reopen`);
-  assertScene(file);
+  readScene(file);
   return { file: realOf(file), manifest, artifact, title: artifact.title, ...(newest ? { newestOf: named.id } : {}) };
 }
 
@@ -305,18 +303,14 @@ function withNewestNote(result, source) {
 function boardSource(flags) {
   if (flags.type !== 'board') return null;
   if (flags.file !== undefined && flags.artifact !== undefined) throw new UsageError('use --file or --artifact, not both');
-  if (flags.artifact !== undefined) {
-    const found = openManifestOf(flags.artifact);
-    if (!found) throw new HwsError(`no artifact ${flags.artifact} in an open workspace`);
-    return artifactSource(found);
-  }
+  if (flags.artifact !== undefined) return artifactSource(findArtifact(flags.artifact, { open: true }));
   if (!flags.file) return null;
   const file = resolve(flags.file);
   if (extname(file).toLowerCase() !== '.excalidraw') throw new HwsError(`a sketch opens an .excalidraw file, so it cannot open ${basename(file)}`);
   if (!existsSync(file)) throw new HwsError(`no file at ${file}`);
   const bundled = boardArtifactOfFile(file);
   if (bundled) return artifactSource(bundled);
-  assertScene(file);
+  readScene(file);
   return { file: realOf(file), manifest: null, artifact: null, title: basename(file, extname(file)) };
 }
 
@@ -385,8 +379,7 @@ async function openOn(flags, { windowed, terminal, source, prepare }) {
 
   if (windowed) {
     const host = runDetached(argv, workspace.folder);
-    const surface = { id: surfaceId, type: flags.type, title, terminal, pane: null, host, socket, pid: terminalInfo(host)?.pid ?? null, ...fileFields };
-    replaceSurface(workspace.id, surface);
+    const surface = replaceSurface(workspace.id, { id: surfaceId, type: flags.type, title, terminal, pane: null, host, socket, pid: terminalInfo(host)?.pid ?? null, ...fileFields });
     return { data: { ...surface, workspace: workspace.id, hostTerminal: host }, text: `opened ${flags.type} ${surfaceId}` };
   }
 
@@ -396,26 +389,29 @@ async function openOn(flags, { windowed, terminal, source, prepare }) {
   const pane = opened.pane ?? findTerminal(listLive() ?? { spaces: [] }, opened.terminal)?.pane ?? null;
   const pid = terminalInfo(opened.terminal)?.pid ?? null;
 
-  const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...fileFields };
-  replaceSurface(workspace.id, surface);
+  const surface = replaceSurface(workspace.id, { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...fileFields });
   const data = { ...surface, workspace: workspace.id, hostTerminal: opened.terminal };
   return { data, text: `opened ${flags.type} ${surfaceId}` };
 }
 
-// A reopened surface replaces its old record and moves to the end of the list.
+// A reopened surface replaces its old record and moves to the end of the list. Returns the stored record.
 function replaceSurface(workspaceId, surface) {
+  let stored;
   updateManifest(workspaceId, (draft) => {
+    stored = withSessionFolder(draft, surface);
     draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
-    draft.surfaces.push(surface);
+    draft.surfaces.push(stored);
   });
+  return stored;
 }
 
 // Rewrites a record where it stands. A prune may drop a record whose host just ended, so it comes back.
 function rewriteSurface(workspaceId, surface) {
   updateManifest(workspaceId, (draft) => {
+    const stored = withSessionFolder(draft, surface);
     const at = draft.surfaces.findIndex((item) => item.id === surface.id);
-    if (at === -1) draft.surfaces.push(surface);
-    else draft.surfaces[at] = surface;
+    if (at === -1) draft.surfaces.push(stored);
+    else draft.surfaces[at] = stored;
   });
 }
 
@@ -496,7 +492,7 @@ const quoted = (path) => (/[\s"'$`\\]/.test(path) ? `'${path.replaceAll("'", `'\
 // Tells the agent how to hand the page back, in the prompt it is about to read.
 // An outline's view reloads as the agent changes it, so it needs no second look.
 function askForAnotherLook(artifact) {
-  if (artifact.role !== FEEDBACK_ROLE || OUTLINE_FILE.test(artifact.file)) return;
+  if (artifact.role !== FEEDBACK_ROLE || isOutlinePath(artifact.file)) return;
   appendFileSync(artifact.prompt, `\n\nIf you change the page, run \`hws review ${quoted(artifact.file)}\` afterwards so the person can look again.\n`);
 }
 
@@ -629,10 +625,8 @@ function popInPlacement(live, surface) {
 }
 
 async function popOut(manifest, surface, live) {
-  const paneHost = paneTerminal(live, surface.pane);
-  if (!paneHost) throw new HwsError(`surface ${surface.id} has no open pane`);
-  act('pane.close', { pane: surface.pane });
-  await awaitHostEnd(paneHost);
+  if (!paneIsOpen(live, surface.pane)) throw new HwsError(`surface ${surface.id} has no open pane`);
+  await endHost(live, surface);
   const { host, pid } = startWindow(manifest, surface, live);
   rewriteSurface(manifest.id, { ...surface, pane: null, host, pid });
   return { id: surface.id, shown: 'window', moved: true, host };
@@ -640,10 +634,7 @@ async function popOut(manifest, surface, live) {
 
 async function popIn(manifest, surface, live) {
   const placement = popInPlacement(live, surface);
-  if (isWindowOpen(surface)) {
-    killTerminal(surface.host);
-    await awaitHostEnd(surface.host);
-  }
+  await endHost(live, surface);
   const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: surface.file ?? '' });
   const opened = placement.pane
     ? act('pane.split', { direction: 'right', pane: placement.pane, argv })
@@ -746,10 +737,8 @@ export async function surfaceMove(flags) {
 
   process.on('SIGHUP', () => {});
   const wasOpen = isWindowOpen(surface);
-  if (wasOpen) {
-    killTerminal(surface.host);
-    await awaitHostEnd(surface.host);
-  }
+  const live = wasOpen ? requireLive() : null;
+  if (wasOpen) await endHost(live, surface);
 
   const from = surfaceDataDir(manifest.id, surfaceId);
   const to = surfaceDataDir(target.id, surfaceId);
@@ -772,7 +761,7 @@ export async function surfaceMove(flags) {
   dropSurface(manifest, surface);
   let moved = { ...surface };
   if (wasOpen) {
-    const { host, pid } = startWindow(target, surface, requireLive());
+    const { host, pid } = startWindow(target, surface, live);
     moved = { ...moved, host, pid };
   }
   replaceSurface(target.id, moved);
@@ -845,15 +834,19 @@ export async function surfaceDone(flags) {
   return { data: { standalone: false, artifact: artifact.id, link, delivered: true } };
 }
 
-// The newest surface glued to the terminal that matches the title and type.
-function gluedSurface(terminal, { title, type }, listening = () => true) {
+// The newest surface glued to the terminal that matches the title and type. `socket` also asks
+// for a socket file. A draft's window is closed, so nothing listens on its socket.
+function gluedSurface(terminal, { title, type }, { socket = false } = {}) {
   return listManifests({ includeStandalone: true })
     .flatMap((manifest) => manifest.surfaces)
-    .filter((surface) => surface.terminal === terminal && (!title || surface.title === title) && (!type || surface.type === type))
-
-    // A draft's window is closed, so nothing listens on its socket.
-    .filter((surface) => (!surface.host || isWindowOpen(surface)) && listening(surface))
-    .at(-1);
+    .findLast(
+      (surface) =>
+        surface.terminal === terminal &&
+        (!title || surface.title === title) &&
+        (!type || surface.type === type) &&
+        (!socket || existsSync(surface.socket)) &&
+        (!surface.host || isWindowOpen(surface)),
+    );
 }
 
 export function surfaceSocket(flags) {
@@ -866,10 +859,10 @@ export function surfaceSocket(flags) {
 // Runs the surface's `agent-brief` CLI against the terminal's surface, as the surface's stand-in session.
 // Returns the CLI's exit code. Its stdin, stdout and stderr are this process's own.
 export function surfaceCli(flags, args) {
-  if (flags.type !== undefined && !SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
+  if (flags.type !== undefined) assertSurfaceType(flags.type);
   if (args.length === 0) throw new UsageError('name an agent-brief verb after --, such as: hws surface cli -- status');
   const terminal = requireCallingTerminal(flags);
-  const surface = gluedSurface(terminal, flags, (item) => existsSync(item.socket));
+  const surface = gluedSurface(terminal, flags, { socket: true });
   if (!surface) {
     const kind = flags.type ? `${flags.type} ` : '';
     const named = flags.title ? ` titled ${JSON.stringify(flags.title)}` : '';
@@ -878,7 +871,13 @@ export function surfaceCli(flags, args) {
   const cli = process.env.HWS_SURFACE_CLI || SURFACE_CLI;
   if (!existsSync(cli)) throw new HwsError(`no surface CLI at ${cli}. Run install.sh to build the surface`);
   // The session folder can differ from the shell's, so the CLI resolves relative paths from HWS_SURFACE_CLI_CWD.
-  const environment = { ...process.env, COMPANION_SOCKET: surface.socket, CLAUDE_CODE_SESSION_ID: `surface-${surface.id}`, HWS_SURFACE_CLI_CWD: process.cwd() };
+  const environment = {
+    ...process.env,
+    COMPANION_SOCKET: surface.socket,
+    CLAUDE_CODE_SESSION_ID: `surface-${surface.id}`,
+    HWS_SURFACE_CLI_CWD: process.cwd(),
+    HWS_SESSION_FOLDER: surface.sessionFolder ?? '',
+  };
   const ran = spawnSync(process.execPath, [cli, ...args], { stdio: 'inherit', env: environment });
   if (ran.error) throw new HwsError(`could not run ${cli}: ${ran.error.message}`);
   return ran.status ?? 1;

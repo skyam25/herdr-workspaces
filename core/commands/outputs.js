@@ -1,7 +1,8 @@
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 
 import { registeredSession } from '../agent-session.js';
+import { pathWithin } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { terminalInfo } from '../herdr.js';
 import { withLock } from '../lock.js';
@@ -10,8 +11,8 @@ import { requireFlag, splitList } from '../resolve.js';
 
 // `<session folder>/.feedback/outputs/<session id>.json` lists a session's outputs. `hws output add`,
 // `hws output touch` from the plugin's write hook, and the Agent Brief plugin write it. The reader
-// follows companion/src/shared/output-file.ts in the agent-brief repo, but keeps any `kind`, so a
-// kind added there still shows here.
+// follows surface/app/src/shared/output-file.ts, but keeps any `kind`, so a kind added there still
+// shows here.
 
 const TIERS = new Set(['declared', 'detected']);
 const STATUSES = new Set(['drafting', 'ready']);
@@ -68,13 +69,15 @@ function readOutputs(file) {
 // A session id names a file, so one that could leave the outputs folder binds nothing.
 const safeId = (id) => /^[\w.-]+$/.test(id) && id !== '.' && id !== '..';
 
+const outputsFileOf = (folder, id) => join(folder, '.feedback', 'outputs', `${id}.json`);
+
 // Binds a terminal to the session its hook registered. A record without a folder uses the program's folder.
 function agentOutputs(terminal) {
   const session = registeredSession(terminal);
   if (!session || !safeId(session.id)) return { terminal, session: null, folder: null, file: null, outputs: [] };
   const folder = session.folder ?? terminalInfo(terminal)?.foreground?.cwd ?? null;
   if (!folder) return { terminal, session: session.id, folder: null, file: null, outputs: [] };
-  const file = join(folder, '.feedback', 'outputs', `${session.id}.json`);
+  const file = outputsFileOf(folder, session.id);
   return { terminal, session: session.id, folder, file, outputs: readOutputs(file) };
 }
 
@@ -86,7 +89,7 @@ export function outputs(flags) {
 
 // The writer follows mod/agent-brief/hooks/outputs.ts in the agent-brief repo.
 
-// The keys are Agent Brief's DOCUMENT_EXTENSIONS, and SKIP_DIRS is its OUTPUT_SKIP_DIRS.
+// The keys are DOCUMENT_EXTENSIONS in surface/app/src/protocol.ts, and SKIP_DIRS is its OUTPUT_SKIP_DIRS.
 const KIND_BY_EXTENSION = { md: 'markdown', markdown: 'markdown', mdx: 'markdown', html: 'html', htm: 'html', pdf: 'pdf', docx: 'docx', pptx: 'pptx', xlsx: 'xlsx' };
 const SKIP_DIRS = new Set(['.feedback', '.claude', 'node_modules']);
 
@@ -109,24 +112,18 @@ function declaringSession() {
   return { id, folder };
 }
 
-// The nearest existing folder's real path, with the missing rest appended.
-function realPathOf(full) {
-  const rest = [];
-  let at = full;
-  while (!existsSync(at) && dirname(at) !== at) {
-    rest.unshift(basename(at));
-    at = dirname(at);
-  }
-  return join(realpathSync(at), ...rest);
+const isFilePath = (raw) => !/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/[\u0000-\u001f\u007f]/.test(raw);
+
+// The path relative to the session folder, or null for a file outside it or the folder itself.
+function insideRef(folder, raw) {
+  return pathWithin(folder, resolve(raw)) || null;
 }
 
 // A file output is named relative to the session folder. Agent Brief refuses one outside it, and so does this.
 function fileRef(folder, raw) {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || /[\u0000-\u001f\u007f]/.test(raw)) throw new HwsError(`${raw} is not a file path`);
-  const ref = relative(realPathOf(folder), realPathOf(resolve(raw)));
-  if (ref === '' || ref === '..' || ref.startsWith('../') || isAbsolute(ref)) {
-    throw new HwsError(`${raw} is outside the session folder ${folder}, so Outputs would not list it`);
-  }
+  if (!isFilePath(raw)) throw new HwsError(`${raw} is not a file path`);
+  const ref = insideRef(folder, raw);
+  if (ref === null) throw new HwsError(`${raw} is outside the session folder ${folder}, so Outputs would not list it`);
   return ref;
 }
 
@@ -192,27 +189,32 @@ function declaredText(record, folder) {
   return `${line}\nWhen the person asks to review it, run: hws review ${JSON.stringify(join(folder, record.ref))}`;
 }
 
+// Applies one change to the session's outputs file under its lock, and returns the file and the changed record.
+function recordOutput(folder, id, ref, upsert) {
+  const file = outputsFileOf(folder, id);
+  const output = withLock(`outputs-${id}`, () => {
+    const content = readRawOutputs(file, id);
+    const list = upsert(content.outputs);
+    writeJsonAtomic(file, { ...content, outputs: list });
+    keepFeedbackIgnored(folder);
+    return list.find((item) => item?.ref === ref);
+  });
+  return { file, output };
+}
+
 export function outputAdd(flags) {
   const { id, folder } = declaringSession();
   const request = declaration(flags, folder);
-  const file = join(folder, '.feedback', 'outputs', `${id}.json`);
-  const output = withLock(`outputs-${id}`, () => {
-    const content = readRawOutputs(file, id);
-    const list = upsertDeclared(content.outputs, request, Date.now());
-    writeJsonAtomic(file, { ...content, outputs: list });
-    keepFeedbackIgnored(folder);
-    return list.find((item) => item?.ref === request.ref);
-  });
+  const { file, output } = recordOutput(folder, id, request.ref, (list) => upsertDeclared(list, request, Date.now()));
   return { data: { session: id, folder, file, output }, text: declaredText(output, folder) };
 }
 
 // The document's path relative to the session folder, or null for anything Outputs does not list.
 // That is a file outside the folder, one under a skipped folder, or one without a document extension.
 function documentRef(folder, raw) {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || /[\u0000-\u001f\u007f]/.test(raw)) return null;
-  if (!KIND_BY_EXTENSION[extensionOf(raw)]) return null;
-  const ref = relative(realPathOf(folder), realPathOf(resolve(raw)));
-  if (ref === '' || ref === '..' || ref.startsWith('../') || isAbsolute(ref)) return null;
+  if (!isFilePath(raw) || !KIND_BY_EXTENSION[extensionOf(raw)]) return null;
+  const ref = insideRef(folder, raw);
+  if (ref === null) return null;
   return ref.split('/').slice(0, -1).some((dir) => SKIP_DIRS.has(dir)) ? null : ref;
 }
 
@@ -224,13 +226,6 @@ export function outputTouch(flags) {
   const { id, folder } = declaringSession();
   const ref = documentRef(folder, raw);
   if (ref === null) return { data: { session: id, folder, file: null, output: null }, text: '' };
-  const file = join(folder, '.feedback', 'outputs', `${id}.json`);
-  const output = withLock(`outputs-${id}`, () => {
-    const content = readRawOutputs(file, id);
-    const list = upsertWrite(content.outputs, { ref, origin, at: Date.now() });
-    writeJsonAtomic(file, { ...content, outputs: list });
-    keepFeedbackIgnored(folder);
-    return list.find((item) => item?.ref === ref);
-  });
+  const { file, output } = recordOutput(folder, id, ref, (list) => upsertWrite(list, { ref, origin, at: Date.now() }));
   return { data: { session: id, folder, file, output }, text: '' };
 }

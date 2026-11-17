@@ -1,8 +1,9 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { HwsError } from './errors.js';
 import { updateManifest, listManifests } from './manifest.js';
+import { home } from './paths.js';
 import { listRetired } from './retired.js';
 
 // Marks a round of comments on a page. Like a tidy review, it is a message and not stream work.
@@ -11,15 +12,47 @@ export const FEEDBACK_ROLE = 'feedback';
 // Marks the answers to an `hws ask` round, which are a message too.
 export const ANSWERS_ROLE = 'answers';
 
-// Follows symlinks where the path exists, so /tmp and /private/tmp compare equal.
+// Follows symlinks, so /tmp and /private/tmp compare equal. A missing path
+// takes the real path of its nearest existing folder, with the rest appended.
 export function realOf(path) {
-  return existsSync(path) ? realpathSync(path) : resolve(path);
+  const rest = [];
+  let at = resolve(path);
+  while (!existsSync(at) && dirname(at) !== at) {
+    rest.unshift(basename(at));
+    at = dirname(at);
+  }
+  return join(realpathSync(at), ...rest);
+}
+
+// The child's path relative to parent, or null when it lies outside. The parent itself gives ''.
+export function pathWithin(parent, child) {
+  const rel = relative(realOf(parent), realOf(child));
+  return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? null : rel;
 }
 
 // True when child is parent or sits below it.
-export function isInside(parent, child) {
-  const rel = relative(realOf(parent), realOf(child));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+export const isInside = (parent, child) => pathWithin(parent, child) !== null;
+
+// The folder a surface on this file works in. It follows sessionCwd in surface/app/src/main/surface.ts.
+// That is the workspace folder when the file sits below it on a path with no dot folder and the
+// folder is not home. Otherwise it is the file's own folder.
+export function projectRootFor(folder, file) {
+  const root = realOf(folder);
+  const rel = pathWithin(root, file);
+  const plain = Boolean(rel) && rel.split(sep).every((part) => !part.startsWith('.'));
+  return plain && root !== realOf(home()) ? root : dirname(file);
+}
+
+// The parsed Excalidraw scene in a file. Anything else is refused.
+export function readScene(file) {
+  let scene;
+  try {
+    scene = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new HwsError(`${file} is not valid JSON`);
+  }
+  if (!Array.isArray(scene?.elements)) throw new HwsError(`${file} is not an Excalidraw scene`);
+  return scene;
 }
 
 // The artifact that tracks a file. Reviews of the file are filed under it.
@@ -109,10 +142,18 @@ export function relocateArtifact(workspaceId, artifact, targetDir) {
   return targetDir;
 }
 
-export function findArtifact(artifactId) {
-  for (const manifest of [...listManifests({ includeStandalone: true }), ...listRetired()]) {
-    const artifact = manifest.artifacts.find((item) => item.id === artifactId);
+// The first artifact that passes the test, with its manifest, or null. `open` leaves out closed workspaces.
+export function findArtifactWhere(test, { open = false } = {}) {
+  const manifests = listManifests({ includeStandalone: true });
+  for (const manifest of open ? manifests : [...manifests, ...listRetired()]) {
+    const artifact = manifest.artifacts.find(test);
     if (artifact) return { manifest, artifact };
   }
-  throw new HwsError(`no artifact ${artifactId}`);
+  return null;
+}
+
+export function findArtifact(artifactId, { open = false } = {}) {
+  const found = findArtifactWhere((item) => item.id === artifactId, { open });
+  if (!found) throw new HwsError(open ? `no artifact ${artifactId} in an open workspace` : `no artifact ${artifactId}`);
+  return found;
 }

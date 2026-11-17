@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -40,8 +40,18 @@ test('surface cli runs the verb on the terminal surface as its stand-in session'
     socket: surface.socket,
     session: `surface-${surface.id}`,
     cwd: shell,
+    sessionFolder: realpathSync(manifest.folder),
     stdin: '{"version":"missing"}',
   });
+});
+
+test('surface cli passes an empty session folder for a board', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  openListening(t, box, ['--type', 'board', '--in-pane', '--terminal', owner]);
+  const result = cli(box, ['--terminal', owner, '--', 'status'], { env: { HWS_SESSION_FOLDER: '/stale' } });
+  assert.equal(JSON.parse(result.stdout).sessionFolder, '');
 });
 
 test('surface cli passes the exit code through', (t) => {

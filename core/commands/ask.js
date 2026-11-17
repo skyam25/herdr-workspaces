@@ -58,7 +58,6 @@ function askText(asked, kept, dropped, windowed) {
 export async function ask(flags) {
   const asked = readAsked(flags);
   const terminal = requireCallingTerminal(flags);
-  if (terminal.includes('/')) throw new HwsError(`surfaces run on this computer, and ${terminal} is on another machine`);
 
   const { rounds, held, heldDir } = await endEarlierRounds(terminal);
   const round = mergeRound(held, asked);

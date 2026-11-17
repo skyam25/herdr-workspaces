@@ -126,6 +126,7 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `agents[].transcript` | The transcript's absolute path, when it is not where `folder` puts it. Absent otherwise |
 | `surfaces[].file` | The file a note or page shows, or the drawing a reopened sketch started from. Absent otherwise |
 | `surfaces[].reopens` | On a reopened sketch, the id of the artifact its next Done bundle replaces. Absent otherwise |
+| `surfaces[].sessionFolder` | On a note or page with a local file, the [session folder](#host-environment) its host was given. Each write of the record works it out again, so a moved surface gets its new workspace's. Absent otherwise |
 | `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. `feedback` on the Done bundle of any other page that shows a file. `answers` on the Done bundle of a round from `hws ask`. Freshness and `hws artifact scan` leave all three out, and the panel lists none as an artifact of its own. Absent on other artifacts |
 | `artifacts[].file` | On a `feedback` round, the absolute path of the file the page showed. Absent otherwise |
 | `artifacts[].reviewOf` | On a `feedback` round, the id of the `file` artifact that tracked that file at Done, or null when none did. Absent otherwise |
@@ -626,12 +627,13 @@ Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live.
 | `HWS_SURFACE_TITLE` | Title. `run.sh` sets it as the terminal title, which the pane header shows |
 | `HWS_SURFACE_FILE` | File for a page or note, else empty |
 | `HWS_FOLDER` | Workspace folder, else `$HOME` |
+| `HWS_SESSION_FOLDER` | Session folder for a note or page with a local file, by the table below. Empty for a board, questions, a URL or no file, so the host keeps its work folder |
 | `COMPANION_SOCKET` | The surface socket |
 | `COMPANION_DATA_DIR` | The surface data folder |
 
 The host's start script is `surface/run.sh`.
 
-The host registers a stand-in session `surface-<surface id>` on the surface socket. Its folder decides what project-relative paths mean on that socket.
+The host registers a stand-in session `surface-<surface id>` on the surface socket. Its folder decides what project-relative paths mean on that socket. `hws` works it out with `projectRootFor` in `core/artifacts.js`, and `hws phone send` serves a page from the same folder.
 
 | Surface | Session folder |
 |---|---|
@@ -646,7 +648,7 @@ The host registers a stand-in session `surface-<surface id>` on the surface sock
 | Item | Behaviour |
 |---|---|
 | Surface | The newest surface of T, default `$HC_TERMINAL_ID`, whose title is X and type is K when given, whose window is open or which has a pane, and whose socket exists |
-| Environment | `COMPANION_SOCKET` is the surface socket and `CLAUDE_CODE_SESSION_ID` is `surface-<id>`, so session verbs act on the surface's stand-in session. `HWS_SURFACE_CLI_CWD` is the folder `hws` ran in |
+| Environment | `COMPANION_SOCKET` is the surface socket and `CLAUDE_CODE_SESSION_ID` is `surface-<id>`, so session verbs act on the surface's stand-in session. `HWS_SURFACE_CLI_CWD` is the folder `hws` ran in. `HWS_SESSION_FOLDER` is the surface's `sessionFolder`, or empty when it has none |
 | Pass-through | Everything after `--` reaches the CLI unchanged, `--json` and `--help` included. stdin, stdout, stderr and the exit code are the CLI's own |
 | Failures | No `--`, no verb or a bad flag exits 2. No matching open surface, or no built CLI, exits 1 with the reason |
 | Paths | The paths `outline`, `feedback` and `behavior` send to the app count from `HWS_SURFACE_CLI_CWD`, as the shell names them. That covers outline paths, `--path`, `--target`, feedback outputs and behavior prototypes. Each is then made relative to the [session folder](#host-environment), and one outside it exits 2. Files the CLI reads itself, such as `--ops`, `--items` and `--file`, count from the current folder. Without `HWS_SURFACE_CLI_CWD` a relative path passes as it is |

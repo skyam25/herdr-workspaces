@@ -1,6 +1,7 @@
-import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { basename, dirname } from 'node:path';
 
+import { pathWithin, projectRootFor, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { manifestOfSpace, readManifest } from '../manifest.js';
 import { STANDALONE, home } from '../paths.js';
@@ -11,7 +12,7 @@ import { callingTerminal, spaceOfTerminal } from '../resolve.js';
 const SUFFIX = '.outline.md';
 const KINDS = ['document', 'page'];
 
-const isOutlinePath = (path) => path.endsWith(SUFFIX) && basename(path).length > SUFFIX.length;
+export const isOutlinePath = (path) => path.endsWith(SUFFIX) && basename(path).length > SUFFIX.length;
 
 // `docs/memo.md` becomes `docs/memo.outline.md`. A name without an extension gets the suffix appended.
 function outlinePathFor(target) {
@@ -32,17 +33,6 @@ function outlineSlugPath(title) {
   return `${slug || 'outline'}${SUFFIX}`;
 }
 
-// The nearest existing folder's real path, with the missing rest appended.
-function realPathOf(full) {
-  const rest = [];
-  let at = full;
-  while (!existsSync(at) && dirname(at) !== at) {
-    rest.unshift(basename(at));
-    at = dirname(at);
-  }
-  return join(realpathSync(at), ...rest);
-}
-
 // The folder `hws review` gives the surface: the calling terminal's workspace, else the standalone one.
 function reviewFolder(flags) {
   const terminal = callingTerminal(flags);
@@ -54,15 +44,6 @@ function reviewFolder(flags) {
   }
   const manifest = (space && manifestOfSpace(space)) || readManifest(STANDALONE);
   return manifest?.folder ?? home();
-}
-
-// The project a surface on this file works in. It follows sessionCwd in surface/app/src/main/surface.ts.
-function projectRoot(file, flags) {
-  const folder = realPathOf(reviewFolder(flags));
-  const rel = relative(folder, file);
-  const inside = rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
-  const plain = inside && rel.split(sep).every((part) => !part.startsWith('.'));
-  return plain && folder !== realPathOf(home()) ? folder : dirname(file);
 }
 
 function oneLine(value, what, max) {
@@ -78,16 +59,14 @@ export function outlineNew(flags, words) {
   const title = oneLine(words.join(' '), 'the title', 300);
   const kind = flags.kind ?? 'document';
   if (!KINDS.includes(kind)) throw new UsageError('--kind must be document or page');
-  const target = flags.target ? realPathOf(resolve(oneLine(flags.target, '--target', 1000))) : null;
-  const file = realPathOf(resolve(flags.path ?? (target ? outlinePathFor(target) : outlineSlugPath(title))));
+  const target = flags.target ? realOf(oneLine(flags.target, '--target', 1000)) : null;
+  const file = realOf(flags.path ?? (target ? outlinePathFor(target) : outlineSlugPath(title)));
   if (!isOutlinePath(file)) throw new UsageError(`${file} is not an outline. Outline files end in ${SUFFIX}`);
   if (lstatSync(file, { throwIfNoEntry: false })) throw new HwsError(`${file} already exists. Open it with hws review, or pass --path for a new file`);
 
-  const root = projectRoot(file, flags);
-  const targetRef = target ? relative(root, target) : null;
-  if (targetRef !== null && (targetRef === '' || targetRef.split(sep).includes('..') || isAbsolute(targetRef))) {
-    throw new HwsError(`--target must be inside ${root}, the folder the outline's surface works in`);
-  }
+  const root = projectRootFor(reviewFolder(flags), file);
+  const targetRef = target ? pathWithin(root, target) : null;
+  if (target && !targetRef) throw new HwsError(`--target must be inside ${root}, the folder the outline's surface works in`);
 
   const meta = [...(targetRef ? [`Target: ${targetRef}`] : []), `Kind: ${kind}`];
   mkdirSync(dirname(file), { recursive: true });

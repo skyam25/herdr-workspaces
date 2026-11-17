@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { UsageError } from './errors.js';
 
 export const MAX_QUESTIONS = 8;
-export const MIN_OPTIONS = 2;
+const MIN_OPTIONS = 2;
 
 // Buttons fit four short choices. A dropdown holds six.
-export const MAX_OPTIONS = { options: 4, select: 6 };
+const MAX_OPTIONS = { options: 4, select: 6 };
 const KINDS = ['options', 'select', 'text'];
 
 // `hws ask` writes the round. The host writes the person's answers beside it.
@@ -39,7 +39,7 @@ function parseQuestion(raw, at) {
 }
 
 // Takes `[...]` or `{ questions: [...] }`. A bad shape exits 2 with the field it names.
-export function parseQuestions(value) {
+function parseQuestions(value) {
   const list = Array.isArray(value) ? value : value?.questions;
   if (!Array.isArray(list)) throw new UsageError('questions must be an array, or an object with a questions array');
   if (list.length < 1 || list.length > MAX_QUESTIONS) throw new UsageError(`questions must hold 1 to ${MAX_QUESTIONS} questions`);

@@ -40,7 +40,6 @@ import { UsageError } from './errors.js';
 const text = { type: 'string' };
 const flag = { type: 'boolean' };
 const repeated = { type: 'string', multiple: true };
-const SURFACE_CLI_OPTIONS = { terminal: text, title: text, type: text };
 
 const ROUTES = [
   { path: ['new', 'terminal'], run: newTerminal, prunes: true, options: { folder: text } },
@@ -89,7 +88,7 @@ const ROUTES = [
   { path: ['surface', 'discard'], run: surfaceDiscard, options: { id: text } },
   { path: ['surface', 'pop'], run: surfacePop, options: { id: text, to: text } },
   { path: ['surface', 'socket'], run: surfaceSocket, options: { terminal: text, title: text } },
-  { path: ['surface', 'cli'], run: surfaceCli, options: SURFACE_CLI_OPTIONS },
+  { path: ['surface', 'cli'], run: surfaceCli, options: { terminal: text, title: text, type: text } },
   { path: ['surface', 'move'], run: surfaceMove, options: { id: text, workspace: text } },
   { path: ['surface', 'targets'], run: surfaceTargets, options: { id: text } },
   { path: ['unfiled'], run: unfiledList, options: {} },
@@ -227,12 +226,12 @@ function runSurfaceCli(argv) {
   }
   try {
     if (split === -1) throw new UsageError('put -- before the agent-brief verb, such as: hws surface cli -- status');
-    const { values } = parseArgs({ args: own, options: SURFACE_CLI_OPTIONS, allowPositionals: false, strict: true });
-    process.exitCode = surfaceCli(values, argv.slice(split + 1));
+    const path = ['surface', 'cli'];
+    const { flags } = parseRouteArgs(findRoute(path), [...path, ...own]);
+    process.exitCode = surfaceCli(flags, argv.slice(split + 1));
   } catch (error) {
-    const usage = error instanceof UsageError || error.code?.startsWith('ERR_PARSE_ARGS');
     console.error(error.message);
-    process.exitCode = usage ? 2 : 1;
+    process.exitCode = error instanceof UsageError ? 2 : 1;
   }
 }
 
