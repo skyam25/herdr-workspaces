@@ -7,7 +7,7 @@ import type { SurfaceState } from '../shared/ipc';
 import { answersPrompt, type Question } from '../shared/questions';
 import { boardCommentsMarkdown } from '../shared/board-comments';
 import { BoardStore } from './store';
-import { boardName, bundleSignature, importSeed, openRequest, prepareBundle, readRound, SEED_DIR, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
+import { boardName, bundleSignature, importSeed, openRequest, prepareBundle, readRound, SEED_DIR, SEEDED_FILE, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
 
 const QUESTIONS: Question[] = [
   { id: 'audience', text: 'Who reads it?', kind: 'options', options: ['Engineers', 'Managers'] },
@@ -133,6 +133,19 @@ describe('importSeed', () => {
     expect(store.load('flow')).toEqual({ scene, notes: 'Remember the footer.' });
     expect(store.listComments().flow.pins).toEqual([pin]);
     expect(existsSync(join(dataDir, SEED_DIR))).toBe(false);
+  });
+
+  it('records what the seed put on the board, so hws can tell an untouched board', () => {
+    const drawn = JSON.stringify({ elements: [{ id: 'r2', version: 4 }, { id: 'r1' }, { id: 'gone', version: 2, isDeleted: true }] });
+    const { dataDir, store } = seeded({ 'board.excalidraw': drawn, 'comments.json': JSON.stringify({ overall: '', pins: [pin] }) });
+    importSeed(config({ title: 'flow', dataDir }), store);
+    const record = JSON.parse(readFileSync(join(dataDir, SEEDED_FILE), 'utf8'));
+    expect(record).toEqual({ board: 'flow', elements: ['r1:1', 'r2:4'], comments: store.listComments().flow });
+    expect(JSON.parse(readFileSync(join(dataDir, 'boards', 'flow.comments.json'), 'utf8'))).toEqual(record.comments);
+
+    const bare = seeded({ 'board.excalidraw': scene });
+    importSeed(config({ title: 'flow', dataDir: bare.dataDir }), bare.store);
+    expect(JSON.parse(readFileSync(join(bare.dataDir, SEEDED_FILE), 'utf8')).comments).toBeNull();
   });
 
   it('reads comments.md when the bundle has no comments.json', () => {

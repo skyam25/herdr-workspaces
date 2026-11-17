@@ -354,15 +354,21 @@ function realPathOf(full: string): string {
   return path.join(realpathSync(at), ...rest);
 }
 
+/** The shell folder `hws surface cli` ran in. Relative paths count from it. */
+const SURFACE_CWD_ENV = 'HWS_SURFACE_CLI_CWD';
+
 /**
  * An absolute path becomes relative to the session's folder, which a surface's stand-in session
- * may not share with the shell. A relative path is already project-relative and passes as it is.
+ * may not share with the shell. Under `hws surface cli` a relative path counts from the shell's
+ * folder first. Otherwise it is already project-relative and passes as it is.
  */
 async function sessionRelative(ctx: Ctx, raw: string, verb: string): Promise<string> {
-  if (!path.isAbsolute(raw)) return raw;
+  const shell = ctx.io.env[SURFACE_CWD_ENV];
+  if (!path.isAbsolute(raw) && !shell) return raw;
+  const full = path.resolve(shell ?? '', raw);
   const session = requireSession(ctx, verb);
   const { cwd } = await callJson<SessionInfo>(ctx.socket, 'GET', `/sessions/${encodeURIComponent(session)}`);
-  const rel = path.relative(realPathOf(cwd), realPathOf(raw));
+  const rel = path.relative(realPathOf(cwd), realPathOf(full));
   if (rel === '' || rel === '..' || rel.startsWith('../') || path.isAbsolute(rel)) {
     throw new UsageError(`${raw} is outside the session's project, ${cwd}`);
   }

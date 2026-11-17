@@ -131,9 +131,33 @@ function seedComments(dir: string): BoardComments | undefined {
 }
 
 /**
+ * What a seed put on its board: the board's name, each live element as `id:version`, and the comments as saved.
+ * `hws` compares the board with it, so a reopened sketch closed without edits leaves no draft.
+ */
+export const SEEDED_FILE = 'seeded.json';
+
+export interface Seeded {
+  board: string;
+  elements: string[];
+  comments: BoardComments | null;
+}
+
+/**
+ * Each live element as `id:version`, sorted. An edit raises an element's version, and Excalidraw
+ * reads a missing version as 1. `core/surface-windows.js` computes the same list.
+ */
+export function elementSignature(elements: unknown[]): string[] {
+  return elements
+    .filter((e): e is { id: string; version?: number; isDeleted?: boolean } => typeof e === 'object' && e !== null && typeof (e as { id?: unknown }).id === 'string')
+    .filter((e) => !e.isDeleted)
+    .map((e) => `${e.id}:${e.version || 1}`)
+    .sort();
+}
+
+/**
  * Loads the drawing `hws` seeded into a sketch's board, with its comments and notes, then removes the seed.
- * The seed replaces whatever the board held. Returns the board's name, or undefined when there was no seed.
- * A scene that does not parse throws and leaves the seed in place.
+ * The seed replaces whatever the board held, and `seeded.json` records it. Returns the board's name, or
+ * undefined when there was no seed. A scene that does not parse throws and leaves the seed in place.
  */
 export function importSeed(cfg: Pick<SurfaceConfig, 'type' | 'title' | 'dataDir'>, store: SeedStore): string | undefined {
   if (cfg.type !== 'board' || !cfg.dataDir) return undefined;
@@ -143,9 +167,12 @@ export function importSeed(cfg: Pick<SurfaceConfig, 'type' | 'title' | 'dataDir'
   const parsed = parseJson(scene) as { elements?: unknown } | undefined;
   if (!Array.isArray(parsed?.elements)) throw new Error('the seeded drawing is not an Excalidraw scene');
   const name = store.create(boardName(cfg.title));
+  const comments = cleanBoardComments(seedComments(dir) ?? { overall: '', pins: [] }) ?? null;
   store.saveScene(name, scene);
   store.saveNotes(name, readIfThere(join(dir, 'notes.md')) ?? '');
-  store.saveComments(name, seedComments(dir) ?? { overall: '', pins: [] });
+  store.saveComments(name, comments ?? { overall: '', pins: [] });
+  const seeded: Seeded = { board: name, elements: elementSignature(parsed.elements), comments };
+  writeFileSync(join(cfg.dataDir, SEEDED_FILE), JSON.stringify(seeded, null, 2));
   rmSync(dir, { recursive: true, force: true });
   return name;
 }

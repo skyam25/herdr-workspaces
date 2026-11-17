@@ -268,13 +268,37 @@ function assertScene(file) {
   if (!Array.isArray(scene?.elements)) throw new HwsError(`${file} is not an Excalidraw scene`);
 }
 
-function artifactSource({ manifest, artifact }) {
-  if (artifact.type !== 'board') throw new HwsError(`artifact ${artifact.id} is a ${artifact.type}, and only a sketch reopens on a board`);
+// The newest sketch down A's `supersedes` chain that is not itself superseded, or null.
+function newestVersion(manifest, artifact) {
+  const seen = new Set([artifact.id]);
+  const versions = [];
+  let front = [artifact.id];
+  while (front.length > 0) {
+    const next = manifest.artifacts.filter((item) => item.type === 'board' && front.includes(item.supersedes) && !seen.has(item.id));
+    for (const item of next) seen.add(item.id);
+    versions.push(...next.filter((item) => item.status !== 'superseded'));
+    front = next.map((item) => item.id);
+  }
+  return versions.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0] ?? null;
+}
+
+// A superseded sketch opens its newest version, so a second Done never forks its history.
+function artifactSource({ manifest, artifact: named }) {
+  if (named.type !== 'board') throw new HwsError(`artifact ${named.id} is a ${named.type}, and only a sketch reopens on a board`);
   if (manifest.archived) throw new HwsError(`${manifest.name} is archived, so restore it first`);
+  const newest = named.status === 'superseded' ? newestVersion(manifest, named) : null;
+  const artifact = newest ?? named;
   const file = join(artifact.path, BUNDLE_SCENE);
   if (!existsSync(file)) throw new HwsError(`sketch ${artifact.id} has no drawing to reopen`);
   assertScene(file);
-  return { file: realOf(file), manifest, artifact, title: artifact.title };
+  return { file: realOf(file), manifest, artifact, title: artifact.title, ...(newest ? { newestOf: named.id } : {}) };
+}
+
+// Names the version a superseded sketch opened in place of the one asked for.
+function withNewestNote(result, source) {
+  if (!source?.newestOf) return result;
+  const note = `${source.newestOf} is superseded, so this opens its newest version ${source.artifact.id}`;
+  return { data: { ...result.data, newestOf: source.newestOf }, text: `${note}\n${result.text}` };
 }
 
 // What a board opens on: a sketch artifact, a file inside one, or a plain `.excalidraw` file. Null for a blank board.
@@ -316,6 +340,10 @@ export async function openSurface(flags, { prepare } = {}) {
   const terminal = ownerTerminal(flags);
   if (terminal?.includes('/')) throw new HwsError(`surfaces run on this computer, and ${terminal} is on another machine`);
   const source = boardSource(flags);
+  return withNewestNote(await openOn(flags, { windowed, terminal, source, prepare }), source);
+}
+
+async function openOn(flags, { windowed, terminal, source, prepare }) {
   const live = requireLive();
 
   // A reopened sketch belongs to the workspace that holds its artifact.
@@ -323,7 +351,10 @@ export async function openSurface(flags, { prepare } = {}) {
   const workspace = source?.manifest ?? placement.workspace ?? ensureStandaloneManifest();
   const file = flags.type === 'questions' ? '' : flags.type === 'board' ? (source?.file ?? '') : resolveFile(flags.file);
   const reopens = source?.artifact?.id;
-  const surfaceId = surfaceIdFor(workspace, { type: flags.type, file, terminal, reopens });
+
+  // Done moves a sketch surface's `reopens` to the new version, so the surface is found by it too.
+  const following = reopens ? workspace.surfaces.find((item) => item.type === 'board' && item.reopens === reopens) : null;
+  const surfaceId = following?.id ?? surfaceIdFor(workspace, { type: flags.type, file, terminal, reopens });
 
   // A file's surface shows again where it already is, whatever the flags say.
   const already = workspace.surfaces.find((surface) => surface.id === surfaceId);
@@ -691,8 +722,9 @@ function unlinkDrafts(dataDir) {
 }
 
 // Puts real draft folders under the workspace's drafts place and links them back.
+// Questions keep no drafts, so they get no folder.
 function relinkDrafts(workspace, surface, dataDir) {
-  const place = draftsPlace(workspace);
+  const place = surface.type === 'questions' ? null : draftsPlace(workspace);
   if (!place) return;
   const home = join(place, `${slug(draftName(surface))}-${surface.id}`);
   for (const entry of DRAFT_ENTRIES) {
@@ -845,7 +877,8 @@ export function surfaceCli(flags, args) {
   }
   const cli = process.env.HWS_SURFACE_CLI || SURFACE_CLI;
   if (!existsSync(cli)) throw new HwsError(`no surface CLI at ${cli}. Run install.sh to build the surface`);
-  const environment = { ...process.env, COMPANION_SOCKET: surface.socket, CLAUDE_CODE_SESSION_ID: `surface-${surface.id}` };
+  // The session folder can differ from the shell's, so the CLI resolves relative paths from HWS_SURFACE_CLI_CWD.
+  const environment = { ...process.env, COMPANION_SOCKET: surface.socket, CLAUDE_CODE_SESSION_ID: `surface-${surface.id}`, HWS_SURFACE_CLI_CWD: process.cwd() };
   const ran = spawnSync(process.execPath, [cli, ...args], { stdio: 'inherit', env: environment });
   if (ran.error) throw new HwsError(`could not run ${cli}: ${ran.error.message}`);
   return ran.status ?? 1;

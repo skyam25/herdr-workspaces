@@ -128,6 +128,46 @@ test('a second round closes the first, keeps its answers and drops those asked a
   assert.deepEqual(surfaces.map((item) => [item.id, item.pane]), [[second.id, second.pane]]);
 });
 
+test('a round that fails to open keeps the earlier round and its answers', (t) => {
+  const { box, manifest, owner } = setup(t);
+  const first = box.json(['ask', '--file', askFile(box), '--terminal', owner]);
+  const answers = { audience: { answer: 'Engineers' }, format: { answer: 'Deck' } };
+  writeFileSync(join(dataOf(box, manifest, first), 'answers.json'), JSON.stringify({ answers }));
+  box.setState({ failDo: ['pane.split'] });
+
+  const again = [{ id: 'audience', text: 'Who reads it now?', kind: 'text' }];
+  const failed = box.hws(['ask', '--file', askFile(box, again), '--terminal', owner]);
+
+  assert.equal(failed.code, 1);
+  assert.deepEqual(readData(box, manifest, first, 'questions.json').questions, ROUND);
+  assert.deepEqual(readData(box, manifest, first, 'answers.json').answers, answers);
+  assert.deepEqual(box.manifest(manifest.id).surfaces.map((item) => item.id), [first.id]);
+
+  box.setState({ failDo: [] });
+  const next = box.json(['ask', '--file', askFile(box, [{ id: 'tone', text: 'Which tone?', kind: 'text' }]), '--terminal', owner]);
+  assert.equal(next.kept, 2);
+  assert.deepEqual(readData(box, manifest, next, 'answers.json').answers, answers);
+});
+
+test('a round holds at most 8 questions, keeping the newest answered ones', (t) => {
+  const { box, manifest, owner } = setup(t);
+  const question = (id) => ({ id, text: `Question ${id}?`, kind: 'text' });
+  const first = box.json(['ask', '--file', askFile(box, ['a', 'b', 'c', 'd', 'e', 'f'].map(question)), '--terminal', owner]);
+  const answers = Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f'].map((id) => [id, { answer: id.toUpperCase() }]));
+  writeFileSync(join(dataOf(box, manifest, first), 'answers.json'), JSON.stringify({ answers }));
+
+  const result = box.hws(['ask', '--file', askFile(box, ['x', 'y', 'z'].map(question)), '--terminal', owner]);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Asked 3 questions in a pane beside this terminal\. 5 answered questions from the last round stay\. 1 older answer left the round, which holds 8 questions\./);
+  const round = readData(box, manifest, first, 'questions.json').questions;
+  assert.deepEqual(round.map((item) => item.id), ['b', 'c', 'd', 'e', 'f', 'x', 'y', 'z']);
+  assert.deepEqual(Object.keys(readData(box, manifest, first, 'answers.json').answers), ['b', 'c', 'd', 'e', 'f']);
+
+  const full = box.json(['ask', '--file', askFile(box, ['1', '2', '3', '4', '5', '6', '7', '8'].map(question)), '--terminal', owner]);
+  assert.deepEqual([full.asked, full.kept, full.dropped], [8, 0, 5]);
+});
+
 test('done delivers the answers as one prompt, files them as a message and closes the pane', (t) => {
   const { box, manifest, owner } = setup(t);
   const surface = box.json(['ask', '--file', askFile(box), '--terminal', owner]);
@@ -163,6 +203,19 @@ test('a closed window with an answer stays as a draft, and one with none goes at
   box.json(['prune']);
   assert.deepEqual(box.manifest(manifest.id).surfaces, []);
   assert.ok(!existsSync(join(manifest.folder, '.herdr-workspace', `${manifest.name}-${manifest.id.slice(-6)}`, 'scratch', 'drafts')));
+});
+
+test('a moved round takes its answers and makes no drafts folder', (t) => {
+  const { box, manifest, owner } = setup(t);
+  const other = box.app('other');
+  const surface = box.json(['ask', '--file', askFile(box), '--terminal', owner, '--window']);
+  const answers = { deadline: { answer: 'Friday' } };
+  writeFileSync(join(dataOf(box, manifest, surface), 'answers.json'), JSON.stringify({ answers }));
+
+  box.json(['surface', 'move', '--id', surface.id, '--workspace', other.id]);
+
+  assert.deepEqual(readData(box, other, surface, 'answers.json').answers, answers);
+  assert.ok(!existsSync(join(other.folder, '.herdr-workspace', `${other.name}-${other.id.slice(-6)}`, 'scratch', 'drafts')));
 });
 
 test('surface open leaves questions to hws ask', (t) => {
