@@ -236,7 +236,7 @@ Tell the person that the note stays as it is until they press Done. Do not poll.
 
 | Feedback | Do |
 |---|---|
-| `I reviewed proposal.md in Agent Brief and changed nothing`, or accepts in words | `hws tidy apply --file <packet folder>/proposal.json` |
+| `I reviewed proposal.md in Herdr and changed nothing`, or accepts in words | `hws tidy apply --file <packet folder>/proposal.json` |
 | Turns down whole parts | Add `--skip` with any of `current`, `decisions`, `demote`, `artifacts`, `cards` |
 | `My edited copy of proposal.md`, comments, or asks for changes | Carry the changes into both files and open the page again. `hws tidy apply` reads only `proposal.json` |
 | Cancels | `hws tidy stop`, or just end the turn when you started with `--here` |

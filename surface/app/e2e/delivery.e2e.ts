@@ -413,7 +413,7 @@ test('pinned comments on the board go out as comments.md, and the board stays wh
   const delivered = (await sock<DeliveriesResponse>(socketPath, 'GET', '/deliveries?session=s1&wait=0')).body.deliveries[0];
   expect(delivered.draft.split('\n').slice(0, 2)).toEqual([
     `@.feedback/sketches/${id}/comments.md`,
-    'Feedback on the board "scratch" from Agent Brief, 1 comment pinned to the board. Make the changes, on the board where they belong, then say what changed.',
+    'Feedback on the sketch "scratch" from Herdr, 1 comment pinned to the sketch. Make the changes, on the sketch where they belong, then say what changed.',
   ]);
 
   // The board stays for Claude to revise; the pins and the column go.

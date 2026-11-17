@@ -139,7 +139,7 @@ test('a dev server opens in the review pane, and pins keep the route they were m
   await page.getByTestId('send').click();
   await expect.poll(async () => (await deliveriesFor(socketPath, 's1')).length).toBe(1);
   const [delivery] = await deliveriesFor(socketPath, 's1');
-  expect(delivery!.draft).toContain(`Review of the running app at ${origin}/ from Agent Brief, 3 comments pinned to the pages.`);
+  expect(delivery!.draft).toContain(`Review of the running app at ${origin}/ from Herdr, 3 comments pinned to the pages.`);
   const md = readFileSync(join(delivery!.dir, 'review.md'), 'utf8');
   expect(md).toContain(`# Review of ${origin}/`);
   expect(md).toMatch(/## 1\. h2 “Featured”\n\nShow three products\.\n\n- Element:/);

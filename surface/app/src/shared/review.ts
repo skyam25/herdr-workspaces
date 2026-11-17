@@ -179,8 +179,8 @@ export function reviewMarkdown(review: ReviewPayload, picturePath: (id: string) 
     `# Review of ${review.path}`,
     '',
     site
-      ? `Comments pinned to elements of the running app at ${review.path} in Agent Brief. Each names its element with a CSS selector, the text it showed, and the nearest heading above it. Find the source behind each element in this project.`
-      : 'Comments pinned to elements of the page in Agent Brief. Each names its element with a CSS selector, the text it showed, and the nearest heading above it.',
+      ? `Comments pinned to elements of the running app at ${review.path} in Herdr. Each names its element with a CSS selector, the text it showed, and the nearest heading above it. Find the source behind each element in this project.`
+      : 'Comments pinned to elements of the page in Herdr. Each names its element with a CSS selector, the text it showed, and the nearest heading above it.',
   ];
   const overall = review.body?.trim();
   if (overall) lines.push('', '## Overall', '', overall);
@@ -215,21 +215,21 @@ export function reviewMarkdown(review: ReviewPayload, picturePath: (id: string) 
 
 /** The prompt line after the `@review.md` line. */
 export function reviewAsk(review: ReviewPayload): string {
-  if (review.behavior) return `Review of ${review.path} from Agent Brief, including behavior decisions. Use the behavior-review skill: apply confirmed behaviors within the requested scope, keep assumptions open, and update the specification through agent-brief behavior. Confirmation does not mean implementation or verification.`;
+  if (review.behavior) return `Review of ${review.path} from Herdr, including behavior decisions. Use the behavior-review skill: apply confirmed behaviors within the requested scope, keep assumptions open, and update the specification through hws surface cli --type page -- behavior. Confirmation does not mean implementation or verification.`;
   const n = review.comments.length;
   const e = review.edits?.length ?? 0;
   if (e && !n && !review.body?.trim()) {
-    return `Review of ${review.path} from Agent Brief: ${editCount(e)} made in the pane, already saved in the file. Check them and tidy the markup where it needs it, then say what changed.`;
+    return `Review of ${review.path} from Herdr: ${editCount(e)} made in the pane, already saved in the file. Check them and tidy the markup where it needs it, then say what changed.`;
   }
   const pages = review.comments.some((c) => c.anchor.page);
   const what = n ? `${commentCount(n)} pinned to the ${pages ? 'pages' : 'page'}` : 'an overall note';
   if (isLocalUrl(review.path)) {
-    return `Review of the running app at ${review.path} from Agent Brief, ${what}. Find the source behind each pinned element in this project and make the changes, then say what changed.`;
+    return `Review of the running app at ${review.path} from Herdr, ${what}. Find the source behind each pinned element in this project and make the changes, then say what changed.`;
   }
   const saved = e ? `, plus ${editCount(e)} already saved in the file` : '';
   const items = review.comments.some((c) => c.feedback)
     ? ' Some pins name feedback items. Follow the feedback-items skill: log a Review line on each named item, and catalog a pin that matches no item as a new item when it is new feedback.'
     : '';
   const where = pages ? `${review.path} and the other pages the comments name` : review.path;
-  return `Review of ${review.path} from Agent Brief, ${what}${saved}. Make the changes in ${where}, then say what changed.${items}`;
+  return `Review of ${review.path} from Herdr, ${what}${saved}. Make the changes in ${where}, then say what changed.${items}`;
 }

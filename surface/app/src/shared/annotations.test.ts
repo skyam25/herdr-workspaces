@@ -33,13 +33,13 @@ describe('note annotations', () => {
 
   it('asks for a revised note, or for changes to the source file', () => {
     expect(annotationsAsk({ title: 'Recap', comments: [comment] })).toBe(
-      'Comments on the note “Recap” from Agent Brief, 1 comment on passages. Revise the note to address them, save the new version with `agent-brief note "Recap"`, open it with the line that command prints, then say what changed.',
+      'Comments on the note “Recap” from Herdr, 1 comment on passages. Revise the note to address them. Write the full new text to a Markdown file, open it with `hws surface open --type note --file <file> --terminal $HC_TERMINAL_ID`, then say what changed.',
     );
     expect(annotationsAsk({ title: 'Recap', noteId: 'd7', comments: [comment] })).toBe(
-      'Comments on the note “Recap” from Agent Brief, 1 comment on passages. Revise the note in place: run `agent-brief note --id d7` with the full new text, then `agent-brief open --note d7`, then say what changed.',
+      'Comments on the note “Recap” from Herdr, 1 comment on passages. Revise the note to address them. Write the full new text to a Markdown file, open it with `hws surface open --type note --file <file> --terminal $HC_TERMINAL_ID`, then say what changed.',
     );
     expect(annotationsAsk({ comments: [], overall: 'x' }, 'docs/plan.md')).toBe(
-      'Comments on docs/plan.md from Agent Brief, an overall comment. Make the changes in docs/plan.md, keep what the comments do not touch, then say what changed.',
+      'Comments on docs/plan.md from Herdr, an overall comment. Make the changes in docs/plan.md, keep what the comments do not touch, then say what changed.',
     );
   });
 });

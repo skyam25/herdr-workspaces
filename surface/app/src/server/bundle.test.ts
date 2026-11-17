@@ -8,7 +8,7 @@ const sketch = { png: Buffer.from('png'), scene: { elements: [] }, boardName: 'f
 
 describe('buildDraft', () => {
   it('points at the sketch and names the board', () => {
-    expect(buildDraft('id1', sketch)).toBe('@.feedback/sketches/id1/sketch.png\nSketch from the Agent Brief board "flow".');
+    expect(buildDraft('id1', sketch)).toBe('@.feedback/sketches/id1/sketch.png\nSketch from the Herdr sketch "flow".');
   });
 
   it('sends a written draft alone word for word', () => {
@@ -22,7 +22,7 @@ describe('buildDraft', () => {
       'Build this flow.',
       '',
       '@.feedback/sketches/id1/sketch.png',
-      'Sketch from the Agent Brief board "flow".',
+      'Sketch from the Herdr sketch "flow".',
     ]);
   });
 });
@@ -35,12 +35,12 @@ describe('a note with comments on its passages', () => {
     expect(buildDraft('id1', note).split('\n')).toEqual([
       '@.feedback/sketches/id1/draft.md',
       '@.feedback/sketches/id1/annotations.md',
-      'Comments on the note “Recap” from Agent Brief, 1 comment on passages. Revise the note to address them, save the new version with `agent-brief note "Recap"`, open it with the line that command prints, then say what changed.',
+      'Comments on the note “Recap” from Herdr, 1 comment on passages. Revise the note to address them. Write the full new text to a Markdown file, open it with `hws surface open --type note --file <file> --terminal $HC_TERMINAL_ID`, then say what changed.',
     ]);
   });
 
   it('asks for changes in the file when the note copies one', () => {
-    expect(buildDraft('id1', { ...note, sourcePath: 'docs/plan.md' }).split('\n')[2]).toMatch(/^Comments on docs\/plan\.md from Agent Brief/);
+    expect(buildDraft('id1', { ...note, sourcePath: 'docs/plan.md' }).split('\n')[2]).toMatch(/^Comments on docs\/plan\.md from Herdr/);
   });
 
   it('writes the note and its comments', async () => {
@@ -56,14 +56,14 @@ describe('a note with comments on its passages', () => {
 describe('a draft opened from a project file', () => {
   const edited = { boardName: '', text: '# Plan\n\nShip it Friday.', sourcePath: 'docs/plan.md' };
   const ask =
-    'My edited copy of docs/plan.md from Agent Brief. Apply the changes to docs/plan.md, keep what I did not touch, then say what changed.';
+    'My edited copy of docs/plan.md from Herdr. Apply the changes to docs/plan.md, keep what I did not touch, then say what changed.';
 
   it('points at draft.md and asks Claude to apply it, in exactly two lines', () => {
     expect(buildDraft('id1', edited)).toBe(`@.feedback/sketches/id1/draft.md\n${ask}`);
   });
 
   it('reports a review with no changes when the draft still matches the file', () => {
-    expect(buildDraft('id1', { ...edited, sourceUnchanged: true })).toBe('I reviewed docs/plan.md in Agent Brief and changed nothing.');
+    expect(buildDraft('id1', { ...edited, sourceUnchanged: true })).toBe('I reviewed docs/plan.md in Herdr and changed nothing.');
   });
 
   it('puts the two lines before the sketch lines when a sketch goes too', () => {
@@ -72,7 +72,7 @@ describe('a draft opened from a project file', () => {
       ask,
       '',
       '@.feedback/sketches/id1/sketch.png',
-      'Sketch from the Agent Brief board "flow".',
+      'Sketch from the Herdr sketch "flow".',
     ]);
   });
 
@@ -181,7 +181,7 @@ describe('a review of an HTML file', () => {
 
   it('points at review.md and asks Claude to make the changes, in two lines', () => {
     expect(buildDraft('id1', { boardName: '', review, images })).toBe(
-      '@.feedback/sketches/id1/review.md\nReview of site/index.html from Agent Brief, 1 comment pinned to the page. Make the changes in site/index.html, then say what changed.',
+      '@.feedback/sketches/id1/review.md\nReview of site/index.html from Herdr, 1 comment pinned to the page. Make the changes in site/index.html, then say what changed.',
     );
   });
 
@@ -206,10 +206,10 @@ describe('a sketch with comments pinned to the board', () => {
   it('leads with comments.md and its ask, then the sketch lines', () => {
     expect(buildDraft('id1', { ...sketch, comments }).split('\n')).toEqual([
       '@.feedback/sketches/id1/comments.md',
-      'Feedback on the board "flow" from Agent Brief, 1 comment pinned to the board. Make the changes, on the board where they belong, then say what changed.',
+      'Feedback on the sketch "flow" from Herdr, 1 comment pinned to the sketch. Make the changes, on the sketch where they belong, then say what changed.',
       '',
       '@.feedback/sketches/id1/sketch.png',
-      'Sketch from the Agent Brief board "flow".',
+      'Sketch from the Herdr sketch "flow".',
     ]);
   });
 
@@ -236,7 +236,7 @@ describe('comments on a file with an outline', () => {
     expect(buildDraft('id1', note, project()).split('\n')).toEqual([
       '@.feedback/sketches/id1/draft.md',
       '@.feedback/sketches/id1/annotations.md',
-      'Comments on docs/memo.md from Agent Brief, 1 comment on passages. docs/memo.md has an outline at docs/memo.outline.md (outline-first). Do not change docs/memo.md yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Agent Brief.',
+      'Comments on docs/memo.md from Herdr, 1 comment on passages. docs/memo.md has an outline at docs/memo.outline.md (outline-first). Do not change docs/memo.md yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Herdr.',
     ]);
   });
 
@@ -245,27 +245,27 @@ describe('comments on a file with an outline', () => {
     writeFileSync(join(cwd, 'docs/page.outline.md'), '# Page\n\nKind: page\n');
     const review = { path: 'docs/page.html', comments: [{ id: 'c1', text: 'Bigger.', anchor, createdAt: 1 }] };
     expect(buildDraft('id1', { boardName: '', review }, cwd).split('\n')[1]).toBe(
-      'Comments on docs/page.html from Agent Brief, 1 comment pinned to the page. docs/page.html has an outline at docs/page.outline.md (outline-first). Do not change docs/page.html yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Agent Brief.',
+      'Comments on docs/page.html from Herdr, 1 comment pinned to the page. docs/page.html has an outline at docs/page.outline.md (outline-first). Do not change docs/page.html yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Herdr.',
     );
   });
 
   it('asks Claude to fold pane edits back into the outline', () => {
     const cwd = project();
     writeFileSync(join(cwd, 'docs/page.outline.md'), '# Page\n\nKind: page\n');
-    const fold = 'Write their wording back into the matching outline points with agent-brief outline apply, so the next Generate keeps it, and flag any edit that changes a claim, number or cite.';
+    const fold = 'Write their wording back into the matching outline points with hws surface cli --type page -- outline apply, so the next Generate keeps it, and flag any edit that changes a claim, number or cite.';
     const edits = { path: 'docs/page.html', comments: [], edits: ['Changed the text of p “a” to “b”', 'Changed the text of h2 “c” to “d”'] };
     expect(buildDraft('id1', { boardName: '', review: edits }, cwd).split('\n')[1]).toBe(
-      `Edits to docs/page.html from Agent Brief, 2 edits made in the pane and already saved in the file. docs/page.html has an outline at docs/page.outline.md (outline-first). Keep the edits in docs/page.html. ${fold}`,
+      `Edits to docs/page.html from Herdr, 2 edits made in the pane and already saved in the file. docs/page.html has an outline at docs/page.outline.md (outline-first). Keep the edits in docs/page.html. ${fold}`,
     );
     const both = { ...edits, comments: [{ id: 'c1', text: 'Bigger.', anchor, createdAt: 1 }] };
     expect(buildDraft('id1', { boardName: '', review: both }, cwd).split('\n')[1]).toBe(
-      `Comments on docs/page.html from Agent Brief, 1 comment pinned to the page. docs/page.html has an outline at docs/page.outline.md (outline-first). Do not change docs/page.html yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Agent Brief. The review also lists 2 edits already saved in docs/page.html. ${fold}`,
+      `Comments on docs/page.html from Herdr, 1 comment pinned to the page. docs/page.html has an outline at docs/page.outline.md (outline-first). Do not change docs/page.html yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Herdr. The review also lists 2 edits already saved in docs/page.html. ${fold}`,
     );
-    expect(buildDraft('id1', { boardName: '', review: edits }, mkdtempSync(join(tmpdir(), 'plain-'))).split('\n')[1]).toMatch(/^Review of docs\/page\.html from Agent Brief: 2 edits made in the pane/);
+    expect(buildDraft('id1', { boardName: '', review: edits }, mkdtempSync(join(tmpdir(), 'plain-'))).split('\n')[1]).toMatch(/^Review of docs\/page\.html from Herdr: 2 edits made in the pane/);
   });
 
   it('keeps the usual ask without an outline or a project folder', () => {
-    expect(buildDraft('id1', note, mkdtempSync(join(tmpdir(), 'plain-'))).split('\n')[2]).toMatch(/^Comments on docs\/memo\.md from Agent Brief, 1 comment on passages\. Make the changes/);
+    expect(buildDraft('id1', note, mkdtempSync(join(tmpdir(), 'plain-'))).split('\n')[2]).toMatch(/^Comments on docs\/memo\.md from Herdr, 1 comment on passages\. Make the changes/);
     expect(buildDraft('id1', note).split('\n')[2]).toMatch(/Make the changes in docs\/memo\.md/);
   });
 });

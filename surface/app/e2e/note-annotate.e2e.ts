@@ -83,7 +83,7 @@ test('a selected passage takes a comment, shows highlighted, and Send hands Clau
     [
       `@${rel}/draft.md`,
       `@${rel}/annotations.md`,
-      `Comments on the note “Interview recap” from Agent Brief, 1 comment on passages. Revise the note in place: run \`agent-brief note --id ${noteId}\` with the full new text, then \`agent-brief open --note ${noteId}\`, then say what changed.`,
+      `Comments on the note “Interview recap” from Herdr, 1 comment on passages. Revise the note to address them. Write the full new text to a Markdown file, open it with \`hws surface open --type note --file <file> --terminal $HC_TERMINAL_ID\`, then say what changed.`,
     ].join('\n'),
   );
 
@@ -199,7 +199,7 @@ test('a commented note linked to a board survives a Send from Sketch, for Claude
   await page.getByTestId('send').click();
   await expect.poll(async () => (await deliveriesFor(socketPath, 's1')).length).toBe(1);
   const [delivery] = await deliveriesFor(socketPath, 's1');
-  expect(delivery!.draft).toContain(`agent-brief note --id ${noteId}`);
+  expect(delivery!.draft).toContain(`Comments on the note`);
   expect(delivery!.draft).toContain('sketch.png');
   await expect.poll(() => page.evaluate((id) => {
     const d = window.__drafts.get(id);

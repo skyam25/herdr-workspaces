@@ -81,9 +81,9 @@ const commentCount = (n: number) => `${n} comment${n === 1 ? '' : 's'}`;
 /** The comments.md a Send writes. Pin numbers match the violet badges on sketch.png. */
 export function boardCommentsMarkdown(boardName: string, c: BoardComments): string {
   const lines = [
-    `# Comments on the board "${boardName}"`,
+    `# Comments on the sketch "${boardName}"`,
     '',
-    'Comments pinned to the board in Agent Brief. Each names its element by id, as `agent-brief read` lists it, and sketch.png shows each pin as a numbered violet badge.',
+    'Comments pinned to the sketch in Herdr. Each names its element by id, as `hws surface cli --type board -- read` lists it, and sketch.png shows each pin as a numbered violet badge.',
   ];
   const overall = c.overall.trim();
   if (overall) lines.push('', '## Overall', '', overall);
@@ -100,8 +100,8 @@ export function boardCommentsMarkdown(boardName: string, c: BoardComments): stri
 /** The prompt line after the `@comments.md` line. */
 export function boardCommentsAsk(boardName: string, c: BoardComments): string {
   const n = c.pins.length;
-  const what = n ? `${commentCount(n)} pinned to the board` : 'a note on the board';
-  return `Feedback on the board "${boardName}" from Agent Brief, ${what}. Make the changes, on the board where they belong, then say what changed.`;
+  const what = n ? `${commentCount(n)} pinned to the sketch` : 'a note on the sketch';
+  return `Feedback on the sketch "${boardName}" from Herdr, ${what}. Make the changes, on the sketch where they belong, then say what changed.`;
 }
 
 const NO_WORDS = '(No words. The pin marks this spot.)';

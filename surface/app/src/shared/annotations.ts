@@ -21,7 +21,7 @@ export interface NoteAnnotations {
   overall?: string;
 }
 
-/** Annotations as a Send hands them over, with the note's name, and its id when Claude revises it in place. */
+/** Annotations as a Send hands them over, with the note's name and id. */
 export interface AnnotationsPayload extends NoteAnnotations {
   title?: string;
   noteId?: string;
@@ -68,7 +68,7 @@ export function annotationsMarkdown(a: AnnotationsPayload, draftFile: string, so
   const lines = [
     `# Comments on ${noteName(a.title, source)}`,
     '',
-    `Comments the user marked on the text in Agent Brief. Each quotes the passage it is about. The full text, with any edits, is in ${draftFile}.`,
+    `Comments the user marked on the text in Herdr. Each quotes the passage it is about. The full text, with any edits, is in ${draftFile}.`,
   ];
   const overall = a.overall?.trim();
   if (overall) lines.push('', '## Overall', '', overall);
@@ -85,10 +85,6 @@ export function annotationsMarkdown(a: AnnotationsPayload, draftFile: string, so
 export function annotationsAsk(a: AnnotationsPayload, source?: string): string {
   const n = a.comments.length;
   const what = n ? `${n} comment${n === 1 ? '' : 's'} on passages` : 'an overall comment';
-  if (source) return `Comments on ${source} from Agent Brief, ${what}. Make the changes in ${source}, keep what the comments do not touch, then say what changed.`;
-  if (a.noteId) {
-    return `Comments on ${noteName(a.title, undefined)} from Agent Brief, ${what}. Revise the note in place: run \`agent-brief note --id ${a.noteId}\` with the full new text, then \`agent-brief open --note ${a.noteId}\`, then say what changed.`;
-  }
-  const title = a.title?.trim() ? oneLine(a.title) : 'Revised note';
-  return `Comments on ${noteName(a.title, undefined)} from Agent Brief, ${what}. Revise the note to address them, save the new version with \`agent-brief note "${title}"\`, open it with the line that command prints, then say what changed.`;
+  if (source) return `Comments on ${source} from Herdr, ${what}. Make the changes in ${source}, keep what the comments do not touch, then say what changed.`;
+  return `Comments on ${noteName(a.title, undefined)} from Herdr, ${what}. Revise the note to address them. Write the full new text to a Markdown file, open it with \`hws surface open --type note --file <file> --terminal $HC_TERMINAL_ID\`, then say what changed.`;
 }

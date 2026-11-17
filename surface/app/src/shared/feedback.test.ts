@@ -180,7 +180,7 @@ describe('feedback files', () => {
     const message = decisionsPrompt(doc, pendingDecisions(doc));
     expect(message.split('\n').slice(0, 5)).toEqual([
       '@prototype/checkout.html.feedback.md',
-      'Feedback decisions on prototype/checkout.html from Agent Brief, 2 items:',
+      'Feedback decisions on prototype/checkout.html from Herdr, 2 items:',
       '- #6 Hard to find the filters: reopen · too long on mobile (replaces accept · keep it sticky on scroll)',
       '  Saved workspace: board fb-checkout-6, picture prototype/checkout.html.feedback/6-workspace.png',
       '- #7 Coupon field is confusing: reject · out of scope',

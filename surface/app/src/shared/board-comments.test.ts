@@ -21,15 +21,15 @@ describe('cleanBoardComments', () => {
 describe('boardCommentsMarkdown', () => {
   it('lists the overall note, then each pin with its element id', () => {
     const md = boardCommentsMarkdown('walkthrough', { overall: 'Mostly right.', pins: [pin, { id: 'p2', x: 9, y: 9, text: '', createdAt: 2 }] });
-    expect(md).toContain('# Comments on the board "walkthrough"');
+    expect(md).toContain('# Comments on the sketch "walkthrough"');
     expect(md).toContain('## Overall\n\nMostly right.');
     expect(md).toContain('## 1. rectangle “Open the app”\n\nSay what opens.\n\n- Element: `start`\n- In frame: “Login flow”');
     expect(md).toContain('## 2. board\n\n(No words. The pin marks this spot.)\n\n- At: 9,9 on the board');
   });
 
-  it('asks for the changes on the board', () => {
+  it('asks for the changes on the sketch', () => {
     expect(boardCommentsAsk('walkthrough', { overall: '', pins: [pin] })).toBe(
-      'Feedback on the board "walkthrough" from Agent Brief, 1 comment pinned to the board. Make the changes, on the board where they belong, then say what changed.',
+      'Feedback on the sketch "walkthrough" from Herdr, 1 comment pinned to the sketch. Make the changes, on the sketch where they belong, then say what changed.',
     );
   });
 });

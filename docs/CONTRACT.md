@@ -260,6 +260,18 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 4. For a glued surface whose terminal is live, `hws` runs `hc send T "<prompt.md text>"`, drops the surface's record, then runs `herdr-app do pane.close --pane P` and `herdr-app do pane.focus --terminal T`.
 5. For standalone, or a terminal that ended, `hws` records the artifact and prints `{"standalone":true,"artifact":"...","link":"@..."}`. The host then shows Open terminal and Copy link. A surface in a pane keeps its record, so the file opens to the same pane and a second press files a second bundle. A board in its own window loses its record.
 
+`prompt.md` names Herdr as the place and names only `hws` commands. The text comes from `surface/app/src/server/bundle.ts` and the prompt helpers in `surface/app/src/shared/`.
+
+| Bundle | Ask line |
+|---|---|
+| Sketch | `Sketch from the Herdr sketch "X".` A sketch with pins leads with `comments.md` and `Feedback on the sketch "X" from Herdr, ...`. `comments.md` names elements as `hws surface cli --type board -- read` lists them |
+| Page or file | `Review of F from Herdr, ...`, `Comments on F from Herdr, ...` or `My edited copy of F from Herdr. ...` |
+| Unedited file | `I reviewed F in Herdr and changed nothing.` |
+| Note with no file | Asks the agent to write the revised text to a Markdown file and open it with `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` |
+| Behavior decisions | Names `hws surface cli --type page -- behavior` |
+| File with an outline | Names `(outline-first)` and `hws surface cli --type page -- outline apply`, and says the person accepts the direction in Herdr |
+| Feedback decisions | Starts with `@<output>.feedback.md`, then `Feedback decisions on F from Herdr, ...`, and names `hws surface cli --type page -- feedback done` |
+
 ### Feedback rounds
 
 A page that shows a file is a round of feedback on that file. Tidy reviews are the exception.
@@ -553,7 +565,7 @@ A shape error exits 2 and names the field, such as `proposal demote[0].to must b
 
 ### `hws tidy apply --file PROPOSAL [--skip current,decisions,demote,artifacts,cards] [--workspace W]`
 
-W defaults to the proposal's `workspace`, and the two must match. The tidy agent runs apply after Done brings the person's verdict. No surface runs it. Done on an unedited page sends `I reviewed proposal.md in Agent Brief and changed nothing.`, which counts as acceptance. Done on an edited page sends the edited copy, and the agent carries the changes into `proposal.md` and `proposal.json` before it opens the page again.
+W defaults to the proposal's `workspace`, and the two must match. The tidy agent runs apply after Done brings the person's verdict. No surface runs it. Done on an unedited page sends `I reviewed proposal.md in Herdr and changed nothing.`, which counts as acceptance. Done on an edited page sends the edited copy, and the agent carries the changes into `proposal.md` and `proposal.json` before it opens the page again.
 
 Every check runs before the first write. Apply exits 1 and changes nothing when any of these holds.
 

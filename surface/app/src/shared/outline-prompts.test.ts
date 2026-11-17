@@ -11,8 +11,8 @@ describe('outline prompts', () => {
   });
 
   it('asks about a section or the whole outline', () => {
-    expect(askPrompt(doc, 's1', ' Add a point on churn ')).toBe('On docs/memo.outline.md (outline-first), section "Why now" (s1): Add a point on churn\nUpdate the outline only, through agent-brief outline apply. Do not write docs/memo.md.');
-    expect(askPrompt(untargeted, undefined, 'Tighten it')).toBe('On docs/memo.outline.md (outline-first): Tighten it\nUpdate the outline only, through agent-brief outline apply. Do not write the target.');
+    expect(askPrompt(doc, 's1', ' Add a point on churn ')).toBe('On docs/memo.outline.md (outline-first), section "Why now" (s1): Add a point on churn\nUpdate the outline only, through hws surface cli --type page -- outline apply. Do not write docs/memo.md.');
+    expect(askPrompt(untargeted, undefined, 'Tighten it')).toBe('On docs/memo.outline.md (outline-first): Tighten it\nUpdate the outline only, through hws surface cli --type page -- outline apply. Do not write the target.');
     expect(askPrompt(doc, 's9', 'x')).toMatch(/^On docs\/memo.outline.md \(outline-first\): x\n/);
   });
 
@@ -23,7 +23,7 @@ describe('outline prompts', () => {
 
   it('routes comments on a target through its outline', () => {
     expect(outlineFeedbackAsk('docs/memo.md', 'docs/memo.outline.md', '3 comments')).toBe(
-      'Comments on docs/memo.md from Agent Brief, 3 comments. docs/memo.md has an outline at docs/memo.outline.md (outline-first). Do not change docs/memo.md yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Agent Brief.',
+      'Comments on docs/memo.md from Herdr, 3 comments. docs/memo.md has an outline at docs/memo.outline.md (outline-first). Do not change docs/memo.md yet. Read the comments together, update the outline, and propose a direction with setDirection. The user accepts it in Herdr.',
     );
   });
 });

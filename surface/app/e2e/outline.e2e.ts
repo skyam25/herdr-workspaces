@@ -28,7 +28,7 @@ const read = (cwd: string, rel: string) => {
   }
 };
 
-/** Applies ops as Claude does through `agent-brief outline apply`. */
+/** Applies ops as Claude does through `hws surface cli --type page -- outline apply`. */
 async function agent(sessionId: string, path: string, ops: unknown[]) {
   const route = `/sessions/${sessionId}/outline?path=${encodeURIComponent(path)}`;
   const { body: doc } = await sock<OutlineDocument>(socketPath, 'GET', route);

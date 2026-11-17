@@ -461,7 +461,7 @@ function withOption(item: FeedbackItem, detail: string): string {
 export function decisionsPrompt(doc: Pick<FeedbackDocument, 'path' | 'output'>, pending: PendingDecision[]): string {
   const lines = [
     `@${doc.path}`,
-    `Feedback decisions on ${doc.output} from Agent Brief, ${pending.length === 1 ? '1 item' : `${pending.length} items`}:`,
+    `Feedback decisions on ${doc.output} from Herdr, ${pending.length === 1 ? '1 item' : `${pending.length} items`}:`,
   ];
   for (const { item, said, saved } of pending) {
     const text = (e: FeedbackEvent) => [e.verb, withOption(item, e.detail)].filter(Boolean).join(SEP);
@@ -480,8 +480,8 @@ export function decisionsPrompt(doc: Pick<FeedbackDocument, 'path' | 'output'>, 
       lines.push(`  Saved workspace: board ${w.board}${w.picture ? `, picture ${w.picture}` : ''}`);
     }
   }
-  lines.push('Act on each item\'s standing decision: make the accepted changes and log them with agent-brief feedback done, leave rejected items alone, and answer notes with a Claude line. A note on an accept can narrow it. The feedback-items skill has the format.');
-  if (pending.some((p) => p.saved.length)) lines.push("A saved workspace is the user's answer drawn out. Look at each saved workspace's picture and run agent-brief read --board <board> before you act on its item.");
+  lines.push('Act on each item\'s standing decision: make the accepted changes and log them with hws surface cli --type page -- feedback done, leave rejected items alone, and answer notes with a Claude line. A note on an accept can narrow it. The feedback-items skill has the format.');
+  if (pending.some((p) => p.saved.length)) lines.push("A saved workspace is the user's answer drawn out. Look at each saved workspace's picture and run hws surface cli --type page -- read --board <board> before you act on its item.");
   return lines.join('\n');
 }
 

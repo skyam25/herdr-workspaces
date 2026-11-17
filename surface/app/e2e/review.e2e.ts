@@ -156,7 +156,7 @@ test('an HTML output opens live in the review pane, takes pinned comments, and s
   const [delivery] = await deliveriesFor(socketPath, 's1');
   const id = delivery!.dir.split('/').at(-1);
   expect(delivery!.draft).toBe(
-    `@.feedback/sketches/${id}/review.md\nReview of site/index.html from Agent Brief, 2 comments pinned to the page. Make the changes in site/index.html, then say what changed.`,
+    `@.feedback/sketches/${id}/review.md\nReview of site/index.html from Herdr, 2 comments pinned to the page. Make the changes in site/index.html, then say what changed.`,
   );
   const md = readFileSync(join(delivery!.dir, 'review.md'), 'utf8');
   expect(md).toContain('## Overall\n\nTighter spacing overall.');

@@ -20,7 +20,7 @@ describe('Send decisions', () => {
     const message = decisionsPrompt(doc(text), pending);
     expect(message).toContain('- #1 Item 1: saved a workspace');
     expect(message).toContain('  Saved workspace: board fb-checkout-1, picture site/checkout.html.feedback/1-workspace-a1.png');
-    expect(message).toMatch(/look at each saved workspace's picture.*agent-brief read --board/i);
+    expect(message).toMatch(/look at each saved workspace's picture.*hws surface cli --type page -- read --board/i);
   });
 
   it('takes a Save with its pin and overall notes as one pending response', () => {

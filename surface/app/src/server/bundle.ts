@@ -143,13 +143,13 @@ export function buildDraft(id: string, input: DeliveryInput, cwd?: string): stri
     : input.annotations
       ? [`@${rel}/draft.md`, `@${rel}/annotations.md`, outlineAsk(cwd, source, annotationsWhat(input.annotations)) ?? annotationsAsk(input.annotations, source)]
       : source && input.sourceUnchanged
-      ? [`I reviewed ${source} in Agent Brief and changed nothing.`]
+      ? [`I reviewed ${source} in Herdr and changed nothing.`]
       : source
-      ? [`@${rel}/draft.md`, `My edited copy of ${source} from Agent Brief. Apply the changes to ${source}, keep what I did not touch, then say what changed.`]
+      ? [`@${rel}/draft.md`, `My edited copy of ${source} from Herdr. Apply the changes to ${source}, keep what I did not touch, then say what changed.`]
       : undefined;
   const text = sourceLines ? sourceLines.join('\n') : input.text && rewriteImages(input.text, id, input.images ?? []).trim();
   if (!input.png) return text ?? '';
-  const lines = [`@${rel}/sketch.png`, `Sketch from the Agent Brief board "${input.boardName}".`];
+  const lines = [`@${rel}/sketch.png`, `Sketch from the Herdr sketch "${input.boardName}".`];
   if (input.comments) lines.unshift(`@${rel}/comments.md`, boardCommentsAsk(input.boardName, input.comments), '');
   if (text) lines.unshift(text, '');
   if (input.speech) lines.push(`Said while drawing: "${input.speech}"`);

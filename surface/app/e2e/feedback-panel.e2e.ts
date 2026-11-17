@@ -57,7 +57,7 @@ test('a saved workspace is sendable, and each send names its picture and board',
     const m = /^ {2}Saved workspace: board fb-checkout-1, picture (\S+\.png)$/m.exec(draft);
     expect(m, draft).not.toBeNull();
     expect(existsSync(join(cwd, m![1]!))).toBe(true);
-    expect(draft).toContain('agent-brief read --board');
+    expect(draft).toContain('hws surface cli --type page -- read --board');
     return m![1]!;
   };
 

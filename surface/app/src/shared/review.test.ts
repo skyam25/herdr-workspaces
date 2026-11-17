@@ -78,7 +78,7 @@ describe('review text', () => {
 
   it('asks for an overall note alone when there are no pins', () => {
     expect(reviewAsk({ path: 'a.html', comments: [], body: 'Darker.' })).toBe(
-      'Review of a.html from Agent Brief, an overall note. Make the changes in a.html, then say what changed.',
+      'Review of a.html from Herdr, an overall note. Make the changes in a.html, then say what changed.',
     );
   });
 });
@@ -96,10 +96,10 @@ describe('pane edits', () => {
 
   it('asks Claude to check edits alone, or adds them to comments', () => {
     expect(reviewAsk({ path: 'a.html', comments: [], edits: ['x', 'y'] })).toBe(
-      'Review of a.html from Agent Brief: 2 edits made in the pane, already saved in the file. Check them and tidy the markup where it needs it, then say what changed.',
+      'Review of a.html from Herdr: 2 edits made in the pane, already saved in the file. Check them and tidy the markup where it needs it, then say what changed.',
     );
     expect(reviewAsk({ path: 'a.html', comments: [], body: 'Darker.', edits: ['x'] })).toBe(
-      'Review of a.html from Agent Brief, an overall note, plus 1 edit already saved in the file. Make the changes in a.html, then say what changed.',
+      'Review of a.html from Herdr, an overall note, plus 1 edit already saved in the file. Make the changes in a.html, then say what changed.',
     );
   });
 
@@ -130,12 +130,12 @@ describe('pages and sites', () => {
     expect(review.comments[1]!.anchor.page).toBe('site/about.html');
     expect(review.comments[0]!.anchor.page).toBeUndefined();
     expect(reviewMarkdown(review, () => undefined)).toContain('- Page: site/about.html\n- Element:');
-    expect(reviewAsk(review)).toBe('Review of site/index.html from Agent Brief, 2 comments pinned to the pages. Make the changes in site/index.html and the other pages the comments name, then say what changed.');
+    expect(reviewAsk(review)).toBe('Review of site/index.html from Herdr, 2 comments pinned to the pages. Make the changes in site/index.html and the other pages the comments name, then say what changed.');
   });
 
   it('asks Claude to find the source behind a running app', () => {
     const review = { path: 'http://localhost:5173/', comments: [comment('a', '/settings')] };
     expect(reviewMarkdown(review, () => undefined)).toContain('running app at http://localhost:5173/');
-    expect(reviewAsk(review)).toBe('Review of the running app at http://localhost:5173/ from Agent Brief, 1 comment pinned to the pages. Find the source behind each pinned element in this project and make the changes, then say what changed.');
+    expect(reviewAsk(review)).toBe('Review of the running app at http://localhost:5173/ from Herdr, 1 comment pinned to the pages. Find the source behind each pinned element in this project and make the changes, then say what changed.');
   });
 });
