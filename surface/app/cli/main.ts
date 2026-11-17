@@ -38,7 +38,8 @@ import {
 } from '../src/protocol';
 import { BOARD_PNG_KEEP, feedbackDir, trimPngs } from '../src/server/feedback-dir';
 import { formatBoards, formatElement, formatRead, formatSessions, formatStatus } from './format';
-import { commandHelp, DOCS, topHelp } from './help';
+import { cliFor, SURFACE_CWD_ENV, surfaceRefusal, type Cli } from './command';
+import { COMMAND_NAMES, commandHelp, topHelp } from './help';
 import { apply, FORCE_VAR, isOn, shellFiles } from './herdr';
 import { ApiError, call, callJson, NotRunningError } from './http';
 import { fitSize, loadImage } from './image';
@@ -69,6 +70,14 @@ export const NOT_RUNNING_MESSAGE =
 export const NOTE_NOT_RUNNING_MESSAGE = 'Agent Brief is not running, so no note was made. Print the text instead.';
 
 export const INITIATIVE_NOT_RUNNING_MESSAGE = 'Agent Brief is not running, so the initiative was not changed. Reads still work; changes need the app.';
+
+export const SURFACE_NOT_RUNNING_MESSAGE =
+  'The surface is not running. "hws surface list" shows the open ones, and "hws surface resume --id S" starts one again.';
+
+function notRunningMessage(command: string | undefined, cli: Cli): string {
+  if (cli.surface) return SURFACE_NOT_RUNNING_MESSAGE;
+  return command === 'note' ? NOTE_NOT_RUNNING_MESSAGE : command === 'initiative' ? INITIATIVE_NOT_RUNNING_MESSAGE : NOT_RUNNING_MESSAGE;
+}
 
 /** Claude Code sets it in every shell it runs, so a note files under the session that wrote it. */
 export const SESSION_ID_ENV = 'CLAUDE_CODE_SESSION_ID';
@@ -134,6 +143,7 @@ export async function main(argv: string[], io: IO): Promise<number> {
   const out = (s: string) => io.stdout(s.endsWith('\n') ? s : s + '\n');
   const err = (s: string) => io.stderr(s.endsWith('\n') ? s : s + '\n');
 
+  const cli = cliFor(io.env);
   let command: string | undefined;
   try {
     const args = parseArgs(argv);
@@ -142,22 +152,24 @@ export async function main(argv: string[], io: IO): Promise<number> {
 
     if (!command || command === 'help' || (command === '--help')) {
       const topic = positional[0];
-      out(topic && DOCS[topic] ? commandHelp(topic) : topHelp());
+      out(topic && COMMAND_NAMES.has(topic) ? commandHelp(topic, cli) : topHelp(cli));
       return EXIT.ok;
     }
-    if (!DOCS[command]) throw new UsageError(`unknown command "${command}". Run "agent-brief help".`);
+    if (!COMMAND_NAMES.has(command)) throw new UsageError(`unknown command "${command}". Run "${cli.line('help')}".`);
     if (args.flags.has('help')) {
-      out(commandHelp(command));
+      out(commandHelp(command, cli));
       return EXIT.ok;
     }
+    const refusal = cli.surface ? surfaceRefusal(command, cli) : undefined;
+    if (refusal) throw new UsageError(refusal);
 
     const socket = io.env[SOCKET_ENV] || defaultSocketPath(os.homedir());
-    const ctx = { args, positional, socket, io, out };
+    const ctx = { args, positional, socket, io, out, cli };
     await COMMANDS[command](ctx);
     return EXIT.ok;
   } catch (e) {
     if (e instanceof NotRunningError) {
-      err(command === 'note' ? NOTE_NOT_RUNNING_MESSAGE : command === 'initiative' ? INITIATIVE_NOT_RUNNING_MESSAGE : NOT_RUNNING_MESSAGE);
+      err(notRunningMessage(command, cli));
       return EXIT.notRunning;
     }
     if (e instanceof ApiError) {
@@ -179,6 +191,7 @@ interface Ctx {
   socket: string;
   io: IO;
   out: (s: string) => void;
+  cli: Cli;
 }
 
 const boardPath = (ctx: Ctx, suffix: string) =>
@@ -286,7 +299,7 @@ const allInitiatives = (ctx: Ctx) => initiativeRead<InitiativeSummary[]>(ctx, '/
 async function initiativeNamed(ctx: Ctx, key: string): Promise<InitiativeSummary> {
   if (!key.trim()) throw new UsageError('name an initiative by its id or title');
   const found = resolveInitiative(await allInitiatives(ctx), key);
-  if (!found) throw new ApiError('not_found', `no initiative matches "${key}". Run "agent-brief initiative list".`);
+  if (!found) throw new ApiError('not_found', `no initiative matches "${key}". Run "${ctx.cli.line('initiative list')}".`);
   return found;
 }
 
@@ -354,9 +367,6 @@ function realPathOf(full: string): string {
   return path.join(realpathSync(at), ...rest);
 }
 
-/** The shell folder `hws surface cli` ran in. Relative paths count from it. */
-const SURFACE_CWD_ENV = 'HWS_SURFACE_CLI_CWD';
-
 /**
  * An absolute path becomes relative to the session's folder, which a surface's stand-in session
  * may not share with the shell. Under `hws surface cli` a relative path counts from the shell's
@@ -401,7 +411,7 @@ const INITIATIVE_VERBS: Record<string, (ctx: Ctx, words: string[]) => Promise<vo
     const q = words.join(' ').trim();
     if (!q) throw new UsageError('find needs words to match');
     const res = await initiativeRead(ctx, `/initiatives/find?q=${encodeURIComponent(q)}`, (s) => s.find(q));
-    show(ctx, res, (l) => formatSummaries(l, 'no match. Run "agent-brief initiative list" to see them all.'));
+    show(ctx, res, (l) => formatSummaries(l, `no match. Run "${ctx.cli.line('initiative list')}" to see them all.`));
   },
 
   async show(ctx, words) {
@@ -441,7 +451,7 @@ const INITIATIVE_VERBS: Record<string, (ctx: Ctx, words: string[]) => Promise<vo
     const { id } = await initiativeNamed(ctx, words.join(' '));
     const patch = await readJsonObject(ctx);
     if (!Number.isInteger(patch.revision)) {
-      throw new InputError('the JSON needs "revision", the one you read. "agent-brief initiative show" prints it.');
+      throw new InputError(`the JSON needs "revision", the one you read. "${ctx.cli.line('initiative show')}" prints it.`);
     }
     const body = { updatedBy: initiativeAuthor(ctx), ...patch } as InitiativeUpdateRequest;
     const res = await callJson<Initiative>(ctx.socket, 'PUT', `/initiatives/${encodeURIComponent(id)}`, body);
@@ -564,7 +574,7 @@ async function catalog(ctx: Ctx, output: string): Promise<void> {
 
 const FEEDBACK_VERBS: Record<string, (ctx: Ctx, output: string, words: string[]) => Promise<void>> = {
   async show(ctx, output) {
-    show(ctx, await readFeedbackDoc(ctx, output), formatFeedback);
+    show(ctx, await readFeedbackDoc(ctx, output), (d) => formatFeedback(d, ctx.cli));
   },
 
   async round(ctx, output) {
@@ -636,7 +646,7 @@ const FEEDBACK_VERBS: Record<string, (ctx: Ctx, output: string, words: string[])
     const n = itemNumber(rawN, 'workspace');
     const route = `/sessions/${encodeURIComponent(requireSession(ctx, 'feedback'))}/feedback/workspace?path=${encodeURIComponent(output)}&item=${n}`;
     const res = await callJson<FeedbackWorkspace>(ctx.socket, 'POST', route);
-    show(ctx, res, formatWorkspace);
+    show(ctx, res, (w) => formatWorkspace(w, ctx.cli));
   },
 
   async snap(ctx, output, [rawN]) {
@@ -703,7 +713,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     if (id !== undefined) {
       if (str(ctx.args, 'session') !== undefined) throw new UsageError('--id keeps the note where it is filed, so it takes no --session');
       const res = await callJson<NoteResponse>(ctx.socket, 'POST', '/notes', { text, ...(title ? { title } : {}), draftId: id });
-      show(ctx, res, () => `Updated note ${res.draftId} in place in Agent Brief.\nTo show it, run: agent-brief open --note ${res.draftId}`);
+      show(ctx, res, () => `Updated note ${res.draftId} in place in Agent Brief.\nTo show it, run: ${ctx.cli.line(`open --note ${res.draftId}`)}`);
       return;
     }
     const flag = str(ctx.args, 'session');
@@ -724,8 +734,8 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     const where = filed ? "this session's tab" : 'Notes';
     show(ctx, { ...res, ...(filed ? { sessionId: filed } : {}) }, () =>
       `Saved "${title || 'Untitled note'}" to ${where} in Agent Brief, Write mode. The user can edit it there and press Copy.\n` +
-      `To show it, run: agent-brief open --note ${res.draftId}\n` +
-      `To change it later, run: agent-brief note --id ${res.draftId} with the full new text`,
+      `To show it, run: ${ctx.cli.line(`open --note ${res.draftId}`)}\n` +
+      `To change it later, run: ${ctx.cli.line(`note --id ${res.draftId}`)} with the full new text`,
     );
   },
 
@@ -792,7 +802,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
   async initiative(ctx) {
     const [verb, ...words] = ctx.positional;
     const run = verb ? INITIATIVE_VERBS[verb] : undefined;
-    if (!run) throw new UsageError(`initiative takes ${Object.keys(INITIATIVE_VERBS).join(', ')}. Run "agent-brief initiative --help".`);
+    if (!run) throw new UsageError(`initiative takes ${Object.keys(INITIATIVE_VERBS).join(', ')}. Run "${ctx.cli.line('initiative --help')}".`);
     await run(ctx, words);
   },
 
@@ -824,7 +834,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
       return;
     }
     const run = verb ? FEEDBACK_VERBS[verb] : undefined;
-    if (!run) throw new UsageError(`feedback takes list, graph, ${Object.keys(FEEDBACK_VERBS).join(', ')}. Run "agent-brief feedback --help".`);
+    if (!run) throw new UsageError(`feedback takes list, graph, ${Object.keys(FEEDBACK_VERBS).join(', ')}. Run "${ctx.cli.line('feedback --help')}".`);
     if (!output) throw new UsageError(`feedback ${verb} needs a project-relative output path`);
     await run(ctx, await sessionRelative(ctx, output, 'feedback'), words);
   },
@@ -840,12 +850,13 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
       cwd: cwdOf(ctx),
       stdin: ctx.io.stdin,
       out: ctx.out,
+      cli: ctx.cli,
     });
   },
 
   async status(ctx) {
     const health = await callJson<Health>(ctx.socket, 'GET', '/health');
-    show(ctx, health, formatStatus);
+    show(ctx, health, (h) => formatStatus(h, ctx.cli.name));
   },
 
   async sessions(ctx) {
@@ -868,6 +879,8 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     const initiative = str(ctx.args, 'initiative');
     const feedback = ctx.args.flags.has('feedback');
     if (feedback && output === undefined) throw new UsageError('--feedback needs --output <path>');
+    if (ctx.cli.surface && note !== undefined) throw new UsageError(surfaceRefusal('note', ctx.cli)!);
+    if (ctx.cli.surface && initiative !== undefined) throw new UsageError(surfaceRefusal('initiative', ctx.cli)!);
     if (layout !== undefined && layout !== 'freeform' && layout !== 'stack') {
       throw new UsageError(`--layout must be freeform or stack, got "${layout}"`);
     }

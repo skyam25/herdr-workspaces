@@ -1,10 +1,11 @@
-/** Text views for `agent-brief feedback`. */
+/** Text views for the `feedback` verb. */
 
 import type { FeedbackDocument, FeedbackItem, FeedbackProject, FeedbackRound } from '../src/protocol';
 import { feedbackItemText, relatedCandidates } from '../src/shared/feedback';
 import type { FeedbackWorkspace } from '../src/protocol';
 import { frameTitle } from '../src/shared/feedback-workspace';
 import { relatedOutput } from '../src/shared/feedback-graph';
+import type { Cli } from './command';
 
 export { relatedOutput };
 
@@ -19,8 +20,8 @@ export const itemHead = (item: FeedbackItem) => `#${item.n} [${item.state}${item
 /** `customers · 2026-10-12 · transcripts/cust-1.md`. */
 export const roundText = (r: FeedbackRound) => [r.label, r.date, ...(r.source ? [r.source] : [])].join(' · ');
 
-export function formatFeedback(doc: FeedbackDocument): string {
-  if (doc.version === 'missing') return `${doc.path} · no feedback yet. Add a round with "agent-brief feedback round".`;
+export function formatFeedback(doc: FeedbackDocument, cli: Cli): string {
+  if (doc.version === 'missing') return `${doc.path} · no feedback yet. Add a round with "${cli.line('feedback round')}".`;
   const lines = [`${doc.path} · version ${doc.version}`];
   for (const r of doc.rounds) lines.push(`Round ${r.n} · ${roundText(r)}`);
   for (const item of doc.items) {
@@ -143,7 +144,7 @@ export function formatCatalog(round: { round: FeedbackRound; existed: boolean; p
 }
 
 /** The board name first, so a script can take the first line. */
-export function formatWorkspace(ws: FeedbackWorkspace): string {
+export function formatWorkspace(ws: FeedbackWorkspace, cli: Cli): string {
   const what = ws.created ? `new board with a ${frameTitle(ws.round)} frame` : ws.framed ? `added a ${frameTitle(ws.round)} frame` : `${frameTitle(ws.round)} frame is there`;
-  return `${ws.board}\n${what}. Draw with: agent-brief draw --board ${ws.board}`;
+  return `${ws.board}\n${what}. Draw with: ${cli.line(`draw --board ${ws.board}`)}`;
 }

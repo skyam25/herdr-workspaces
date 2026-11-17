@@ -220,7 +220,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
 | `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place. See [Delivery on Done](#delivery-on-done) |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface. Agents drive a surface with `hws surface cli` |
-| `hws surface cli [--terminal T] [--title X] [--type board\|note\|page] -- VERB [ARGS...]` | Runs the surface's `agent-brief` CLI on the newest open surface of T that matches, as that surface's stand-in session. See [Surface CLI](#surface-cli) |
+| `hws surface cli [--terminal T] [--title X] [--type board\|note\|page] -- VERB [ARGS...]` | Runs the surface's copy of the Agent Brief CLI on the newest open surface of T that matches, as that surface's stand-in session. See [Surface CLI](#surface-cli) |
 | `hws surface move --id S --workspace W` | Moves a surface's record and data folder to W and keeps its id. W `standalone` takes it out of every workspace. An open window ends and starts again on the moved data, and its drafts link into W's drafts place. A `questions` surface keeps no drafts, so it gets no folder there. Prints `{id,from,workspace,moved,restarted}`. Fails on a surface in a pane, an archived W and an unknown W. A surface already in W prints `moved: false` |
 | `hws surface targets [--id S]` | Prints `{current,suggested,workspaces}`. `current` is S's workspace, or null without `--id`. `suggested` is the workspace of the selected space when it differs from `current`, else null. `workspaces` lists each open workspace as `{id,name,kind}` |
 | `hws unfiled` | Prints `{surfaces,artifacts}` for work in no workspace, newest first. Each surface is `{id,type,title,file,state}`, where `state` is `open`, `draft` or `pane`. A closed window with no work and a closed pane are left out. Each artifact is `{id,type,title,path,createdAt}` |
@@ -649,6 +649,7 @@ The host registers a stand-in session `surface-<surface id>` on the surface sock
 | Pass-through | Everything after `--` reaches the CLI unchanged, `--json` and `--help` included. stdin, stdout, stderr and the exit code are the CLI's own |
 | Failures | No `--`, no verb or a bad flag exits 2. No matching open surface, or no built CLI, exits 1 with the reason |
 | Paths | The paths `outline`, `feedback` and `behavior` send to the app count from `HWS_SURFACE_CLI_CWD`, as the shell names them. That covers outline paths, `--path`, `--target`, feedback outputs and behavior prototypes. Each is then made relative to the [session folder](#host-environment), and one outside it exits 2. Files the CLI reads itself, such as `--ops`, `--items` and `--file`, count from the current folder. Without `HWS_SURFACE_CLI_CWD` a relative path passes as it is |
+| Text | With `HWS_SURFACE_CLI_CWD` set, help, hints and errors name `hws surface cli -- VERB`, with `--type board` before `--` for board verbs and `--type page` for `outline`, `feedback` and `behavior`. `surface/app/cli/command.ts` builds each line. A closed socket exits 3 with `The surface is not running.`, `hws surface list` and `hws surface resume --id S`. `status` prints `Surface running`. Without it the CLI names `agent-brief` and Agent Brief |
 
 | Verbs | Surface | State |
 |---|---|---|
@@ -658,12 +659,15 @@ The host registers a stand-in session `surface-<surface id>` on the surface sock
 | `outline new` | Any | Works, and opens the outline in that surface. `hws outline new` makes one before any surface exists |
 | `feedback list\|graph\|show\|round\|catalog\|add\|log\|change\|done\|related\|workspace\|snap` | Page on the output, or any surface whose session folder holds it | Works. Review's Feedback tab shows the items |
 | `behavior show\|update\|export` | Page on the prototype | Works. Review's Behavior tab shows beside the page |
-| `handoff` | Any | Fails, because a surface keeps no iPad pairing. Use `hws phone send FILE` |
-| `show`, `output` | Any | Print a request line that only the Agent Brief plugin acts on, so nothing shows or records. Use `hws output add` in place of `output` |
+| `handoff`, `ipad` | Any | Exit 2, because a surface keeps no iPad pairing. They name `hws phone send FILE` and `hws phone status` |
+| `show` | Any | Exits 2 and names `snap FILE` on a board and `hws review FILE` |
+| `output` | Any | Exits 2 and names `hws output add` |
+| `note`, `open --note` | Any | Exit 2, because a surface keeps no saved notes. They name `hws surface open --type note --file F` |
+| `initiative`, `open --initiative` | Any | Exit 2, because a surface keeps no initiatives. They name `hws current --line` |
 
 ### Outlines
 
-`hws outline new` writes `# TITLE`, a blank line, `Target: P` when given, and `Kind: K`, as `agent-brief outline new` does through the app.
+`hws outline new` writes `# TITLE`, a blank line, `Target: P` when given, and `Kind: K`, as `hws surface cli -- outline new` does through the surface.
 
 | Item | Behaviour |
 |---|---|
