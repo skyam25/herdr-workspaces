@@ -10,7 +10,7 @@ import { isKept, placeOf, writablePlace } from '../places.js';
 import { moveToTrash } from '../trash.js';
 import { requireCallingTerminal, requireFlag, resolveWorkspace, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { listRetired } from '../retired.js';
-import { scanWorkspace } from '../scan.js';
+import { SIDE_FILE, scanWorkspace } from '../scan.js';
 import { moveTarget, newId, surfaceOpen } from './surface.js';
 
 export const ARTIFACT_STATUSES = ['draft', 'current', 'superseded'];
@@ -204,8 +204,9 @@ function reviewedFile(target) {
 }
 
 // A kept workspace tracks the file where it sits, so each round of feedback files under it.
+// An outline or feedback file works beside its output and is never tracked.
 function trackReviewed(manifest, file, title) {
-  if (!manifest || !isKept(manifest)) return null;
+  if (!manifest || !isKept(manifest) || SIDE_FILE.test(file)) return null;
   const artifact = record(inPlaceFields(file, title));
   updateManifest(manifest.id, (draft) => {
     draft.artifacts.push(artifact);

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
@@ -21,13 +22,14 @@ import {
   windowStatus,
 } from '../herdr.js';
 import { TIDY_ROLE, ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
-import { HOST_SCRIPT, STANDALONE, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
+import { HOST_SCRIPT, STANDALONE, SURFACE_CLI, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
 import { isForeign, isKept, placeOf, writablePlace } from '../places.js';
 import { callingTerminal, requireCallingTerminal, requireFlag, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
 
 const SURFACE_TYPES = ['board', 'note', 'page'];
+const OUTLINE_FILE = /\.outline\.md$/i;
 
 // The limit for one argument on Linux, and well inside the 1 MiB macOS total.
 export const MAX_SEND_BYTES = 128 * 1024;
@@ -353,8 +355,9 @@ function dropSurface(manifest, surface) {
 const quoted = (path) => (/[\s"'$`\\]/.test(path) ? `'${path.replaceAll("'", `'\\''`)}'` : path);
 
 // Tells the agent how to hand the page back, in the prompt it is about to read.
+// An outline's view reloads as the agent changes it, so it needs no second look.
 function askForAnotherLook(artifact) {
-  if (artifact.role !== FEEDBACK_ROLE) return;
+  if (artifact.role !== FEEDBACK_ROLE || OUTLINE_FILE.test(artifact.file)) return;
   appendFileSync(artifact.prompt, `\n\nIf you change the page, run \`hws review ${quoted(artifact.file)}\` afterwards so the person can look again.\n`);
 }
 
@@ -688,15 +691,40 @@ export async function surfaceDone(flags) {
   return { data: { standalone: false, artifact: artifact.id, link, delivered: true } };
 }
 
-export function surfaceSocket(flags) {
-  const terminal = requireCallingTerminal(flags);
-  const matches = listManifests({ includeStandalone: true })
+// The newest surface glued to the terminal that matches the title and type.
+function gluedSurface(terminal, { title, type }, listening = () => true) {
+  return listManifests({ includeStandalone: true })
     .flatMap((manifest) => manifest.surfaces)
-    .filter((surface) => surface.terminal === terminal && (!flags.title || surface.title === flags.title))
+    .filter((surface) => surface.terminal === terminal && (!title || surface.title === title) && (!type || surface.type === type))
 
     // A draft's window is closed, so nothing listens on its socket.
-    .filter((surface) => !surface.host || isWindowOpen(surface));
-  const surface = matches.at(-1);
+    .filter((surface) => (!surface.host || isWindowOpen(surface)) && listening(surface))
+    .at(-1);
+}
+
+export function surfaceSocket(flags) {
+  const terminal = requireCallingTerminal(flags);
+  const surface = gluedSurface(terminal, flags);
   if (!surface) throw new HwsError(`terminal ${terminal} has no matching surface`);
   return { data: { socket: surface.socket, surface: surface.id }, text: surface.socket };
+}
+
+// Runs the surface's `agent-brief` CLI against the terminal's surface, as the surface's stand-in session.
+// Returns the CLI's exit code. Its stdin, stdout and stderr are this process's own.
+export function surfaceCli(flags, args) {
+  if (flags.type !== undefined && !SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
+  if (args.length === 0) throw new UsageError('name an agent-brief verb after --, such as: hws surface cli -- status');
+  const terminal = requireCallingTerminal(flags);
+  const surface = gluedSurface(terminal, flags, (item) => existsSync(item.socket));
+  if (!surface) {
+    const kind = flags.type ? `${flags.type} ` : '';
+    const named = flags.title ? ` titled ${JSON.stringify(flags.title)}` : '';
+    throw new HwsError(`terminal ${terminal} has no open ${kind}surface${named}. Open one with hws review FILE or hws surface open first`);
+  }
+  const cli = process.env.HWS_SURFACE_CLI || SURFACE_CLI;
+  if (!existsSync(cli)) throw new HwsError(`no surface CLI at ${cli}. Run install.sh to build the surface`);
+  const environment = { ...process.env, COMPANION_SOCKET: surface.socket, CLAUDE_CODE_SESSION_ID: `surface-${surface.id}` };
+  const ran = spawnSync(process.execPath, [cli, ...args], { stdio: 'inherit', env: environment });
+  if (ran.error) throw new HwsError(`could not run ${cli}: ${ran.error.message}`);
+  return ran.status ?? 1;
 }

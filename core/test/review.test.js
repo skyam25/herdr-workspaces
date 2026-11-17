@@ -203,3 +203,21 @@ test('review --window opens the page in its own window', (t) => {
   assert.ok(box.actions().some((call) => call[0] === 'hc' && call[1] === 'run'));
   assert.equal(box.manifest(manifest.id).surfaces[0].pane, null);
 });
+
+test('review opens an outline as a page without tracking it, and its rounds ask for no second look', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const file = join(realpathSync(manifest.folder), 'memo.outline.md');
+  writeFileSync(file, '# Memo\n\nKind: document\n');
+
+  const opened = box.json(['review', file, '--terminal', owner]);
+  assert.equal(opened.type, 'page');
+  assert.equal(opened.artifact, null);
+  assert.deepEqual(box.manifest(manifest.id).artifacts, []);
+  box.clearCalls();
+
+  box.json(['surface', 'done', '--id', opened.id, '--bundle', box.bundle('bundle-outline', 'Generate memo.md from memo.outline.md (outline-first).\n')]);
+  const sent = box.actions().find((call) => call[1] === 'send')[3];
+  assert.equal(sent, 'Generate memo.md from memo.outline.md (outline-first).\n');
+});

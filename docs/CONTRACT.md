@@ -205,8 +205,10 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws agents --session S` | Prints `{ session, workspaces }`, every workspace whose log holds S. Needs no calling terminal |
 | `hws agent add --session S [--folder F] [--tool claude\|codex] [--workspace W]` | Logs a session started outside the workspace's terminals, with `source` `manual`. A Claude session is looked up at F, then by id under every Claude project folder, and its folder is read from the transcript's `cwd`. It fails when no transcript is found. A Codex session needs `--folder` and is not checked. Logging a known session changes nothing and prints `existing: true` |
 | `hws outputs --terminals T1,T2` | Read-only. Prints `{ agents }`, one `{ terminal, session, folder, file, outputs }` per terminal in the order given. See Outputs under Right panel |
+| `hws output add --title T (--path P \| --url U) [--status drafting\|ready]` | Declares a deliverable in the calling agent's outputs file, as Agent Brief's `declare_output` does. See [Declaring an output](#declaring-an-output) |
+| `hws outline new TITLE... [--target P] [--path X.outline.md] [--kind document\|page] [--terminal T]` | Writes a new outline file and prints its path on the first line. Needs no surface. See [Outlines](#outlines) |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board or note opens in its own window and a page splits a pane beside T. `--window` and `--in-pane` choose the place, and both together exit 2. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. One file is one surface per workspace. A file already open in a pane gets the focus, and one already open in a window is raised, whatever the flags say. The result then has `focused: true`, and `raised` for a window. A file whose window is closed starts again on the same data in the place the flags or the default give |
-| `hws review FILE\|ARTIFACT [--title X] [--terminal T] [--window]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T --in-pane` does. `--window` opens it in its own window. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane or window with no agent attached. Never opens standalone |
+| `hws review FILE\|ARTIFACT [--title X] [--terminal T] [--window]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T --in-pane` does. `--window` opens it in its own window. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does, except an `.outline.md` or `.feedback.md` file, which is never tracked. An `.outline.md` file opens in Write's outline view. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane or window with no agent attached. Never opens standalone |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open}]`. Leaves out closed windows with no work |
 | `hws surface resume --id S` | Brings an open window forward, or starts a closed one again on the same id, data and file |
@@ -214,6 +216,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
 | `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place. See [Delivery on Done](#delivery-on-done) |
 | `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
+| `hws surface cli [--terminal T] [--title X] [--type board\|note\|page] -- VERB [ARGS...]` | Runs the surface's `agent-brief` CLI on the newest open surface of T that matches, as that surface's stand-in session. See [Surface CLI](#surface-cli) |
 | `hws surface move --id S --workspace W` | Moves a surface's record and data folder to W and keeps its id. W `standalone` takes it out of every workspace. An open window ends and starts again on the moved data, and its drafts link into W's drafts place. Prints `{id,from,workspace,moved,restarted}`. Fails on a surface in a pane, an archived W and an unknown W. A surface already in W prints `moved: false` |
 | `hws surface targets [--id S]` | Prints `{current,suggested,workspaces}`. `current` is S's workspace, or null without `--id`. `suggested` is the workspace of the selected space when it differs from `current`, else null. `workspaces` lists each open workspace as `{id,name,kind}` |
 | `hws unfiled` | Prints `{surfaces,artifacts}` for work in no workspace, newest first. Each surface is `{id,type,title,file,state}`, where `state` is `open`, `draft` or `pane`. A closed window with no work and a closed pane are left out. Each artifact is `{id,type,title,path,createdAt}` |
@@ -261,7 +264,7 @@ A page that shows a file is a round of feedback on that file. Tidy reviews are t
 |---|---|
 | Record | `type: page`, `role: feedback`, `title: Feedback on <surface title>`, `file`, and `reviewOf` |
 | `reviewOf` | The `file` artifact whose path is the file, compared after resolving links. `hws review` tracks the file first, so its rounds always have one |
-| Prompt | Before a live terminal gets it, `prompt.md` gains a last line. It asks the agent to run `hws review <file>` after changing the page |
+| Prompt | Before a live terminal gets it, `prompt.md` gains a last line. It asks the agent to run `hws review <file>` after changing the page. An `.outline.md` round gains none, because the outline view reloads as the agent changes the file |
 | Freshness, scan, session start | Leave rounds out, because a round is a message and not work that landed |
 | Panel | Lists a round under the artifact it reviews. See [Workspace panel](#workspace-panel-hws-panel) |
 
@@ -567,6 +570,65 @@ Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live.
 | `COMPANION_DATA_DIR` | The surface data folder |
 
 The host's start script is `surface/run.sh`.
+
+The host registers a stand-in session `surface-<surface id>` on the surface socket. Its folder decides what project-relative paths mean on that socket.
+
+| Surface | Session folder |
+|---|---|
+| Board, or note with no file | `<data folder>/work` |
+| File inside `HWS_FOLDER`, which is not the home folder, on a path with no dot folder | `HWS_FOLDER` |
+| Any other file | The file's folder |
+
+## Surface CLI
+
+`hws surface cli [--terminal T] [--title X] [--type K] -- VERB [ARGS...]` runs `surface/app/bin/agent-brief.mjs`, the surface's copy of the Agent Brief CLI, with Node. `HWS_SURFACE_CLI` names another script, for tests.
+
+| Item | Behaviour |
+|---|---|
+| Surface | The newest surface of T, default `$HC_TERMINAL_ID`, whose title is X and type is K when given, whose window is open or which has a pane, and whose socket exists |
+| Environment | `COMPANION_SOCKET` is the surface socket and `CLAUDE_CODE_SESSION_ID` is `surface-<id>`, so session verbs act on the surface's stand-in session |
+| Pass-through | Everything after `--` reaches the CLI unchanged, `--json` and `--help` included. stdin, stdout, stderr and the exit code are the CLI's own |
+| Failures | No `--`, no verb or a bad flag exits 2. No matching open surface, or no built CLI, exits 1 with the reason |
+| Paths | `outline`, `feedback` and `behavior` take a path relative to the [session folder](#host-environment). An absolute path inside that folder is made relative to it, and one outside it exits 2 |
+
+| Verbs | Surface | State |
+|---|---|---|
+| `status`, `sessions`, `boards`, `read`, `png`, `draw`, `snap`, `update`, `delete` | Board | Works. Without `--board` they act on the board the surface shows. `png` writes under the shell folder's `.feedback/boards/` |
+| `open [--board B] [--prompt X]`, `open --output F [--feedback]` | Any | Works, and changes what that surface shows |
+| `outline list\|show\|apply` | Page on an `.outline.md` file, or any surface whose session folder holds the outline | Works. Write's outline view reloads live |
+| `outline new` | Any | Works, and opens the outline in that surface. `hws outline new` makes one before any surface exists |
+| `feedback list\|graph\|show\|round\|catalog\|add\|log\|change\|done\|related\|workspace\|snap` | Page on the output, or any surface whose session folder holds it | Works. Review's Feedback tab shows the items |
+| `behavior show\|update\|export` | Page on the prototype | Works. Review's Behavior tab shows beside the page |
+| `handoff` | Any | Fails, because a surface keeps no iPad pairing. Use `hws phone send FILE` |
+| `show`, `output` | Any | Print a request line that only the Agent Brief plugin acts on, so nothing shows or records. Use `hws output add` in place of `output` |
+
+### Outlines
+
+`hws outline new` writes `# TITLE`, a blank line, `Target: P` when given, and `Kind: K`, as `agent-brief outline new` does through the app.
+
+| Item | Behaviour |
+|---|---|
+| Paths | `--target` and `--path` count from the current folder |
+| File | `--path`, else the target with `.outline.md` for its extension, else the title as a slug in the current folder. It must end in `.outline.md` and must not exist |
+| Target line | The target relative to the folder a surface on the outline would use, found from T's workspace as in [Host environment](#host-environment). A target outside that folder exits 1 |
+| Kind | `document` by default, or `page` |
+| Result | Prints the path, then a line naming `hws review` to show it. `--json` prints `{path,title,target,kind,root}` |
+| Surface | `hws review X.outline.md` shows Write's outline view, with Pop out and the workspace chip but no Done. Its Generate and Ask buttons deliver to the owning terminal as Done does |
+
+### Declaring an output
+
+`hws output add` writes the same record Agent Brief's `declare_output` writes, so Outputs lists it.
+
+| Item | Behaviour |
+|---|---|
+| Session | `$CLAUDE_CODE_SESSION_ID`, else the session registered for `$HC_TERMINAL_ID`. Neither exits 2 |
+| Folder | The registered session's folder when its id matches, else the current folder |
+| File | `<folder>/.feedback/outputs/<session>.json`, version 1. Records and fields `hws` does not know are kept |
+| `--path` | Counts from the current folder and must lie inside the folder, else it exits 1. The record's `ref` is relative to the folder, and `kind` comes from the extension: `markdown`, `html`, `pdf`, `docx`, `pptx`, `xlsx` or `other` |
+| `--url` | An http or https link, with `ref` and `url` both the link and `kind` `artifact` |
+| Upsert | A record with the same `ref` keeps its place and other fields, and takes the new `title`, `status`, `tier: declared` and `declaredAt` |
+| `.gitignore` | `<folder>/.feedback/.gitignore` holding `*` is written when missing |
+| Result | Prints the record. A Markdown or HTML file's text names the `hws review` line that shows it |
 
 ## In a pane
 
@@ -1034,7 +1096,7 @@ The header shows `Models  <orchestrator model> → <worker model>`, which opens 
 |---|---|
 | `session` | The registered Claude session id, or null when the terminal has none |
 | `folder` | The `--folder` given to `hws register`, else the folder the terminal's program runs in, else null |
-| `file` | `<folder>/.feedback/outputs/<session>.json`, which the Agent Brief plugin writes for each session, or null |
+| `file` | `<folder>/.feedback/outputs/<session>.json`, which `hws output add` and the Agent Brief plugin write for each session, or null |
 | `outputs` | That file's records, one per `ref`, each `{ ref, kind, tier }` with `url`, `title`, `status`, `origin`, `declaredAt`, `firstWriteAt`, `lastWriteAt` and `writes` when well formed |
 
 A missing folder or file, malformed JSON, a file whose `version` is not 1, or a session id that is not a plain file name gives an empty `outputs`. A record without a `ref`, a `kind`, or a `tier` of `declared` or `detected` is dropped, and unknown fields are left out. Any `kind` string is kept. The command exits 0 in each of these cases.

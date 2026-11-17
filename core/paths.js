@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 export const STANDALONE = 'standalone';
 export const HOST_SCRIPT = fileURLToPath(new URL('../surface/run.sh', import.meta.url));
 export const PHONE_HOST = fileURLToPath(new URL('../surface/app/out/phone/host.cjs', import.meta.url));
+export const SURFACE_CLI = fileURLToPath(new URL('../surface/app/bin/agent-brief.mjs', import.meta.url));
 export const HWS_BIN = fileURLToPath(new URL('../bin/hws', import.meta.url));
 
 export function home() {

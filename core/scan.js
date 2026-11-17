@@ -14,7 +14,7 @@ const MAX_SHOWN = 40;
 
 const OUTPUT = /\.(html?|pptx|potx|key|pdf|docx|xlsx|excalidraw)$/i;
 const READS_LINKS = /\.(md|markdown|html?)$/i;
-const SIDE_FILE = /\.(feedback|outline)\.md$/i;
+export const SIDE_FILE = /\.(feedback|outline)\.md$/i;
 const FIRST = /^(readme|current)\b/i;
 const WEB = /https:\/\/(?:claude\.ai\/(?:code\/)?artifact\/[\w-]+|docs\.google\.com\/(?:document|presentation|spreadsheets)\/d\/[\w-]+|[\w-]+\.sharepoint\.com\/[^\s)"'<>]+|(?:www\.)?figma\.com\/[^\s)"'<>]+)/g;
 const MARKDOWN_LINK = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;

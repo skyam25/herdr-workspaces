@@ -8,14 +8,15 @@ import { update } from './commands/update.js';
 import { current, list, parent, register } from './commands/info.js';
 import { close, place, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
-import { outputs } from './commands/outputs.js';
+import { outlineNew } from './commands/outline.js';
+import { outputAdd, outputs } from './commands/outputs.js';
 import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
 import { phoneAccept, phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop, phoneTargets } from './commands/phone.js';
 import { find, reopen } from './commands/retired.js';
 import { decisionAdd, decisionList } from './commands/decision.js';
 import { tidyApply, tidyStart, tidyStatus, tidyStop } from './commands/tidy.js';
 import { boardAdd, boardOpen, spaceAdd, spaceMatch, spaceMove, spaceRemove } from './commands/spaces.js';
-import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceMove, surfaceOpen, surfacePop, surfaceResume, surfaceSocket, surfaceTargets, unfiledList } from './commands/surface.js';
+import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceMove, surfaceOpen, surfacePop, surfaceResume, surfaceCli, surfaceSocket, surfaceTargets, unfiledList } from './commands/surface.js';
 import {
   todoAdd,
   todoArchive,
@@ -38,6 +39,7 @@ import { UsageError } from './errors.js';
 const text = { type: 'string' };
 const flag = { type: 'boolean' };
 const repeated = { type: 'string', multiple: true };
+const SURFACE_CLI_OPTIONS = { terminal: text, title: text, type: text };
 
 const ROUTES = [
   { path: ['new', 'terminal'], run: newTerminal, prunes: true, options: { folder: text } },
@@ -58,6 +60,8 @@ const ROUTES = [
   { path: ['list'], run: list, prunes: true, options: { archived: flag } },
   { path: ['register'], run: register, options: { terminal: text, session: text, role: text, folder: text } },
   { path: ['outputs'], run: outputs, options: { terminals: text } },
+  { path: ['output', 'add'], run: outputAdd, options: { title: text, path: text, url: text, status: text } },
+  { path: ['outline', 'new'], run: outlineNew, options: { target: text, path: text, kind: text, terminal: text }, positionals: 'any' },
   { path: ['agents'], run: agentsList, options: { workspace: text, session: text } },
   { path: ['agent', 'add'], run: agentAdd, options: { session: text, folder: text, tool: text, workspace: text } },
   {
@@ -82,6 +86,7 @@ const ROUTES = [
   { path: ['surface', 'discard'], run: surfaceDiscard, options: { id: text } },
   { path: ['surface', 'pop'], run: surfacePop, options: { id: text, to: text } },
   { path: ['surface', 'socket'], run: surfaceSocket, options: { terminal: text, title: text } },
+  { path: ['surface', 'cli'], run: surfaceCli, options: SURFACE_CLI_OPTIONS },
   { path: ['surface', 'move'], run: surfaceMove, options: { id: text, workspace: text } },
   { path: ['surface', 'targets'], run: surfaceTargets, options: { id: text } },
   { path: ['unfiled'], run: unfiledList, options: {} },
@@ -207,8 +212,28 @@ function printFailure(message, json) {
   else console.error(message);
 }
 
+// `hws surface cli [flags] -- VERB [ARGS...]` passes everything after `--` to the surface's CLI, `--json` and `--help` included.
+function runSurfaceCli(argv) {
+  const split = argv.indexOf('--');
+  const own = split === -1 ? argv : argv.slice(0, split);
+  if (own.includes('--help') || own.includes('-h')) {
+    console.log(`${helpFor(['surface', 'cli'])} -- VERB [ARGS...]`);
+    return;
+  }
+  try {
+    if (split === -1) throw new UsageError('put -- before the agent-brief verb, such as: hws surface cli -- status');
+    const { values } = parseArgs({ args: own, options: SURFACE_CLI_OPTIONS, allowPositionals: false, strict: true });
+    process.exitCode = surfaceCli(values, argv.slice(split + 1));
+  } catch (error) {
+    const usage = error instanceof UsageError || error.code?.startsWith('ERR_PARSE_ARGS');
+    console.error(error.message);
+    process.exitCode = usage ? 2 : 1;
+  }
+}
+
 export async function main(argv) {
   process.stdout.on('error', () => {});
+  if (argv[0] === 'surface' && argv[1] === 'cli') return runSurfaceCli(argv.slice(2));
   const json = argv.includes('--json');
   const args = argv.filter((arg) => arg !== '--json');
   if (args[0] === '--help' || args[0] === '-h') {
