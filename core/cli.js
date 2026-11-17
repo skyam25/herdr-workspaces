@@ -10,7 +10,7 @@ import { current, list, parent, register } from './commands/info.js';
 import { close, place, promote, prune, resume, setWorkspace } from './commands/lifecycle.js';
 import { newTerminal, newThrowaway, newWorkspace } from './commands/new.js';
 import { outlineNew } from './commands/outline.js';
-import { outputAdd, outputs } from './commands/outputs.js';
+import { outputAdd, outputs, outputTouch } from './commands/outputs.js';
 import { orchestratorStart, orchestratorStatus, orchestratorStop } from './commands/orchestrator.js';
 import { phoneAccept, phoneDeliver, phoneForget, phonePair, phoneSend, phoneStatus, phoneStop, phoneTargets } from './commands/phone.js';
 import { find, reopen } from './commands/retired.js';
@@ -62,6 +62,7 @@ const ROUTES = [
   { path: ['register'], run: register, options: { terminal: text, session: text, role: text, folder: text } },
   { path: ['outputs'], run: outputs, options: { terminals: text } },
   { path: ['output', 'add'], run: outputAdd, options: { title: text, path: text, url: text, status: text } },
+  { path: ['output', 'touch'], run: outputTouch, hidden: true, options: { path: text, origin: text } },
   { path: ['outline', 'new'], run: outlineNew, options: { target: text, path: text, kind: text, terminal: text }, positionals: 'any' },
   { path: ['agents'], run: agentsList, options: { workspace: text, session: text } },
   { path: ['agent', 'add'], run: agentAdd, options: { session: text, folder: text, tool: text, workspace: text } },
@@ -168,12 +169,13 @@ const ROUTES = [
 
 const USAGE = `Usage: hws <command> [--json]
 
-${ROUTES.map((route) => `  ${route.path.join(' ')}`).join('\n')}
+${ROUTES.filter((route) => !route.hidden).map((route) => `  ${route.path.join(' ')}`).join('\n')}
 
 The contract in docs/CONTRACT.md lists every option.`;
 
 function helpFor(words) {
-  const routes = ROUTES.filter(({ path }) => words.every((word, index) => path[index] === word));
+  // A hidden route shows only when its whole path is asked for.
+  const routes = ROUTES.filter(({ path, hidden }) => words.every((word, index) => path[index] === word) && (!hidden || words.length === path.length));
   if (routes.length === 0) return USAGE;
   const describe = ({ type }, name) => (type === 'boolean' ? `--${name}` : `--${name} X`);
   return routes.map(({ path, options }) => `hws ${[...path, ...Object.entries(options).map(([name, option]) => describe(option, name))].join(' ')}`).join('\n');

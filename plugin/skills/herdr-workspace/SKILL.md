@@ -204,7 +204,10 @@ hws output add --title "Pricing memo" --path docs/pricing.md --status drafting
 - Run it with `--status drafting` when you start the work.
 - Run it again with `--status ready` when the work is done.
 - Use `--url U` in place of `--path` for a web document, such as a claude.ai artifact.
+- Declare only the deliverable the person asked for, usually one per request.
 - Never declare code, config, tests or other files that serve the code.
+
+Outputs already lists every Markdown, HTML, PDF and Office file you write under Touched, so never declare a file just to list it.
 
 ## Ask the user questions
 

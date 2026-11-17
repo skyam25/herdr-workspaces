@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { setup, mount, settle, hwsCalls, usedMethods } from "./harness.mjs";
-import { modelsLine, agentName, ago, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, storyHeight, todoColumns, todoDialogSize, todoLayout } from "../hws-work/data.js";
+import { modelsLine, agentName, ago, cardSessions, cardStory, cardSummary, cardTimes, describeSession, locateTerminal, mergeWaiting, orchestratorFolder, outputActions, outputGroups, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, storyHeight, todoColumns, todoDialogSize, todoLayout, touchedDetail } from "../hws-work/data.js";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -1991,6 +1991,102 @@ test("an open failure shows in the panel", async () => {
   await m.click("output-t1-plan.md");
   assert.match(m.text(), /terminal t1 is gone/);
   assert.equal(m.has("note"), true);
+});
+
+test("touchedDetail says how a document came about and how often it was written", () => {
+  assert.equal(touchedDetail({ origin: "created", writes: 3 }), "created · 3 writes");
+  assert.equal(touchedDetail({ origin: "edited", writes: 1 }), "edited · 1 write");
+  assert.equal(touchedDetail({}), "edited · 0 writes");
+});
+
+test("outputActions offers review for pages, a note for Markdown and a copy for everything", () => {
+  const ids = (ref) => outputActions(ref).map((a) => a.label);
+  assert.deepEqual(ids("docs/plan.md"), ["Review", "Open as note", "Copy path"]);
+  assert.deepEqual(ids("page.HTML"), ["Review", "Copy path"]);
+  assert.deepEqual(ids("notes.markdown"), ["Open as note", "Copy path"]);
+  assert.deepEqual(ids("deck.pdf"), ["Copy path"]);
+  assert.deepEqual(ids("https://claude.ai/artifact/x"), ["Copy link"]);
+});
+
+test("touched rows say created or edited and how many writes, after the declared rows", async () => {
+  const touched = { ...seen("draft.md", 300, "markdown"), origin: "created", writes: 3 };
+  world({ found: { t1: rec("s1", [decl("plan.md", 100, "markdown"), touched, { ...seen("old.html", 50, "html"), origin: "edited", writes: 1 }]) } });
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("touched-t1");
+  assert.match(m.text(), /plan\.md \| markdown.*Touched \(2\).*draft\.md \| created · 3 writes.*old\.html \| edited · 1 write/);
+});
+
+test("the ··· button shows a row's actions, and a second press or right-click hides them", async () => {
+  world({ found: { t1: rec("s1", [decl("plan.md", 2), decl("deck.pdf", 1)]) } });
+  const m = await mount("hws-work", { view: "outputs" });
+  assert.equal(m.has("actions-t1-plan.md"), false);
+  await m.click("more-t1-plan.md");
+  assert.match(m.text(), /Review \| Open as note \| Copy path/);
+  await m.click("more-t1-deck.pdf");
+  assert.equal(m.has("actions-t1-plan.md"), false);
+  assert.equal(m.has("copy-t1-deck.pdf"), true);
+  assert.equal(m.has("review-t1-deck.pdf"), false);
+  await m.rightClick("output-t1-deck.pdf");
+  assert.equal(m.has("actions-t1-deck.pdf"), false);
+  await m.rightClick("output-t1-plan.md");
+  assert.equal(m.has("actions-t1-plan.md"), true);
+});
+
+test("Review opens the page beside its agent, as a click on the row does", async () => {
+  const H = world({ found: { t1: rec("s1", [decl("plan.md", 1)]) } });
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("more-t1-plan.md");
+  await m.click("review-t1-plan.md");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["surface", "open", "--type", "page", "--file", "/w/s1/plan.md", "--terminal", "t1", "--json"]);
+  assert.equal(m.has("actions-t1-plan.md"), false);
+});
+
+test("Open as note opens a touched Markdown file in a note tied to its agent", async () => {
+  const H = world({ found: { t1: rec("s1", [{ ...seen("notes/today.md", 1, "markdown"), origin: "edited", writes: 2 }]) } });
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("touched-t1");
+  await m.click("more-t1-notes/today.md");
+  await m.click("note-t1-notes/today.md");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["surface", "open", "--type", "note", "--file", "/w/s1/notes/today.md", "--terminal", "t1", "--json"]);
+});
+
+test("a flipped agent's note opens beside its chat pane, and a failure shows in the panel", async () => {
+  const H = world({
+    agents: [],
+    panes: [{ pane: "chat1", mod: "hws-chat", tab: "tb1" }],
+    terminals: [{ address: "t5", state: "live", labels: { "herdr.chat": "chat1" }, program: { key: "claude" } }],
+    found: { t5: rec("s5", [decl("spec.md", 1)]) },
+  });
+  H.hws["surface open"] = { fail: "terminal t5 is gone" };
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("more-t5-spec.md");
+  await m.click("note-t5-spec.md");
+  assert.deepEqual(hwsCalls(H).at(-1).args, ["surface", "open", "--type", "note", "--file", "/w/s5/spec.md", "--terminal", "t5", "--beside-pane", "chat1", "--space", "spc1", "--json"]);
+  assert.match(m.text(), /terminal t5 is gone/);
+});
+
+test("Copy path copies the absolute path, and Copy link copies a link", async () => {
+  const H = world({ found: { t1: rec("s1", [decl("docs/my plan.md", 2), decl("https://claude.ai/artifact/x", 1, "artifact")]) } });
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("more-t1-docs/my plan.md");
+  await m.click("copy-t1-docs/my plan.md");
+  const copied = H.calls.at(-1);
+  assert.equal(copied.command, "sh");
+  assert.match(copied.args[1], /pbcopy/);
+  assert.deepEqual(copied.args.slice(2), ["sh", "/w/s1/docs/my plan.md"]);
+  assert.match(m.text(), /Copied \/w\/s1\/docs\/my plan\.md/);
+  await m.click("more-t1-https://claude.ai/artifact/x");
+  await m.click("copy-t1-https://claude.ai/artifact/x");
+  assert.deepEqual(H.calls.at(-1).args.slice(2), ["sh", "https://claude.ai/artifact/x"]);
+});
+
+test("a failed copy says so", async () => {
+  const H = world({ found: { t1: rec("s1", [decl("plan.md", 1)]) } });
+  H.other = () => ({ code: 1, stdout: "", stderr: "" });
+  const m = await mount("hws-work", { view: "outputs" });
+  await m.click("more-t1-plan.md");
+  await m.click("copy-t1-plan.md");
+  assert.match(m.text(), /Could not copy\./);
 });
 
 // Polling

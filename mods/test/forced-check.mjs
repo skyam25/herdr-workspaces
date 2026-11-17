@@ -99,12 +99,12 @@ const DONE_CARDS = [{ id: "d1", title: "Shipped", notes: "", column: "done", own
 const OUTPUTS_ANCHOR = "outputsBody(t, blocker) {";
 const OUTPUTS_AGENTS = [{ address: "t13", tab: "tb1", chatPane: null, space: "spc1", title: "✳ Plan the checkout" }, { address: "t22", tab: "tb2", chatPane: "p9", space: "spc1", title: "" }];
 const OUTPUTS_FOUND = [
-  { terminal: "t13", session: "s1", folder: "/w", outputs: [{ ref: "docs/plan.md", kind: "markdown", tier: "declared", declaredAt: 1794000000000 }, { ref: "notes/scratch.md", kind: "markdown", tier: "detected", lastWriteAt: 1794000000001 }] },
+  { terminal: "t13", session: "s1", folder: "/w", outputs: [{ ref: "docs/plan.md", kind: "markdown", tier: "declared", declaredAt: 1794000000000 }, { ref: "notes/scratch.md", kind: "markdown", tier: "detected", origin: "created", writes: 3, lastWriteAt: 1794000000001 }] },
   { terminal: "t22", session: "s2", folder: "/w/web", outputs: [{ ref: "https://claude.ai/artifact/x", kind: "artifact", tier: "declared", declaredAt: 1794000000002 }] },
 ];
-const outputsState = (found) => (s) => {
+const outputsState = (found, extra = "") => (s) => {
   if (!s.includes(OUTPUTS_ANCHOR)) throw new Error(`hws-work/main.js has no "${OUTPUTS_ANCHOR}" to force a state on`);
-  return s.replace(OUTPUTS_ANCHOR, `${OUTPUTS_ANCHOR} blocker = null; this.roster = ${JSON.stringify(OUTPUTS_AGENTS)}; this.found = new Map(${JSON.stringify(found.map((x) => [x.terminal, x]))}); this.touchedOpen = new Set(["t13"]);`);
+  return s.replace(OUTPUTS_ANCHOR, `${OUTPUTS_ANCHOR} blocker = null; this.roster = ${JSON.stringify(OUTPUTS_AGENTS)}; this.found = new Map(${JSON.stringify(found.map((x) => [x.terminal, x]))}); this.touchedOpen = new Set(["t13"]); ${extra}`);
 };
 
 const LINKED_CARD = { id: "a1", title: "Pick a host", notes: "Brief", note: "Which host?", report: "**Changed** the host\\n\\n- Checked it", column: "waiting", terminal: "t13", addedBy: "t22", owner: "agent", worktree: true, createdAt: 1000, updatedAt: 2000, kind: "todo" };
@@ -166,6 +166,8 @@ const VARIANTS = [
   { mod: "hws-work", name: "todo-dialog-reply-ended", props: { view: "todo", space: "spc1", id: "a1", height: 700 }, files: { "todo.js": { header: `const __props = () => (${JSON.stringify({ view: "todo", space: "spc1", id: "a1", height: 700 })});\n${LINKED_HEADER}`, patch: endedDialog } } },
   { mod: "hws-work", name: "outputs-empty", props: { view: "outputs" }, patch: outputsState([]) },
   { mod: "hws-work", name: "outputs-list", props: { view: "outputs" }, patch: outputsState(OUTPUTS_FOUND) },
+  { mod: "hws-work", name: "outputs-actions", props: { view: "outputs" }, patch: outputsState(OUTPUTS_FOUND, 'this.actionsFor = "t13-notes/scratch.md"; this.outputNote = { text: "Copied /w/notes/scratch.md", isError: false };') },
+  { mod: "hws-work", name: "outputs-link-actions", props: { view: "outputs" }, patch: outputsState(OUTPUTS_FOUND, 'this.actionsFor = "t22-https://claude.ai/artifact/x"; this.outputNote = { text: "terminal t22 is gone", isError: true };') },
   { mod: "hws-work", name: "board-orchestrating", props: { view: "tasks" }, patch: boardState("") },
   { mod: "hws-work", name: "board-stop-confirm", props: { view: "tasks" }, patch: boardState("this.confirmingStop = true;") },
   { mod: "hws-work", name: "board-stopping", props: { view: "tasks" }, patch: boardState('this.orchestratorBusy = "stop";') },

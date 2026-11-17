@@ -1,5 +1,5 @@
 {
-  "description": "Register the session with its Herdr workspace, tell Claude which workspace it is in, where files land, how fresh the current note is, what work it tracks and how the note gets updated, keep direct writes off the current note, copy a closing message onto the cards it finished, and show a flipped agent's permission requests in its chat.",
+  "description": "Register the session with its Herdr workspace, tell Claude which workspace it is in, where files land, how fresh the current note is, what work it tracks and how the note gets updated, keep direct writes off the current note, list the documents a session writes under Outputs, copy a closing message onto the cards it finished, and show a flipped agent's permission requests in its chat.",
   "hooks": {
     "SessionStart": [
       {
@@ -20,6 +20,18 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard-note.sh\"",
             "timeout": 4
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/output-touch.sh\"",
+            "timeout": 5
           }
         ]
       }

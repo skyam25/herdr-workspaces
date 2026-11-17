@@ -119,7 +119,7 @@ const HERDR_APP = "dev.herdr.app";
 const NOTE_EDITOR =
   "To show the person a Markdown file to read or edit, run `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn. It opens in a Herdr note window, in a workspace or not. When you want their comments on something you wrote, run `hws review FILE` instead. Never open the file with `open`, VS Code or another editor.";
 const OUTPUTS =
-  "When the person asks for a doc, brief, report, spec, page or deck, run `hws output add --title T --path P --status drafting` as you start it, and run it again with `--status ready` when it is done. Use `--url U` in place of `--path` for a web document. The work then shows under Outputs in Herdr's right panel. Never declare code, config or tests.";
+  "When the person asks for a doc, brief, report, spec, page or deck, run `hws output add --title T --path P --status drafting` as you start it, and run it again with `--status ready` when it is done. Use `--url U` in place of `--path` for a web document. The work then shows under Outputs in Herdr's right panel. Outputs already lists every document you write as touched, so declare only the deliverable the person asked for. Never declare code, config or tests.";
 const PHONE =
   'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn. Their markup arrives as your next prompt. Run `~/.local/bin/hws` if `hws` is not on PATH.';
 

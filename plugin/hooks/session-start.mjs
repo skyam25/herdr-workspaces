@@ -39,6 +39,7 @@ const PASTE = [
 const OUTPUTS = [
   "When the person asks for a doc, brief, report, spec, page or deck, run `hws output add --title T --path P --status drafting` as you start it, and run it again with `--status ready` when it is done.",
   "Use `--url U` in place of `--path` for a web document. The work then shows under Outputs in Herdr's right panel.",
+  "Outputs already lists every document you write as touched, so declare only the deliverable the person asked for.",
   "Never declare code, config or tests.",
 ].join(" ");
 
