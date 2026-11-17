@@ -1,20 +1,20 @@
 ---
 name: behavior-review
-description: This skill should be used when the user asks for behavior rules, acceptance criteria or assumptions beside an interactive HTML prototype, asks to review a prototype's behavior, sends behavior decisions from the Behavior tab of a Herdr review page, or asks to export acceptance criteria for an engineering handoff. Explains how to keep rules in <prototype.html>.behavior.json with `hws surface cli -- behavior`, review them with `hws review`, and apply the decisions.
+description: This skill should be used when the user asks for behavior rules, acceptance criteria or assumptions beside an interactive HTML prototype, asks to review a prototype's behavior, sends behavior decisions from the Behavior tab of a Herdr review page, or asks to export acceptance criteria for an engineering handoff. Explains how to keep rules in <prototype.html>.behavior.json with `hws surface cli --type page -- behavior`, review them with `hws review`, and apply the decisions.
 ---
 
 # Behavior review
 
-The review page that `hws review` opens for a prototype has a Behavior tab beside its comments. Rules live in `<prototype.html>.behavior.json`, independent of the session. The surface checks revisions and keeps the decision history, so change the rules through `hws surface cli -- behavior`, never by editing the file.
+The review page that `hws review` opens for a prototype has a Behavior tab beside its comments. Rules live in `<prototype.html>.behavior.json`, independent of the session. The surface checks revisions and keeps the decision history, so change the rules through `hws surface cli --type page -- behavior`, never by editing the file.
 
 Run `~/.local/bin/hws` if `hws` is not on PATH.
 
 | Command | Does |
 |---|---|
 | `hws review <prototype.html>` | Opens the prototype beside this terminal, with its Behavior tab |
-| `hws surface cli -- behavior show <prototype.html> --json` | Reads the rules. A missing file returns an empty document with `version: "missing"` |
-| `hws surface cli -- behavior update <prototype.html> --file <patch.json> --json` | Applies a version-checked patch |
-| `hws surface cli -- behavior export <prototype.html> --out acceptance.md` | Writes acceptance criteria for a handoff |
+| `hws surface cli --type page -- behavior show <prototype.html> --json` | Reads the rules. A missing file returns an empty document with `version: "missing"` |
+| `hws surface cli --type page -- behavior update <prototype.html> --file <patch.json> --json` | Applies a version-checked patch |
+| `hws surface cli --type page -- behavior export <prototype.html> --out acceptance.md` | Writes acceptance criteria for a handoff |
 
 The `hws surface cli` commands run against this terminal's open surface. When none is open, finish the prototype, then run `hws review <prototype.html>` as you hand it over, and write the rules then. If a command fails, say the rules were not saved, keep going with authorized prototype work, and never claim they were recorded.
 

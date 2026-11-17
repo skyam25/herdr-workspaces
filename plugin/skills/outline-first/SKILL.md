@@ -17,9 +17,9 @@ Change an outline only through these commands. Never edit a `.outline.md` file d
 |---|---|
 | `hws outline new "<title>" [--target <path>] [--path <x.outline.md>]` | Makes the file and prints its path first |
 | `hws review <x.outline.md>` | Opens the outline in the outline view beside this terminal |
-| `hws surface cli -- outline list` | Outlines in the project, with counts |
-| `hws surface cli -- outline show <path> [--json]` | The outline and its ids |
-| `hws surface cli -- outline apply <path> --ops .feedback/outline-ops.json` | Applies ops. Prints the ids it added |
+| `hws surface cli --type page -- outline list` | Outlines in the project, with counts |
+| `hws surface cli --type page -- outline show <path> [--json]` | The outline and its ids |
+| `hws surface cli --type page -- outline apply <path> --ops .feedback/outline-ops.json` | Applies ops. Prints the ids it added |
 
 The `hws surface cli` commands run against this terminal's open surface, so open the outline with `hws review` first. If one fails, say the outline was not changed. Run each command on its own, with no shell loops, variables or `&&` chains, so the user can allow it once.
 
@@ -88,5 +88,5 @@ A review can also list edits the user made in the review page's Edit mode. They 
 
 - Sections are screens or regions.
 - Points are content and behavior.
-- Sources may be sketches or screenshots. Read an open sketch with `hws surface cli --title "<sketch title>" -- read`.
+- Sources may be sketches or screenshots. Read an open sketch with `hws surface cli --type board --title "<sketch title>" -- read`.
 - Write every visible word as static markup. Text a script shows, such as modal captions, goes in hidden elements the script reads, so the review page's Edit mode can retype it.

@@ -175,7 +175,7 @@ The user can move a surface between a pane and a window with Pop out and Pop in.
 hws surface cli -- VERB [ARGS]
 ```
 
-This runs the surface command line against this terminal's open surface. Add `--title X` before `--` when this terminal has more than one surface open, and `--terminal T` to drive another terminal's surface. Load the skill for the verb you need.
+This runs the surface command line against this terminal's newest open surface. Before `--`, add `--type board` for a sketch or `--type page` for a review page or outline, `--title X` to pick one of several, and `--terminal T` to drive another terminal's surface. Load the skill for the verb you need.
 
 | Verbs | Skill |
 |---|---|

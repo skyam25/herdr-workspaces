@@ -17,7 +17,7 @@ Open one only when the user asks for a sketch, a diagram or a drawing. Never ope
 hws surface open --type board --title "Signup flow" --terminal $HC_TERMINAL_ID
 ```
 
-The title names the sketch. When this terminal has more than one surface open, add `--title X` before the `--` of every `hws surface cli` call to pick one.
+The title names the sketch. `--type board` picks this terminal's newest sketch over any page it has open. When it has more than one sketch open, add `--title X` before the `--` to pick one.
 
 To reopen a sketch the user closed early, find its id under `surfaces` in `hws current --json` and run `hws surface resume --id S`.
 
@@ -27,12 +27,12 @@ Each command runs against this terminal's open sketch. `--json` prints the raw r
 
 | Command | Does |
 |---|---|
-| `hws surface cli -- read [--region x,y,w,h]` | Prints the elements as text |
-| `hws surface cli -- png [--region x,y,w,h] [--max-edge 1400] [--out <path>]` | Writes a PNG and prints its path |
-| `hws surface cli -- draw --file f.json` | Adds elements from a JSON file |
-| `hws surface cli -- snap <image> [--caption <text>] [--note <text>] [--width 720]` | Adds a screenshot as the next numbered step |
-| `hws surface cli -- update --file f.json` | Changes elements by id |
-| `hws surface cli -- delete <id>...` | Removes elements by id |
+| `hws surface cli --type board -- read [--region x,y,w,h]` | Prints the elements as text |
+| `hws surface cli --type board -- png [--region x,y,w,h] [--max-edge 1400] [--out <path>]` | Writes a PNG and prints its path |
+| `hws surface cli --type board -- draw --file f.json` | Adds elements from a JSON file |
+| `hws surface cli --type board -- snap <image> [--caption <text>] [--note <text>] [--width 720]` | Adds a screenshot as the next numbered step |
+| `hws surface cli --type board -- update --file f.json` | Changes elements by id |
+| `hws surface cli --type board -- delete <id>...` | Removes elements by id |
 
 Write the JSON with your Write tool to a file under `.feedback/scratch/`, then pass `--file`. Run each command on its own, with no shell loops, variables or `&&` chains, so the user can allow it once. Input errors name the element index, such as `elements[2]: "x" must be a number`. If a command fails because no sketch is open, say so and stop. Do not retry in a loop.
 
@@ -152,7 +152,7 @@ When you drive a browser for the user and they want to follow along, post a scre
 2. After each meaningful step, save a screenshot and post it.
 
    ```bash
-   hws surface cli -- snap .feedback/scratch/step-2.png --caption "Added two items to the cart" --note "Total shows $40, expected $36"
+   hws surface cli --type board -- snap .feedback/scratch/step-2.png --caption "Added two items to the cart" --note "Total shows $40, expected $36"
    ```
 
    `snap` puts the picture in a frame titled with the step number and caption, three steps to a row. Use `--note` for a question or anything you are unsure about. Five to ten steps make a readable run.

@@ -44,7 +44,7 @@ describe("ported skills", () => {
 
   it("drives surfaces through hws surface cli", () => {
     for (const name of ["sketch-board", "outline-first", "behavior-review", "feedback-items"]) {
-      assert.ok(read(name).includes("hws surface cli -- "), name);
+      assert.match(read(name), /hws surface cli (--type (board|page) )?-- /, name);
     }
   });
 
