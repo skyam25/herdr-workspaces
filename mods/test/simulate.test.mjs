@@ -1156,7 +1156,7 @@ test("a sketch's title and Open reopen it on a board, tied to the panel's agent"
   await m.settle();
   const reopen = ["surface", "open", "--type", "board", "--artifact", "new", "--terminal", "t13", "--json"];
   assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), reopen);
-  assert.deepEqual(H.calls.find((c) => c.command === "test").args, ["-f", "/art/new/board.excalidraw"]);
+  assert.equal(H.calls.some((c) => c.command === "test"), false);
   await m.click("artifact-open-new");
   await m.settle();
   assert.deepEqual(args(H).filter((a) => a[0] === "surface").length, 2);
@@ -1172,18 +1172,34 @@ test("a flipped agent's sketch reopens with its chat pane named", async () => {
   assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1).slice(-7), ["--terminal", "t13", "--beside-pane", "p7", "--space", "spc1", "--json"]);
 });
 
+// hws refuses to reopen a sketch whose bundle has no board.excalidraw.
+const noDrawing = (args) => (args.includes("board") ? { fail: "sketch new has no drawing to reopen" } : {});
+
 test("a board with no drawing opens its comments in the companion, or else its sketch", async () => {
-  const H1 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" }, missingDirs: new Set(["/art/new/board.excalidraw"]) });
+  const H1 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
+  H1.hws["surface open"] = noDrawing;
   const withComments = await mount("hws-panel", {});
   await withComments.click("open-new");
   await withComments.settle();
   assert.equal(args(H1).filter((a) => a[0] === "surface").at(-1)[5], "/art/new/comments.md");
-  const H2 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "@/art/new/sketch.png" }, missingDirs: new Set(["/art/new/board.excalidraw"]) });
+  const H2 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "@/art/new/sketch.png" } });
+  H2.hws["surface open"] = noDrawing;
   const noComments = await mount("hws-panel", {});
   await noComments.click("open-new");
   await noComments.settle();
-  assert.equal(args(H2).some((a) => a[0] === "surface"), false);
+  assert.deepEqual(args(H2).filter((a) => a[0] === "surface").length, 1);
   assert.deepEqual(H2.calls.at(-1), { command: "open", args: ["/art/new/sketch.png"] });
+});
+
+test("a sketch that fails to reopen for another reason shows why and opens nothing else", async () => {
+  const H = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
+  H.hws["surface open"] = { fail: "terminal t13 is gone" };
+  const m = await mount("hws-panel", {});
+  await m.click("open-new");
+  await m.settle();
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").length, 1);
+  assert.equal(H.calls.some((c) => c.command === "open"), false);
+  assert.match(m.text(), /terminal t13 is gone/);
 });
 
 test("a note bundle opens its prompt in the companion", async () => {
@@ -1627,6 +1643,10 @@ test("brief does nothing without an overlay", async () => {
 test("hws-new, hws-panel and hws-actions carry the same hws.js", () => {
   assert.equal(read("../hws-new/hws.js"), read("../hws-panel/hws.js"));
   assert.equal(read("../hws-new/hws.js"), read("../hws-actions/hws.js"));
+});
+
+test("hws-panel and hws-work carry the same clipboard.js", () => {
+  assert.equal(read("../hws-panel/clipboard.js"), read("../hws-work/clipboard.js"));
 });
 
 test("every element method used exists in gpui-kit.d.ts", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {

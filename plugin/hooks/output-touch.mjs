@@ -1,21 +1,14 @@
-import { execFile } from "node:child_process";
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
+import { hws, parse } from "./hws.mjs";
 import { readStdin } from "./stdin.mjs";
 
 // Stdin (1s) and one hws call stay under the 5s timeout in hooks.json.
 const HWS_MS = 3000;
 
-// hws decides what counts as a document. This list only spares it a start for every code edit.
-const DOCUMENT = /\.(md|markdown|mdx|html?|pdf|docx|pptx|xlsx)$/i;
-
-function parse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
+// Outputs never lists a file under these folders. core/commands/outputs.js holds the same set.
+const SKIP_DIRS = new Set([".claude", ".feedback", "node_modules"]);
 
 function isFolder(path) {
   try {
@@ -23,6 +16,22 @@ function isFolder(path) {
   } catch {
     return false;
   }
+}
+
+function realPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+// True for a path inside the session folder and outside every skipped folder.
+// hws checks the same, so this only spares it a start.
+function listable(folder, path) {
+  const ref = relative(realPath(folder), realPath(resolve(folder, path)));
+  if (ref === "" || ref === ".." || ref.startsWith(`..${sep}`) || isAbsolute(ref)) return false;
+  return !ref.split(sep).slice(0, -1).some((dir) => SKIP_DIRS.has(dir));
 }
 
 // A failed tool reports an error, or a bare string, in place of its result.
@@ -42,23 +51,20 @@ function originOf(tool, response) {
   return typeof before === "string" && typeof after === "string" && before.length < after.length / 2 ? "created" : "edited";
 }
 
-function hws(args, options) {
-  return new Promise((resolve) => {
-    execFile("hws", args, { timeout: HWS_MS, killSignal: "SIGKILL", ...options }, () => resolve());
-  });
-}
-
+// output-touch.sh has already checked the document extension.
 async function main() {
   const input = parse(await readStdin());
   const path = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path;
-  if (typeof path !== "string" || !DOCUMENT.test(path)) return;
+  if (typeof path !== "string" || path === "") return;
   if (failed(input.tool_response)) return;
 
   // hws finds the outputs file from the session id, and counts a relative path from the session's folder.
-  const sessionId = typeof input.session_id === "string" ? input.session_id : "";
   const cwd = typeof input.cwd === "string" && isFolder(input.cwd) ? input.cwd : process.cwd();
+  if (!listable(cwd, path)) return;
+
+  const sessionId = typeof input.session_id === "string" ? input.session_id : "";
   const env = sessionId ? { ...process.env, CLAUDE_CODE_SESSION_ID: sessionId } : process.env;
-  await hws(["output", "touch", "--path", path, "--origin", originOf(input.tool_name, input.tool_response)], { cwd, env });
+  await hws(["output", "touch", "--path", path, "--origin", originOf(input.tool_name, input.tool_response)], { timeout: HWS_MS, cwd, env });
 }
 
 main()

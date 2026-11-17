@@ -6,7 +6,8 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, home, layout, openOverlay, panes, props, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
 import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, cardSummary, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputActions, outputGroups, outputTarget, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, todoColumns, todoDialogSize, todoItems, touchedDetail, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
-import { copyOutput, focusAgent, hws, openNote, openOutput, openSession } from "./open.js";
+import { copy } from "./clipboard.js";
+import { focusAgent, hws, openNote, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
 const WAITING_KEY = "hws.tasks.waiting";
@@ -28,7 +29,6 @@ const SILENT_START_MS = 20000;
 const silentSince = (record, since) => !record.status && !(record.turn > 0) && Date.now() - since > SILENT_START_MS;
 
 const message = (e) => String(e?.message ?? e);
-const failure = (text) => (text ? { text, isError: true } : null);
 
 // One quiet look for every board control. A primary one is solid.
 function buttonLook(el, t, enabled, primary) {
@@ -487,6 +487,7 @@ export default class Work extends View {
     for (const dir of this.dirs) this.watch(dir, cx);
   }
 
+  // A change while Outputs is hidden waits for the timer, which polls once Outputs shows again.
   watch(dir, cx) {
     if (this.watching.has(dir)) return;
     this.watching.set(dir, null);
@@ -497,7 +498,7 @@ export default class Work extends View {
           this.watching.set(dir, pending);
           await pending;
           if (!this.dirs.has(dir)) break;
-          this.poll(cx);
+          if (outputsShowing()) this.poll(cx);
         }
       } catch {
         // The next poll watches again.
@@ -512,9 +513,16 @@ export default class Work extends View {
     this.actionsFor = null;
     cx.spawn(async (cx) => {
       const { agent, folder } = group;
-      if (action === "note") this.outputNote = failure(await openNote(agent, folder, output.ref));
-      else if (action === "copy") this.outputNote = failure(await copyOutput(folder, output.ref)) ?? { text: `Copied ${outputTarget(output.ref, folder)}`, isError: false };
-      else this.outputNote = failure(await openOutput(agent, folder, output.ref));
+      try {
+        if (action === "note") await openNote(agent, folder, output.ref);
+        else if (action === "copy") {
+          const target = outputTarget(output.ref, folder);
+          await copy(target);
+          this.outputNote = { text: `Copied ${target}`, isError: false };
+        } else await openOutput(agent, folder, output.ref);
+      } catch (e) {
+        this.outputNote = { text: message(e), isError: true };
+      }
       cx.notify();
     });
   }

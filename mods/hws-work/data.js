@@ -254,7 +254,7 @@ export const opensAsNote = (ref) => !hasScheme(ref) && /\.(md|markdown)$/i.test(
 export const outputTarget = (ref, cwd) => (hasScheme(ref) || ref.startsWith("/") ? ref : `${cleanPath(cwd)}/${ref}`);
 
 // A page opens in a pane beside its agent and a note in its own window, both tied to the agent.
-export function surfaceArgs(agent, file, type = "page") {
+export function surfaceArgs(agent, file, type) {
   const args = ["surface", "open", "--type", type, "--file", file, "--terminal", agent.address];
   return agent.chatPane ? [...args, "--beside-pane", agent.chatPane, "--space", agent.space] : args;
 }

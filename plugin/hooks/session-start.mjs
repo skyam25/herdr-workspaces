@@ -1,10 +1,9 @@
-import { execFile } from "node:child_process";
 import { relative } from "node:path";
 
+import { hws, parse } from "./hws.mjs";
 import { readStdin } from "./stdin.mjs";
 
-// Stdin (1s) and two rounds of hws calls stay under the 6s timeout in hooks.json.
-const HWS_MS = 2000;
+// Stdin (1s) and two rounds of 2s hws calls stay under the 6s timeout in hooks.json.
 const NAMED_MATCHES = 3;
 
 const TASK_LIST = [
@@ -61,21 +60,6 @@ const NOTE_RULE = [
 ].join(" ");
 
 const LISTED_ARTIFACTS = 12;
-
-// Resolves to trimmed stdout, or null when hws fails or outlives HWS_MS.
-function hws(args) {
-  return new Promise((resolve) => {
-    execFile("hws", args, { timeout: HWS_MS, killSignal: "SIGKILL" }, (error, stdout) => resolve(error ? null : stdout.trim()));
-  });
-}
-
-function parse(text) {
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return null;
-  }
-}
 
 function print(text) {
   return new Promise((resolve) => process.stdout.write(text, resolve));
