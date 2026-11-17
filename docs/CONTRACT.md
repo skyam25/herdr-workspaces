@@ -270,7 +270,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | Note with no file | Asks the agent to write the revised text to a Markdown file and open it with `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` |
 | Behavior decisions | Names `hws surface cli --type page -- behavior` |
 | File with an outline | Names `(outline-first)` and `hws surface cli --type page -- outline apply`, and says the person accepts the direction in Herdr |
-| Feedback decisions | Starts with `@<output>.feedback.md`, then `Feedback decisions on F from Herdr, ...`, and names `hws surface cli --type page -- feedback done` |
+| Feedback decisions | Starts with `@<output>.feedback.md`, then `Feedback decisions on F from Herdr, ...`, and names `hws surface cli --type page -- feedback done`. Done sends it while the Feedback view shows unsent decisions, and then reads `Done · N decisions` |
 
 ### Feedback rounds
 

@@ -117,8 +117,11 @@ export function SurfacePlace(props: {
   );
 }
 
+/** Done's label, with the count when a Feedback view's decisions ride on it. */
+export const doneLabel = (decisions?: number) => (decisions ? `Done · ${decisions} decision${decisions === 1 ? '' : 's'}` : 'Done');
+
 /** The composer's right end on a surface: the mic, then Done, or Open terminal and Copy link when no terminal waits. */
-export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; onDone: () => void; onAct: (action: SurfaceAction) => void }) {
+export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; decisions?: number; onDone: () => void; onAct: (action: SurfaceAction) => void }) {
   const { surface } = props;
   const blocked = !!surface.busy || !!surface.delivered;
   return (
@@ -140,7 +143,7 @@ export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; onDo
         </>
       ) : (
         <button className="primary send-named" disabled={blocked} title="Hand this to the terminal that opened it (⌘↩)" onClick={props.onDone} data-testid="surface-done">
-          Done
+          {doneLabel(props.decisions)}
         </button>
       )}
     </div>

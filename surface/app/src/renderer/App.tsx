@@ -314,7 +314,10 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
       const text = answersPrompt(surface?.questions ?? [], answersRef.current);
       return text ? { text } : NOTHING_ANSWERED;
     });
-  const done = () => void (questioning ? sendAnswers() : send());
+
+  // A Feedback view with unsent decisions gets Done, as it gets Send outside a surface.
+  const claimed = mode === 'review' && decisions && decisions.count > 0 && !decisions.blocked ? decisions : undefined;
+  const done = () => void (questioning ? sendAnswers() : claimed ? claimed.send() : send());
   const surfaceDone = useRef(() => {});
   surfaceDone.current = done;
   const surfaceSettle = useRef(() => {});
@@ -353,7 +356,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
     <SurfacePlace surface={surface} onAct={surfaceAct} onTargets={() => host.surfaceTargets()} onMove={(workspace) => void host.surfaceMove(workspace)} />
   );
   const sendBar = surface ? (
-    <SurfaceBar surface={surface} mic={questioning ? undefined : micButton} onDone={done} onAct={surfaceAct} />
+    <SurfaceBar surface={surface} mic={questioning ? undefined : micButton} decisions={claimed?.count} onDone={done} onAct={surfaceAct} />
   ) : (
     <SendTo
       sessions={sessions}
