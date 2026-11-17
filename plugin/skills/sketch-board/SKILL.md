@@ -21,6 +21,14 @@ The title names the sketch. `--type board` picks this terminal's newest sketch o
 
 To reopen a sketch the user closed early, find its id under `surfaces` in `hws current --json` and run `hws surface resume --id S`.
 
+To keep drawing on a sketch the user already finished with Done, find its id in `hws artifact list`, where its type is `board`, and reopen it.
+
+```bash
+hws surface open --type board --artifact A --terminal $HC_TERMINAL_ID
+```
+
+The sketch opens with its drawing and pinned comments. Its next Done files a new artifact that replaces the old one, which stays as it was. Pass `--file F` in place of `--artifact` to open an `.excalidraw` file.
+
 ## Commands
 
 Each command runs against this terminal's open sketch. `--json` prints the raw response.

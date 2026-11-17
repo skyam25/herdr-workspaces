@@ -103,3 +103,52 @@ export function boardCommentsAsk(boardName: string, c: BoardComments): string {
   const what = n ? `${commentCount(n)} pinned to the board` : 'a note on the board';
   return `Feedback on the board "${boardName}" from Agent Brief, ${what}. Make the changes, on the board where they belong, then say what changed.`;
 }
+
+const NO_WORDS = '(No words. The pin marks this spot.)';
+const SECTION = /^## (?:(Overall)|(\d+)\. (.*))$/;
+const FACT = /^- (Element|In frame|Element text|At): (.*)$/;
+const unquote = (s: string) => s.replace(/^“/, '').replace(/”$/, '');
+
+/** One pin's section of comments.md. Its words come first, and fact lines naming its element and spot close it. */
+function pinFromSection(n: number, heading: string, body: string[]): BoardPin {
+  const facts = new Map<string, string>();
+  let end = body.length;
+  while (end > 0 && (FACT.test(body[end - 1]) || !body[end - 1].trim())) {
+    const fact = FACT.exec(body[end - 1]);
+    if (fact) facts.set(fact[1], fact[2].trim());
+    end -= 1;
+  }
+  const text = body.slice(0, end).join('\n').trim();
+  const kind = /^(\S+)/.exec(heading)?.[1];
+  const [x, y] = (facts.get('At') ?? '').replace(/ on the board$/, '').split(',').map(Number);
+  const elementId = facts.get('Element')?.replace(/^`|`$/g, '');
+  const label = facts.get('Element text');
+  const frame = facts.get('In frame');
+  return {
+    id: `p${n}`,
+    ...(elementId ? { elementId } : {}),
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+    ...(kind && kind !== 'board' && kind !== 'element' ? { type: kind } : {}),
+    ...(label ? { label: unquote(label) } : {}),
+    ...(frame ? { frame: unquote(frame) } : {}),
+    text: text === NO_WORDS ? '' : text,
+    createdAt: 0,
+  };
+}
+
+/**
+ * Reads comments back from the comments.md a Send wrote, for a bundle with no comments.json.
+ * Each pin keeps its words, element and spot. Undefined when the file holds no comments.
+ */
+export function parseBoardCommentsMarkdown(md: string): BoardComments | undefined {
+  const sections: { overall: boolean; n: number; heading: string; body: string[] }[] = [];
+  for (const line of md.replace(/\r\n/g, '\n').split('\n')) {
+    const head = SECTION.exec(line);
+    if (head) sections.push({ overall: !!head[1], n: Number(head[2] ?? 0), heading: head[3] ?? '', body: [] });
+    else sections.at(-1)?.body.push(line);
+  }
+  const overall = sections.find((s) => s.overall)?.body.join('\n').trim() ?? '';
+  const pins = sections.filter((s) => !s.overall).map((s) => pinFromSection(s.n, s.heading, s.body));
+  return cleanBoardComments({ overall, pins });
+}

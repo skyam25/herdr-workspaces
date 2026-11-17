@@ -213,10 +213,11 @@ describe('a sketch with comments pinned to the board', () => {
     ]);
   });
 
-  it('writes comments.md beside the sketch', async () => {
+  it('writes comments.md beside the sketch, and comments.json for reopening it', async () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'bundle-')), 'b1');
     await writeBundle(dir, { ...sketch, comments });
     expect(readFileSync(join(dir, 'comments.md'), 'utf8')).toContain('## 1. rectangle “Open the app”\n\nSay what opens.\n\n- Element: `start`');
+    expect(JSON.parse(readFileSync(join(dir, 'comments.json'), 'utf8'))).toEqual(comments);
   });
 });
 

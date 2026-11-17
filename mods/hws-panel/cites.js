@@ -17,13 +17,16 @@ export async function copy(text) {
 }
 
 // A flipped agent's surface opens beside its chat pane, as hws surface open requires.
-// With no agent the page opens standalone, in a tab of its own.
-function pageArgs(file, target, title) {
-  const args = ["surface", "open", "--type", "page", "--file", file, ...(title ? ["--title", title] : [])];
-  if (!target) return [...args, "--standalone"];
-  const owned = [...args, "--terminal", target.address];
+// With no agent the surface opens standalone.
+function ownerArgs(target) {
+  if (!target) return ["--standalone"];
+  const owned = ["--terminal", target.address];
   const chat = terminals().find((x) => x.address === target.address)?.labels?.["herdr.chat"];
   return chat && panes().some((p) => p.pane === chat) ? [...owned, "--beside-pane", chat, "--space", target.space] : owned;
+}
+
+function pageArgs(file, target, title) {
+  return ["surface", "open", "--type", "page", "--file", file, ...(title ? ["--title", title] : []), ...ownerArgs(target)];
 }
 
 export async function openExternally(path) {
@@ -66,8 +69,18 @@ async function bundleFile(artifact) {
   return null;
 }
 
+const isFile = async (path) => (await exec("test", ["-f", path])).code === 0;
+
+// A sketch with a drawing reopens on a board. Its Done files a bundle that replaces this one.
+async function reopenSketch(artifact, target) {
+  if (!(await isFile(`${artifact.path}/board.excalidraw`))) return false;
+  await hws(["surface", "open", "--type", "board", "--artifact", artifact.id, ...ownerArgs(target)]);
+  return true;
+}
+
 async function openArtifact(artifact, { target, workspace }) {
   if (artifact.type === "link") return openExternally(artifact.url ?? artifact.path);
+  if (artifact.type === "board" && (await reopenSketch(artifact, target))) return null;
   const file = artifact.type === "file" ? artifact.path : await bundleFile(artifact);
   if (!file) return openExternally(artifact.type === "board" ? `${artifact.path}/sketch.png` : artifact.path);
   return openPath(file, { target, workspace, title: artifact.title || artifact.id });

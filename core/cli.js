@@ -72,6 +72,7 @@ const ROUTES = [
       type: text,
       title: text,
       file: text,
+      artifact: text,
       terminal: text,
       standalone: flag,
       'in-pane': flag,

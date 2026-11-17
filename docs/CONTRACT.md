@@ -124,6 +124,8 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `agents[].role` | The terminal's role when the session registered. `tidy` keeps the session out of freshness |
 | `agents[].folder` | Where the session started, so `claude --resume` works there. Null when unknown, and the transcript is then looked up under the workspace folder |
 | `agents[].transcript` | The transcript's absolute path, when it is not where `folder` puts it. Absent otherwise |
+| `surfaces[].file` | The file a note or page shows, or the drawing a reopened sketch started from. Absent otherwise |
+| `surfaces[].reopens` | On a reopened sketch, the id of the artifact its next Done bundle replaces. Absent otherwise |
 | `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. `feedback` on the Done bundle of any other page that shows a file. `answers` on the Done bundle of a round from `hws ask`. Freshness and `hws artifact scan` leave all three out, and the panel lists none as an artifact of its own. Absent on other artifacts |
 | `artifacts[].file` | On a `feedback` round, the absolute path of the file the page showed. Absent otherwise |
 | `artifacts[].reviewOf` | On a `feedback` round, the id of the `file` artifact that tracked that file at Done, or null when none did. Absent otherwise |
@@ -208,6 +210,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws output add --title T (--path P \| --url U) [--status drafting\|ready]` | Declares a deliverable in the calling agent's outputs file, as Agent Brief's `declare_output` does. See [Declaring an output](#declaring-an-output) |
 | `hws outline new TITLE... [--target P] [--path X.outline.md] [--kind document\|page] [--terminal T]` | Writes a new outline file and prints its path on the first line. Needs no surface. See [Outlines](#outlines) |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board or note opens in its own window and a page splits a pane beside T. `--window` and `--in-pane` choose the place, and both together exit 2. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. One file is one surface per workspace. A file already open in a pane gets the focus, and one already open in a window is raised, whatever the flags say. The result then has `focused: true`, and `raised` for a window. A file whose window is closed starts again on the same data in the place the flags or the default give |
+| `hws surface open --type board (--artifact A \| --file F) [--title X] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Reopens a finished sketch on a board. A is a board artifact in an open workspace, and F is an `.excalidraw` file. F inside a board artifact's bundle reopens that artifact. The surface lives in the artifact's workspace, else the caller's, tied to T as any surface is, and records `reopens` and `file`. The title defaults to the artifact's title, else the file name without `.excalidraw`. See [Reopened sketches](#reopened-sketches) |
 | `hws review FILE\|ARTIFACT [--title X] [--terminal T] [--window]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T --in-pane` does. `--window` opens it in its own window. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does, except an `.outline.md` or `.feedback.md` file, which is never tracked. An `.outline.md` file opens in Write's outline view. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane or window with no agent attached. Never opens standalone |
 | `hws ask [--title X] [--file Q.json] [--terminal T] [--window]` | Opens a round of questions beside T, default `$HC_TERMINAL_ID`, in a pane like `hws review`, or in its own window with `--window`. Reads the round from `--file`, else from stdin. The title defaults to `Questions`. A bad round exits 2 and names the field. Prints the surface with `asked` and `kept`, and text that tells the agent to end the turn. See [Questions](#questions). Never opens standalone |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
@@ -291,6 +294,23 @@ Answers to your questions:
 - Which format?: A one-pager (their own words)
 - When is it due?: (no answer)
 ```
+
+### Reopened sketches
+
+`hws surface open --type board --artifact A` puts a finished sketch back on a board to keep drawing.
+
+| Item | Behaviour |
+|---|---|
+| Source | `board.excalidraw` in A's bundle, or the `.excalidraw` file F. It must parse as a scene with `elements`. A board artifact with no drawing, another artifact type, an archived workspace and any other file fail |
+| Workspace | The one that holds A. A plain F lands where any surface would |
+| Terminal | `--terminal T`, default `$HC_TERMINAL_ID`, or `--standalone`. Neither exits 2, so no terminal is guessed |
+| One surface | A's surface id comes from its artifact id, and F's from its path. An open one gets the focus or is raised, and a closed draft starts again on its own edits |
+| Seed | Otherwise `hws` copies the drawing to `<data folder>/seed/board.excalidraw`, with `comments.json`, `comments.md` and `notes.md` from A's bundle when they exist. The host loads the seed into its board on start and deletes it. The source is only read |
+| Comments | From `comments.json`, which a sketch's Done bundle writes beside `comments.md`, else read back from `comments.md` |
+| Done | Delivers and files a new bundle as any board does. The new artifact gets `supersedes: A`, A becomes `superseded`, and the surface's `reopens` moves to the new id, so a second press replaces the first. An A no longer in the surface's workspace gives `supersedes: null` and changes nothing |
+| Close early | The window stays as a draft, as other windows do |
+
+The board takes its name from the title, with characters other than letters, digits, spaces, dots, dashes and underscores turned into spaces.
 
 ### Clearing what was delivered
 
@@ -986,7 +1006,7 @@ Reads, on each `hws list` refresh:
 | `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |
 | `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID`, in the workspace folder unless the caller names the session's own |
 | `[commit:SHA]` chip | Copies the sha with `pbcopy` |
-| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board opens its `comments.md`, or its sketch in the default app when it has none. Another Done bundle opens the first it has of `review.md`, `annotations.md`, `comments.md` and `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
+| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board with `board.excalidraw` reopens on a board for editing with `hws surface open --type board --artifact A`, with `--terminal T` and the chat pane flags as a page gets them, or `--standalone`. A board without one opens its `comments.md`, or its sketch in the default app when it has none. Another Done bundle opens the first it has of `review.md`, `annotations.md`, `comments.md` and `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
 | Artifact title and Open | Run the `[artifact:ID]` action. A `file` artifact is the page itself, so its row opens the page |
 | Dragging an artifact title | Drops its path into a terminal, the same path Copy for Claude gives. A link has no drag |
 | `N feedback` on an artifact row | Shown when rounds name the artifact in `reviewOf`. Unfolds them beneath the row, newest first |
@@ -1012,7 +1032,7 @@ Both are `hws-panel` dialogs.
 
 | Dialog | Props | Shows | Actions |
 |---|---|---|---|
-| Unfiled | `{"view":"unfiled"}` | `hws unfiled`, surfaces under Open and drafts, then artifacts under Saved. A surface row gives its type and `open`, `draft` or `in a pane`. An artifact row gives `saved` and its age. With nothing left it says so | Open runs `hws surface resume --id S`, or `hws surface pop --id S --to pane` for a pane, and opens an artifact as the `[artifact:ID]` chip does. Move… closes this dialog and opens the move dialog. Trash runs `hws surface discard --id S` for a draft, and is off for an open window or a pane, and runs `hws artifact trash` for an artifact. The list reloads after each action, and a failure shows under it |
+| Unfiled | `{"view":"unfiled"}` | `hws unfiled`, surfaces under Open and drafts, then artifacts under Saved. A surface row gives its type and `open`, `draft` or `in a pane`. An artifact row gives `saved` and its age. With nothing left it says so | Open runs `hws surface resume --id S`, or `hws surface pop --id S --to pane` for a pane, and opens an artifact as the `[artifact:ID]` chip does, so a sketch reopens on a board with `--standalone`. Move… closes this dialog and opens the move dialog. Trash runs `hws surface discard --id S` for a draft, and is off for an open window or a pane, and runs `hws artifact trash` for an artifact. The list reloads after each action, and a failure shows under it |
 | Move to a workspace | `{"view":"move-item","kind":"surface"\|"artifact","id","title","from"}` | `hws surface targets`, with `--id` for a surface. Suggested holds `suggested`. The other open workspaces follow, without `current`. An Unfiled row closes the list when `current` is neither `standalone` nor null | A row runs `hws surface move --id S --workspace W` or `hws artifact move A --workspace W`, then closes. A failure stays in the dialog. Move… is off for a surface in a pane |
 
 ### New menu: `hws-actions`
