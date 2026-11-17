@@ -10,8 +10,8 @@ import { sandbox } from './helpers.js';
 const HWS = fileURLToPath(new URL('../../bin/hws', import.meta.url));
 const FAKE_CLI = fileURLToPath(new URL('./fakes/fake-agent-brief.cjs', import.meta.url));
 
-function cli(box, args, { input = '', env = {} } = {}) {
-  const result = spawnSync(HWS, ['surface', 'cli', ...args], { input, encoding: 'utf8', env: { ...box.environment, HWS_SURFACE_CLI: FAKE_CLI, ...env } });
+function cli(box, args, { input = '', env = {}, cwd } = {}) {
+  const result = spawnSync(HWS, ['surface', 'cli', ...args], { input, cwd, encoding: 'utf8', env: { ...box.environment, HWS_SURFACE_CLI: FAKE_CLI, ...env } });
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
@@ -31,13 +31,15 @@ test('surface cli runs the verb on the terminal surface as its stand-in session'
   writeFileSync(page, '<p>x</p>');
   const surface = openListening(t, box, ['--type', 'page', '--file', page, '--in-pane', '--terminal', owner]);
 
-  const result = cli(box, ['--', 'behavior', 'update', 'proto.html', '--json', '--help'], { input: '{"version":"missing"}', env: { HC_TERMINAL_ID: owner, CLAUDE_CODE_SESSION_ID: 'real' } });
+  const shell = box.folder('shell');
+  const result = cli(box, ['--', 'behavior', 'update', 'proto.html', '--json', '--help'], { input: '{"version":"missing"}', cwd: shell, env: { HC_TERMINAL_ID: owner, CLAUDE_CODE_SESSION_ID: 'real', HWS_SURFACE_CLI_CWD: '/elsewhere' } });
   assert.equal(result.code, 0);
   assert.equal(result.stderr, 'fake agent-brief\n');
   assert.deepEqual(JSON.parse(result.stdout), {
     args: ['behavior', 'update', 'proto.html', '--json', '--help'],
     socket: surface.socket,
     session: `surface-${surface.id}`,
+    cwd: shell,
     stdin: '{"version":"missing"}',
   });
 });

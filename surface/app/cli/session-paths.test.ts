@@ -52,3 +52,36 @@ describe('absolute paths on session verbs', () => {
     expect(r.stderr).toMatch(/outside the session's project/);
   });
 });
+
+describe('relative paths under hws surface cli', () => {
+  /** The shell sits one folder above the session's project, as `hws review project/x` leaves it. */
+  const shell = () => ({ ...SESSION, HWS_SURFACE_CLI_CWD: app.dir });
+
+  it('counts an outline path and --target from the shell folder', async () => {
+    project();
+    await run(['outline', 'show', 'project/docs/memo.outline.md'], '', shell());
+    await run(['outline', 'new', 'Memo', '--target', 'project/docs/memo.md', '--no-open'], '', shell());
+    expect(routes()).toContain('/sessions/surface-s1/outline?path=docs/memo.outline.md');
+    const made = app.seen.find((s) => s.method === 'POST' && s.url.includes('/outline'));
+    expect(made?.body).toMatchObject({ ops: [{ op: 'setMeta', target: 'docs/memo.md' }] });
+  });
+
+  it('counts a feedback output from the shell folder', async () => {
+    project();
+    await run(['feedback', 'show', 'project/docs/page.html', '--json'], '', shell());
+    expect(routes()).toContain('/sessions/surface-s1/feedback?path=docs/page.html');
+  });
+
+  it('counts a behavior prototype from the shell folder', async () => {
+    project();
+    await run(['behavior', 'show', 'project/proto.html', '--json'], '', shell());
+    expect(routes()).toContain('/sessions/surface-s1/behavior?path=proto.html');
+  });
+
+  it('refuses a relative path that leaves the session folder', async () => {
+    project();
+    const r = await run(['behavior', 'show', 'proto.html'], '', shell());
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/outside the session's project/);
+  });
+});

@@ -58,6 +58,25 @@ test('a second add with the same ref changes title and status in place and keeps
   assert.equal(plain.stdout, `Declared "Final page" (page.html, drafting). It shows in Outputs.\nWhen the person asks to review it, run: hws review "${join(folder, 'page.html')}"\n`);
 });
 
+test('output add refuses an outputs file it cannot read and leaves it alone', (t) => {
+  const box = sandbox(t);
+  const folder = box.folder('w');
+  const env = { CLAUDE_CODE_SESSION_ID: 's1' };
+  const file = join(folder, '.feedback', 'outputs', 's1.json');
+  mkdirSync(join(folder, '.feedback', 'outputs'), { recursive: true });
+
+  for (const broken of ['{"version": 1, "outputs": [{"ref": "a.md"', JSON.stringify({ version: 2, outputs: [{ ref: 'a.md' }] })]) {
+    writeFileSync(file, broken);
+    const result = add(box, folder, ['--title', 'Plan', '--path', 'plan.md'], env);
+    assert.equal(result.code, 1);
+    assert.match(result.stdout + result.stderr, /leaves it alone/);
+    assert.equal(readFileSync(file, 'utf8'), broken);
+  }
+
+  writeFileSync(file, '\n');
+  assert.equal(add(box, folder, ['--title', 'Plan', '--path', 'plan.md'], env).code, 0);
+});
+
 test('output add declares a link, with the shell folder when no session is registered', (t) => {
   const box = sandbox(t);
   const folder = box.folder('w');

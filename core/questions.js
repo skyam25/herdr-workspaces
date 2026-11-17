@@ -83,9 +83,12 @@ export function readRound(dataDir) {
 export const isAnswered = (entry) => typeof entry?.answer === 'string' && entry.answer.trim() !== '';
 
 // A new round keeps the answered questions it does not ask again, ahead of the new ones.
+// The round holds at most MAX_QUESTIONS, so the oldest answered ones go first. `dropped` counts them.
 export function mergeRound(held, asked) {
   const askedIds = new Set(asked.map((question) => question.id));
-  const kept = held.questions.filter((question) => isAnswered(held.answers[question.id]) && !askedIds.has(question.id));
+  const answered = held.questions.filter((question) => isAnswered(held.answers[question.id]) && !askedIds.has(question.id));
+  const room = Math.max(0, MAX_QUESTIONS - asked.length);
+  const kept = room === 0 ? [] : answered.slice(-room);
   const answers = Object.fromEntries(kept.map((question) => [question.id, held.answers[question.id]]));
-  return { questions: [...kept, ...asked], answers };
+  return { questions: [...kept, ...asked], answers, dropped: answered.length - kept.length };
 }

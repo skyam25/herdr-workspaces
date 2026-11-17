@@ -10,6 +10,7 @@ process.stdin.on('end', () => {
       args,
       socket: process.env.COMPANION_SOCKET,
       session: process.env.CLAUDE_CODE_SESSION_ID,
+      cwd: process.env.HWS_SURFACE_CLI_CWD,
       stdin: Buffer.concat(chunks).toString('utf8'),
     })}\n`,
   );

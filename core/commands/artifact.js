@@ -34,7 +34,7 @@ export function artifactList(flags) {
   );
   return {
     data: artifacts,
-    text: artifacts.map((item) => `${item.id}\t${item.type}\t${item.title}\t${item.path}`).join('\n'),
+    text: artifacts.map((item) => `${item.id}\t${item.type}\t${item.status ?? 'current'}\t${item.title}\t${item.path}`).join('\n'),
   };
 }
 

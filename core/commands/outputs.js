@@ -145,15 +145,21 @@ function keepFeedbackIgnored(folder) {
   if (!existsSync(ignore)) writeFileSync(ignore, '*\n');
 }
 
-// The file as written, so records and fields this writer does not know survive. Anything unusable starts over.
+// The file as written, so records and fields this writer does not know survive.
+// A missing or blank file starts fresh. One that does not read as version 1 is refused and left alone.
 function readRawOutputs(file, sessionId) {
+  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  if (!text.trim()) return { version: 1, sessionId, outputs: [] };
+  let raw;
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8'));
-    if (raw?.version === 1 && Array.isArray(raw.outputs)) return raw;
-  } catch {
-    // Missing or unreadable.
+    raw = JSON.parse(text);
+  } catch (error) {
+    throw new HwsError(`${file} is not valid JSON (${error.message}), so hws leaves it alone. Fix or remove it, then declare again`);
   }
-  return { version: 1, sessionId, outputs: [] };
+  if (raw?.version !== 1 || !Array.isArray(raw.outputs)) {
+    throw new HwsError(`${file} is not a version 1 outputs file, so hws leaves it alone. Fix or remove it, then declare again`);
+  }
+  return raw;
 }
 
 // Replaces the record with the same ref where it stands, keeping its other fields, or appends one.

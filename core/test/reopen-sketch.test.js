@@ -146,6 +146,46 @@ test('a closed draft keeps its edits, and a closed empty one starts from the art
   assert.ok(existsSync(join(data, 'seed', 'board.excalidraw')));
 });
 
+test('a reopened sketch closed without edits goes at prune, and an edited one stays a draft', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const artifact = finishSketch(box, manifest);
+  const pin = { id: 'p1', elementId: 'r1', x: 10, y: 20, text: 'Bigger.', createdAt: 0 };
+  const scene = (elements) => JSON.stringify({ type: 'excalidraw', elements, appState: { scrollX: 40 } });
+
+  // Stands in for the host: it loads the seed into boards/ and records what it put there.
+  const openSeeded = () => {
+    const surface = box.json(['surface', 'open', '--type', 'board', '--artifact', artifact.id, '--terminal', owner]);
+    const data = dataDir(box, manifest.id, surface.id);
+    assert.ok(existsSync(join(data, 'seed', 'board.excalidraw')));
+    rmSync(join(data, 'seed'), { recursive: true });
+    mkdirSync(join(data, 'boards'), { recursive: true });
+    writeFileSync(join(data, 'boards', 'flow.excalidraw'), scene([{ id: 'r2', version: 4 }, { id: 'r1', customData: { createdAt: 5 } }, { id: 'old', isDeleted: true }]));
+    writeFileSync(join(data, 'boards', 'flow.comments.json'), JSON.stringify({ overall: '', pins: [pin] }, null, 2));
+    writeFileSync(join(data, 'seeded.json'), JSON.stringify({ board: 'flow', elements: ['r1:1', 'r2:4'], comments: { overall: '', pins: [pin] } }));
+    box.setState({ hc: { t90: 'missing' } });
+    return { surface, data };
+  };
+  const listed = () => box.json(['surface', 'list']).map((item) => item.id);
+
+  const untouched = openSeeded();
+  box.json(['prune']);
+  assert.deepEqual(listed(), []);
+  assert.deepEqual(box.manifest(manifest.id).surfaces, []);
+
+  const moved = openSeeded();
+  writeFileSync(join(moved.data, 'boards', 'flow.excalidraw'), scene([{ id: 'r2', version: 5 }, { id: 'r1' }]));
+  box.json(['prune']);
+  assert.deepEqual(listed(), [moved.surface.id]);
+  box.json(['surface', 'discard', '--id', moved.surface.id]);
+
+  const commented = openSeeded();
+  writeFileSync(join(commented.data, 'boards', 'flow.comments.json'), JSON.stringify({ overall: 'Tighter.', pins: [pin] }));
+  box.json(['prune']);
+  assert.deepEqual(listed(), [commented.surface.id]);
+});
+
 test('done on a reopened sketch files a new bundle that supersedes the old one', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
@@ -182,6 +222,61 @@ test('a second press on a standalone pane supersedes the first press', (t) => {
   assert.deepEqual([byId[old.id].status, byId[first.artifact].status, byId[second.artifact].status], ['superseded', 'superseded', 'current']);
   assert.deepEqual([byId[first.artifact].supersedes, byId[second.artifact].supersedes], [old.id, first.artifact]);
   assert.equal(box.manifest(manifest.id).surfaces[0].reopens, second.artifact);
+});
+
+test('reopening a superseded sketch opens its newest version, so history never forks', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const first = finishSketch(box, manifest);
+  const reopenAndFinish = (name) => {
+    const opened = box.hws(['surface', 'open', '--type', 'board', '--artifact', first.id, '--terminal', owner]);
+    assert.equal(opened.code, 0, opened.stderr);
+    const [record] = box.manifest(manifest.id).surfaces;
+    const bundle = box.bundle(name);
+    writeFileSync(join(bundle, 'board.excalidraw'), SCENE);
+    const done = box.json(['surface', 'done', '--id', record.id, '--bundle', bundle]);
+    return { opened, record, done };
+  };
+
+  const second = reopenAndFinish('bundle-two');
+  assert.doesNotMatch(second.opened.stdout, /superseded/);
+  const third = reopenAndFinish('bundle-three');
+
+  assert.equal(third.record.reopens, second.done.artifact);
+  assert.match(third.opened.stdout, new RegExp(`^${first.id} is superseded, so this opens its newest version ${second.done.artifact}\n`));
+  const byId = Object.fromEntries(box.manifest(manifest.id).artifacts.map((item) => [item.id, item]));
+  assert.deepEqual(
+    [first.id, second.done.artifact, third.done.artifact].map((id) => [byId[id].status, byId[id].supersedes ?? null]),
+    [['superseded', null], ['superseded', first.id], ['current', second.done.artifact]],
+  );
+  const json = box.json(['surface', 'open', '--type', 'board', '--artifact', first.id, '--terminal', owner]);
+  assert.deepEqual([json.reopens, json.newestOf], [third.done.artifact, first.id]);
+});
+
+test('a superseded sketch with no version left in its workspace opens itself', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const sketch = finishSketch(box, manifest);
+  box.json(['artifact', 'set', sketch.id, '--status', 'superseded']);
+
+  const opened = box.json(['surface', 'open', '--type', 'board', '--artifact', sketch.id, '--terminal', owner]);
+
+  assert.deepEqual([opened.reopens, opened.newestOf], [sketch.id, undefined]);
+});
+
+test('artifact list prints each status, so versions tell apart', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const owner = manifest.terminals[0].terminal;
+  const old = finishSketch(box, manifest);
+  const surface = box.json(['surface', 'open', '--type', 'board', '--artifact', old.id, '--terminal', owner]);
+  const fresh = box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle('bundle-again')]).artifact;
+
+  const lines = box.hws(['artifact', 'list', '--workspace', manifest.id]).stdout.trim().split('\n');
+
+  assert.deepEqual(lines.map((line) => line.split('\t').slice(0, 3)), [[old.id, 'board', 'superseded'], [fresh, 'board', 'current']]);
 });
 
 test('a reopened sketch moved away supersedes nothing', (t) => {
