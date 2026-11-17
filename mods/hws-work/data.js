@@ -249,12 +249,29 @@ export function outputGroups(agents, found) {
 }
 
 export const opensAsPage = (ref) => !hasScheme(ref) && /\.(html?|md)$/i.test(ref);
+export const opensAsNote = (ref) => !hasScheme(ref) && /\.(md|markdown)$/i.test(ref);
 
 export const outputTarget = (ref, cwd) => (hasScheme(ref) || ref.startsWith("/") ? ref : `${cleanPath(cwd)}/${ref}`);
 
-export function surfaceArgs(agent, file) {
-  const args = ["surface", "open", "--type", "page", "--file", file, "--terminal", agent.address];
+// A page opens in a pane beside its agent and a note in its own window, both tied to the agent.
+export function surfaceArgs(agent, file, type = "page") {
+  const args = ["surface", "open", "--type", type, "--file", file, "--terminal", agent.address];
   return agent.chatPane ? [...args, "--beside-pane", agent.chatPane, "--space", agent.space] : args;
+}
+
+// The actions under an output's ··· button, in the order they show.
+export function outputActions(ref) {
+  return [
+    ...(opensAsPage(ref) ? [{ id: "review", label: "Review" }] : []),
+    ...(opensAsNote(ref) ? [{ id: "note", label: "Open as note" }] : []),
+    { id: "copy", label: hasScheme(ref) ? "Copy link" : "Copy path" },
+  ];
+}
+
+// How a touched document came about and how often it was written, such as "created · 3 writes".
+export function touchedDetail(output) {
+  const writes = output.writes ?? 0;
+  return `${output.origin ?? "edited"} · ${writes} ${writes === 1 ? "write" : "writes"}`;
 }
 
 export function findNode(tree, id) {

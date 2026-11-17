@@ -1,4 +1,5 @@
 // Opens outputs and agent sessions. A page opens beside its agent and other outputs open in macOS.
+// An output's row actions also open Markdown as a note and copy its path.
 
 import { checking, exec, home, panes, run, spaces, terminals, window } from "herdr";
 import { locateTerminal, opensAsPage, outputTarget, surfaceArgs } from "./data.js";
@@ -83,7 +84,7 @@ async function openPage(agent, target, ref) {
     showPane(existing.tab, existing.pane);
     return null;
   }
-  const r = await runHws(surfaceArgs(agent, target));
+  const r = await runHws(surfaceArgs(agent, target, "page"));
   if (r.code !== 0) return hwsError(r) || `Could not open ${ref}`;
   const pane = openedPane(r);
   if (pane) pagePanes.set(key, pane);
@@ -98,6 +99,29 @@ export async function openOutput(agent, folder, ref) {
     if (opensAsPage(ref)) return await openPage(agent, target, ref);
     const r = await exec(window()?.platform === "linux" ? "xdg-open" : "open", [target]);
     return r.code === 0 ? null : (r.stderr || r.stdout).trim() || `Could not open ${ref}`;
+  } catch (e) {
+    return String(e?.message ?? e);
+  }
+}
+
+// Resolves to null on success and to a message on failure.
+export async function openNote(agent, folder, ref) {
+  try {
+    const r = await runHws(surfaceArgs(agent, outputTarget(ref, folder), "note"));
+    return r.code === 0 ? null : hwsError(r) || `Could not open ${ref}`;
+  } catch (e) {
+    return String(e?.message ?? e);
+  }
+}
+
+const LINUX_COPY = 'if [ -n "${WAYLAND_DISPLAY:-}" ]; then wl-copy; else xclip -selection clipboard; fi';
+
+// Copies the output's absolute path, or its link. Resolves to null on success and to a message on failure.
+export async function copyOutput(folder, ref) {
+  try {
+    const copier = window()?.platform === "linux" ? LINUX_COPY : "pbcopy";
+    const r = await exec("sh", ["-c", `printf %s "$1" | ${copier}`, "sh", outputTarget(ref, folder)]);
+    return r.code === 0 ? null : "Could not copy.";
   } catch (e) {
     return String(e?.message ?? e);
   }

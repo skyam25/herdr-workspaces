@@ -92,6 +92,12 @@ describe("herdr-workspace skill", () => {
     }
   });
 
+  it("says touched documents list themselves, so only the asked-for deliverable is declared", () => {
+    assert.ok(skill.includes("Declare only the deliverable the person asked for"));
+    assert.ok(skill.includes("Outputs already lists every Markdown, HTML, PDF and Office file you write under Touched"));
+    assert.ok(!skill.includes("hws output touch"));
+  });
+
   it("separates review from a note", () => {
     assert.ok(skill.includes("Use `hws review` when you want comments back on your own work. Use a note when the file is the person's to read or change."));
   });

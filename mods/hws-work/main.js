@@ -5,8 +5,8 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { agents, home, layout, openOverlay, panes, props, setShared, shared, spaces, terminals, theme, watchFolder } from "herdr";
-import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, cardSummary, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputGroups, outputTarget, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, todoColumns, todoDialogSize, todoItems, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
-import { focusAgent, hws, openOutput, openSession } from "./open.js";
+import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, cardSummary, describeSession, feedbackDir, fileName, findNode, lastTouched, locateTerminal, mergeWaiting, orchestratorFolder, outputActions, outputGroups, outputTarget, ownerTag, replyEnded, roster, sendTargets, severalDialogHeight, todoColumns, todoDialogSize, todoItems, touchedDetail, MODELS_DIALOG, modelsDialogHeight, modelsLine } from "./data.js";
+import { copyOutput, focusAgent, hws, openNote, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
 
 const WAITING_KEY = "hws.tasks.waiting";
@@ -28,6 +28,7 @@ const SILENT_START_MS = 20000;
 const silentSince = (record, since) => !record.status && !(record.turn > 0) && Date.now() - since > SILENT_START_MS;
 
 const message = (e) => String(e?.message ?? e);
+const failure = (text) => (text ? { text, isError: true } : null);
 
 // One quiet look for every board control. A primary one is solid.
 function buttonLook(el, t, enabled, primary) {
@@ -71,6 +72,8 @@ export default class Work extends View {
     this.height = 0;
     this.doneOpen = false;
     this.touchedOpen = new Set();
+    this.actionsFor = null;
+    this.outputNote = null;
     this.roster = [];
     this.rosterKey = null;
     this.dirs = new Set();
@@ -503,12 +506,23 @@ export default class Work extends View {
     });
   }
 
-  open(group, output, cx) {
-    this.note = null;
+  // Runs one output action. The note line shows a failure, or the copy that worked.
+  act(action, group, output, cx) {
+    this.outputNote = null;
+    this.actionsFor = null;
     cx.spawn(async (cx) => {
-      this.note = await openOutput(group.agent, group.folder, output.ref);
+      const { agent, folder } = group;
+      if (action === "note") this.outputNote = failure(await openNote(agent, folder, output.ref));
+      else if (action === "copy") this.outputNote = failure(await copyOutput(folder, output.ref)) ?? { text: `Copied ${outputTarget(output.ref, folder)}`, isError: false };
+      else this.outputNote = failure(await openOutput(agent, folder, output.ref));
       cx.notify();
     });
+  }
+
+  // One row's actions show at a time. A second press on the same row hides them.
+  toggleActions(key, cx) {
+    this.actionsFor = this.actionsFor === key ? null : key;
+    cx.notify();
   }
 
   // Why Outputs has no agents to show, or null when it has.
@@ -559,7 +573,7 @@ export default class Work extends View {
       .child(body.header)
       .when(Boolean(body.quiet), (el) => el.child(div().id("quiet").flex_none().px(14).py(5).text_size(11).text_color(t.dim).whitespace_normal().child(body.quiet)))
       .child(body.content)
-      .when(this.kind === "outputs" && Boolean(this.note), (el) => el.child(div().id("note").flex_none().px(14).py(6).text_size(11).text_color(t.blocked).child(this.note)));
+      .when(this.kind === "outputs" && Boolean(this.outputNote), (el) => el.child(div().id("note").flex_none().px(14).py(6).text_size(11).text_color(this.outputNote.isError ? t.blocked : t.dim).truncate().child(this.outputNote.text)));
   }
 
   header(t, title, count, control = null) {
@@ -881,13 +895,14 @@ export default class Work extends View {
     return { header, content };
   }
 
+  // Declared outputs first, then the documents the agent only wrote, folded under Touched.
   outputGroup(t, group, labelled, now) {
-    const rows = group.declared.map((o) => this.outputRow(t, group, o, now));
+    const rows = group.declared.flatMap((o) => this.outputRows(t, group, o, now, o.kind));
     if (group.touched.length > 0) {
       const key = group.agent.address;
       const isOpen = this.touchedOpen.has(key);
       rows.push(this.touchedRow(t, key, group.touched.length, isOpen));
-      if (isOpen) rows.push(...group.touched.map((o) => this.outputRow(t, group, o, now)));
+      if (isOpen) rows.push(...group.touched.flatMap((o) => this.outputRows(t, group, o, now, touchedDetail(o))));
     }
     return v_flex()
       .flex_none()
@@ -915,25 +930,68 @@ export default class Work extends View {
       .child(`${isOpen ? "▾" : "▸"} Touched (${count})`);
   }
 
-  outputRow(t, group, output, now) {
+  // The output's row, and its actions below it while they show.
+  outputRows(t, group, output, now, detail) {
     const at = lastTouched(output);
+    const key = `${group.agent.address}-${output.ref}`;
+    const showsActions = this.actionsFor === key;
 
     // Dragging a file row into a terminal types its path there.
     const file = outputTarget(output.ref, group.folder);
-    return h_flex()
-      .id(`output-${group.agent.address}-${output.ref}`)
+    const row = h_flex()
+      .id(`output-${key}`)
       .when(file.startsWith("/"), (el) => el.drag_paths([file]))
       .h(28)
       .flex_none()
-      .px(8)
+      .pl(8)
+      .pr(4)
       .gap(8)
       .items_center()
       .rounded(7)
       .cursor_pointer()
+      .when(showsActions, (el) => el.bg(t.hover))
       .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => this.open(group, output, cx))
+      .on_click((_e, cx) => this.act("open", group, output, cx))
+      .on_mouse_down("right", (_e, cx) => {
+        cx.stop_propagation();
+        this.toggleActions(key, cx);
+      })
       .child(div().flex_1().min_w(0).truncate().child(fileName(output.ref)))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child(output.kind))
-      .when(at > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago(now - at))));
+      .child(div().flex_none().text_size(11).text_color(t.dim).child(detail))
+      .when(at > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago(now - at))))
+      .child(this.moreButton(t, key, showsActions));
+    if (!showsActions) return [row];
+    const actions = h_flex()
+      .id(`actions-${key}`)
+      .flex_none()
+      .pl(16)
+      .pr(4)
+      .pb(4)
+      .gap(4)
+      .items_center()
+      .children(outputActions(output.ref).map(({ id, label }) => buttonLook(div().id(`${id}-${key}`), t, true, false).on_click((_e, cx) => this.act(id, group, output, cx)).child(label)));
+    return [row, actions];
+  }
+
+  moreButton(t, key, isOpen) {
+    return div()
+      .id(`more-${key}`)
+      .flex_none()
+      .w(22)
+      .h(20)
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded(5)
+      .text_size(11)
+      .text_color(isOpen ? t.foreground : t.dim)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.raised).text_color(t.foreground))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.toggleActions(key, cx);
+      })
+      .tooltip("Review, open as note or copy path")
+      .child("···");
   }
 }

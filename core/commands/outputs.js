@@ -8,9 +8,10 @@ import { withLock } from '../lock.js';
 import { writeJsonAtomic } from '../manifest.js';
 import { requireFlag, splitList } from '../resolve.js';
 
-// `<session folder>/.feedback/outputs/<session id>.json` lists a session's outputs. `hws output add`
-// and the Agent Brief plugin write it. The reader follows companion/src/shared/output-file.ts in the
-// agent-brief repo, but keeps any `kind`, so a kind added there still shows here.
+// `<session folder>/.feedback/outputs/<session id>.json` lists a session's outputs. `hws output add`,
+// `hws output touch` from the plugin's write hook, and the Agent Brief plugin write it. The reader
+// follows companion/src/shared/output-file.ts in the agent-brief repo, but keeps any `kind`, so a
+// kind added there still shows here.
 
 const TIERS = new Set(['declared', 'detected']);
 const STATUSES = new Set(['drafting', 'ready']);
@@ -85,13 +86,17 @@ export function outputs(flags) {
 
 // The writer follows mod/agent-brief/hooks/outputs.ts in the agent-brief repo.
 
+// The keys are Agent Brief's DOCUMENT_EXTENSIONS, and SKIP_DIRS is its OUTPUT_SKIP_DIRS.
 const KIND_BY_EXTENSION = { md: 'markdown', markdown: 'markdown', mdx: 'markdown', html: 'html', htm: 'html', pdf: 'pdf', docx: 'docx', pptx: 'pptx', xlsx: 'xlsx' };
+const SKIP_DIRS = new Set(['.feedback', '.claude', 'node_modules']);
 
-function kindOf(ref) {
+function extensionOf(ref) {
   const name = basename(ref);
   const dot = name.lastIndexOf('.');
-  return (dot > 0 && KIND_BY_EXTENSION[name.slice(dot + 1).toLowerCase()]) || 'other';
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }
+
+const kindOf = (ref) => KIND_BY_EXTENSION[extensionOf(ref)] ?? 'other';
 
 // The calling agent's session, and the folder the session-start hook registered for it.
 function declaringSession() {
@@ -162,11 +167,23 @@ function readRawOutputs(file, sessionId) {
   return raw;
 }
 
-// Replaces the record with the same ref where it stands, keeping its other fields, or appends one.
-function upsertDeclared(outputs, request, declaredAt) {
-  const index = outputs.findIndex((item) => item?.ref === request.ref);
-  const record = { ...(index === -1 ? {} : outputs[index]), ...request, tier: 'declared', declaredAt };
-  return index === -1 ? [...outputs, record] : outputs.map((item, position) => (position === index ? record : item));
+// Replaces the record with `ref` where it stands, or appends one, so records keep their first-appearance order.
+function put(outputs, ref, change) {
+  const index = outputs.findIndex((item) => item?.ref === ref);
+  if (index === -1) return [...outputs, change(undefined)];
+  return outputs.map((item, position) => (position === index ? change(item) : item));
+}
+
+// A new declaration keeps the record's other fields, write times included.
+const upsertDeclared = (outputs, request, declaredAt) => put(outputs, request.ref, (found) => ({ ...found, ...request, tier: 'declared', declaredAt }));
+
+// A write adds to the record's times and count. The first write's origin stays, and a declared record stays declared.
+function upsertWrite(outputs, { ref, origin, at }) {
+  return put(outputs, ref, (found) =>
+    found === undefined
+      ? { ref, kind: kindOf(ref), tier: 'detected', origin, firstWriteAt: at, lastWriteAt: at, writes: 1 }
+      : { ...found, origin: found.origin ?? origin, firstWriteAt: found.firstWriteAt ?? at, lastWriteAt: at, writes: (found.writes ?? 0) + 1 },
+  );
 }
 
 function declaredText(record, folder) {
@@ -187,4 +204,33 @@ export function outputAdd(flags) {
     return list.find((item) => item?.ref === request.ref);
   });
   return { data: { session: id, folder, file, output }, text: declaredText(output, folder) };
+}
+
+// The document's path relative to the session folder, or null for anything Outputs does not list.
+// That is a file outside the folder, one under a skipped folder, or one without a document extension.
+function documentRef(folder, raw) {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || /[\u0000-\u001f\u007f]/.test(raw)) return null;
+  if (!KIND_BY_EXTENSION[extensionOf(raw)]) return null;
+  const ref = relative(realPathOf(folder), realPathOf(resolve(raw)));
+  if (ref === '' || ref === '..' || ref.startsWith('../') || isAbsolute(ref)) return null;
+  return ref.split('/').slice(0, -1).some((dir) => SKIP_DIRS.has(dir)) ? null : ref;
+}
+
+// The plugin's PostToolUse hook calls this after each write. It prints nothing, and a path that is not a document records nothing.
+export function outputTouch(flags) {
+  const raw = requireFlag(flags, 'path');
+  const origin = flags.origin ?? 'edited';
+  if (!ORIGINS.has(origin)) throw new UsageError('--origin must be created or edited');
+  const { id, folder } = declaringSession();
+  const ref = documentRef(folder, raw);
+  if (ref === null) return { data: { session: id, folder, file: null, output: null }, text: '' };
+  const file = join(folder, '.feedback', 'outputs', `${id}.json`);
+  const output = withLock(`outputs-${id}`, () => {
+    const content = readRawOutputs(file, id);
+    const list = upsertWrite(content.outputs, { ref, origin, at: Date.now() });
+    writeJsonAtomic(file, { ...content, outputs: list });
+    keepFeedbackIgnored(folder);
+    return list.find((item) => item?.ref === ref);
+  });
+  return { data: { session: id, folder, file, output }, text: '' };
 }

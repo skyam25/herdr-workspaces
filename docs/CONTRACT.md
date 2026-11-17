@@ -208,6 +208,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws agent add --session S [--folder F] [--tool claude\|codex] [--workspace W]` | Logs a session started outside the workspace's terminals, with `source` `manual`. A Claude session is looked up at F, then by id under every Claude project folder, and its folder is read from the transcript's `cwd`. It fails when no transcript is found. A Codex session needs `--folder` and is not checked. Logging a known session changes nothing and prints `existing: true` |
 | `hws outputs --terminals T1,T2` | Read-only. Prints `{ agents }`, one `{ terminal, session, folder, file, outputs }` per terminal in the order given. See Outputs under Right panel |
 | `hws output add --title T (--path P \| --url U) [--status drafting\|ready]` | Declares a deliverable in the calling agent's outputs file, as Agent Brief's `declare_output` does. See [Declaring an output](#declaring-an-output) |
+| `hws output touch --path P [--origin created\|edited]` | Records a document the calling agent wrote as a `detected` output, as Agent Brief's write hook did. The plugin's write hook runs it, and `hws --help` leaves it out. See [Recording a write](#recording-a-write) |
 | `hws outline new TITLE... [--target P] [--path X.outline.md] [--kind document\|page] [--terminal T]` | Writes a new outline file and prints its path on the first line. Needs no surface. See [Outlines](#outlines) |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board or note opens in its own window and a page splits a pane beside T. `--window` and `--in-pane` choose the place, and both together exit 2. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. One file is one surface per workspace. A file already open in a pane gets the focus, and one already open in a window is raised, whatever the flags say. The result then has `focused: true`, and `raised` for a window. A file whose window is closed starts again on the same data in the place the flags or the default give |
 | `hws surface open --type board (--artifact A \| --file F) [--title X] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Reopens a finished sketch on a board. A is a board artifact in an open workspace, and F is an `.excalidraw` file. F inside a board artifact's bundle reopens that artifact. The surface lives in the artifact's workspace, else the caller's, tied to T as any surface is, and records `reopens` and `file`. The title defaults to the artifact's title, else the file name without `.excalidraw`. See [Reopened sketches](#reopened-sketches) |
@@ -689,9 +690,22 @@ The host registers a stand-in session `surface-<surface id>` on the surface sock
 | File | `<folder>/.feedback/outputs/<session>.json`, version 1. Records and fields `hws` does not know are kept. A missing or blank file starts fresh. A file that is not JSON, or not version 1 with an `outputs` array, exits 1 and stays as it was |
 | `--path` | Counts from the current folder and must lie inside the folder, else it exits 1. The record's `ref` is relative to the folder, and `kind` comes from the extension: `markdown`, `html`, `pdf`, `docx`, `pptx`, `xlsx` or `other` |
 | `--url` | An http or https link, with `ref` and `url` both the link and `kind` `artifact` |
-| Upsert | A record with the same `ref` keeps its place and other fields, and takes the new `title`, `status`, `tier: declared` and `declaredAt` |
+| Upsert | A record with the same `ref` keeps its place and other fields, write times included, and takes the new `title`, `status`, `tier: declared` and `declaredAt` |
 | `.gitignore` | `<folder>/.feedback/.gitignore` holding `*` is written when missing |
 | Result | Prints the record. A Markdown or HTML file's text names the `hws review` line that shows it |
+
+### Recording a write
+
+`hws output touch` writes the record Agent Brief's write hook wrote, so Outputs lists the documents a session touched beside the ones it declared. Session, folder, file and `.gitignore` follow `hws output add`.
+
+| Item | Behaviour |
+|---|---|
+| Document | `--path` counts from the current folder. It must lie inside the session folder, outside any `.feedback`, `.claude` or `node_modules` folder, and end in `.md`, `.markdown`, `.mdx`, `.html`, `.htm`, `.pdf`, `.docx`, `.pptx` or `.xlsx`, in any case. Anything else exits 0 and writes nothing |
+| New record | `{ ref, kind, tier: detected, origin, firstWriteAt, lastWriteAt, writes: 1 }`. `ref` and `kind` follow `hws output add` |
+| Later write | Sets `lastWriteAt` and adds 1 to `writes`. `origin` and `firstWriteAt` keep their first values, so `created` sticks only on a first write |
+| Declared | A declared record stays declared, keeps its place and gains `origin`, the write times and `writes` |
+| `--origin` | `created` or `edited`, default `edited`. Anything else exits 2 |
+| Result | Prints nothing. `--json` prints `{ session, folder, file, output }`, with `file` and `output` null for a path that is not a document. An outputs file that does not read as version 1 exits 1 and stays as it was |
 
 ## In a pane
 
@@ -1159,12 +1173,29 @@ The header shows `Models  <orchestrator model> → <worker model>`, which opens 
 |---|---|
 | `session` | The registered Claude session id, or null when the terminal has none |
 | `folder` | The `--folder` given to `hws register`, else the folder the terminal's program runs in, else null |
-| `file` | `<folder>/.feedback/outputs/<session>.json`, which `hws output add` and the Agent Brief plugin write for each session, or null |
+| `file` | `<folder>/.feedback/outputs/<session>.json`, which `hws output add`, `hws output touch` and the Agent Brief plugin write for each session, or null |
 | `outputs` | That file's records, one per `ref`, each `{ ref, kind, tier }` with `url`, `title`, `status`, `origin`, `declaredAt`, `firstWriteAt`, `lastWriteAt` and `writes` when well formed |
 
 A missing folder or file, malformed JSON, a file whose `version` is not 1, or a session id that is not a plain file name gives an empty `outputs`. A record without a `ref`, a `kind`, or a `tier` of `declared` or `detected` is dropped, and unknown fields are left out. Any `kind` string is kept. The command exits 0 in each of these cases.
 
-Outputs lists each agent's outputs, newest first, under the agent's Herdr title or its folder's name. With none it says `No outputs recorded yet.` An `hws outputs` failure shows hws's message. Outputs watches the `.feedback` folder of each agent with outputs and runs `hws outputs` again on a change. A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. The click shows the agent's tab and focuses the surface. A second click on the same output returns to that surface while its pane lives. Anything else goes to macOS `open`. Dragging a file output's row into a terminal types its absolute path there.
+Outputs lists each agent's outputs under the agent's Herdr title or its folder's name, the agent with the newest output first. With none it says `No outputs recorded yet.` An `hws outputs` failure shows hws's message. Outputs watches the `.feedback` folder of each agent with outputs and runs `hws outputs` again on a change.
+
+| Rows | |
+|---|---|
+| Declared | First, newest first. Each row shows the file name, `kind` and age |
+| Touched | A folded `Touched (N)` row after the declared rows. Unfolded, it lists the `detected` records newest first, each with `created` or `edited`, the write count, such as `created · 3 writes`, and age |
+| Click | A local `.html`, `.htm` or `.md` output opens beside its agent with `hws surface open --type page`. The click shows the agent's tab and focuses the surface. A second click on the same output returns to that surface while its pane lives. Anything else goes to macOS `open` |
+| Drag | Dragging a file output's row into a terminal types its absolute path there |
+| `···` or right-click | Shows the row's actions on a line below it. One row shows actions at a time, and a second press hides them |
+
+| Action | Shown for | Does |
+|---|---|---|
+| Review | `.html`, `.htm` and `.md` | What a click does |
+| Open as note | `.md` and `.markdown` | `hws surface open --type note --file F --terminal T`, with `--beside-pane` and `--space` for a flipped agent |
+| Copy path | Files | Copies the absolute path with `pbcopy`, or `wl-copy` or `xclip` on Linux |
+| Copy link | Links | Copies the link |
+
+A failed action shows its message under the list. A copy shows `Copied` and what it copied.
 
 `mod.open:hws-brief` shows or hides Outputs in the right panel.
 
@@ -1257,9 +1288,18 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 `plugin/hooks/guard-note.sh` runs on `PreToolUse` for `Write`. It denies a write to the current note when `hws` owns that place and tells the agent to run a tidy pass. `Edit` stays allowed so an agent can add one dated decision line. It exits 0 on every path, so a failed lookup allows the write.
 
+`plugin/hooks/output-touch.sh` runs on `PostToolUse` for `Write`, `Edit`, `MultiEdit` and `NotebookEdit`, only in a Herdr app terminal, the same check `ask-hook.sh` makes. It prints nothing and exits 0 on every path.
+
+| Step | |
+|---|---|
+| Path | `tool_input.file_path`, else `tool_input.notebook_path`. A path without a document extension stops here, so a code edit starts no `hws` |
+| Failure | A `tool_response` that is a string, or holds `error`, `is_error: true` or `success: false`, records nothing |
+| Origin | `created` when Write's `tool_response.type` is `create`, or when Write's `originalFile` is under half the length of its `content`. Every other write is `edited` |
+| Call | `hws output touch --path P --origin O`, run in the payload's `cwd` with `CLAUDE_CODE_SESSION_ID` set to its `session_id`. It gets 3 seconds and stdin gets 1, under the 5 second `timeout` in `hooks.json` |
+
 1. Runs `hws register --terminal T --session S --folder F --json` and `hws current --line` in parallel. F is the hook's `cwd`, so Outputs finds the session's outputs file.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
-3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE`, rules out `--standalone` and says to open a note when the person only wants to read or edit. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` for a Markdown file and rules out `open` and other editors, and says to use `hws review` when the agent wants comments, then a paragraph that sends paste-ready text to a Markdown file opened as a note, then a paragraph that teaches `hws output add` for a requested doc, brief, report, spec, page or deck, then a paragraph that teaches `hws ask`, then a paragraph that teaches `hws phone send FILE --prompt X`.
+3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE`, rules out `--standalone` and says to open a note when the person only wants to read or edit. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` for a Markdown file and rules out `open` and other editors, and says to use `hws review` when the agent wants comments, then a paragraph that sends paste-ready text to a Markdown file opened as a note, then a paragraph that teaches `hws output add` for a requested doc, brief, report, spec, page or deck and says touched documents are listed already, so the agent declares only the deliverable asked for, then a paragraph that teaches `hws ask`, then a paragraph that teaches `hws phone send FILE --prompt X`.
 
 | Places sentence | |
 |---|---|
