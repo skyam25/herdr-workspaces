@@ -8,6 +8,9 @@ import { listRetired } from './retired.js';
 // Marks a round of comments on a page. Like a tidy review, it is a message and not stream work.
 export const FEEDBACK_ROLE = 'feedback';
 
+// Marks the answers to an `hws ask` round, which are a message too.
+export const ANSWERS_ROLE = 'answers';
+
 // Follows symlinks where the path exists, so /tmp and /private/tmp compare equal.
 export function realOf(path) {
   return existsSync(path) ? realpathSync(path) : resolve(path);

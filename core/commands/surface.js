@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdir
 import { request as httpRequest } from 'node:http';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import { FEEDBACK_ROLE, artifactOfFile, linkFor, moveBundle, moveDir, realOf } from '../artifacts.js';
+import { ANSWERS_ROLE, FEEDBACK_ROLE, artifactOfFile, linkFor, moveBundle, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import {
   act,
@@ -130,9 +130,11 @@ function surfaceTitle(given, file, type) {
 }
 
 // One file opens as one surface per workspace, so its draft is there when it reopens.
-function surfaceIdFor(workspace, file) {
-  if (!file || isUrl(file)) return newId('s');
-  return `s${createHash('sha256').update(`${workspace.id}\n${file}`).digest('hex').slice(0, 8)}`;
+// A terminal's questions open as one surface too, so a new round finds the answers held.
+function surfaceIdFor(workspace, { type, file, terminal }) {
+  const key = type === 'questions' ? `questions ${terminal}` : file;
+  if (!key || isUrl(key)) return newId('s');
+  return `s${createHash('sha256').update(`${workspace.id}\n${key}`).digest('hex').slice(0, 8)}`;
 }
 
 const DRAFT_ENTRIES = ['drafts', 'boards'];
@@ -214,8 +216,13 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
   return ['env', ...Object.entries(environment).map(([key, value]) => `${key}=${value}`), HOST_SCRIPT];
 }
 
-export async function surfaceOpen(flags) {
+export function surfaceOpen(flags) {
   if (!SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
+  return openSurface(flags);
+}
+
+// `prepare` writes into the data folder before the host starts. `hws ask` puts its round there.
+export async function openSurface(flags, { prepare } = {}) {
   assertBesideFlags(flags);
   const windowed = opensInWindow(flags);
   const terminal = ownerTerminal(flags);
@@ -224,8 +231,8 @@ export async function surfaceOpen(flags) {
 
   const placement = placementFor(live, terminal, flags);
   const workspace = placement.workspace ?? ensureStandaloneManifest();
-  const file = flags.type === 'board' ? '' : resolveFile(flags.file);
-  const surfaceId = surfaceIdFor(workspace, file);
+  const file = flags.type === 'board' || flags.type === 'questions' ? '' : resolveFile(flags.file);
+  const surfaceId = surfaceIdFor(workspace, { type: flags.type, file, terminal });
 
   // A file's surface shows again where it already is, whatever the flags say.
   const already = workspace.surfaces.find((surface) => surface.id === surfaceId);
@@ -242,7 +249,10 @@ export async function surfaceOpen(flags) {
   const socket = socketPath(surfaceId);
   const dataDir = surfaceDataDir(workspace.id, surfaceId);
   mkdirSync(dataDir, { recursive: true });
-  linkDrafts(workspace, surfaceId, dataDir, file ? basename(file) : title);
+
+  // Questions leave no drafts, so they get no folder in the workspace.
+  if (flags.type !== 'questions') linkDrafts(workspace, surfaceId, dataDir, file ? basename(file) : title);
+  prepare?.(dataDir);
 
   const owner = windowed ? (terminal ? windowOwnerLabel(live, terminal, placement) : '') : undefined;
   const argv = hostArgv({ workspace, id: surfaceId, type: flags.type, title, terminal, file, owner });
@@ -326,7 +336,7 @@ export function archiveBundle({ manifest, surface }, bundle) {
   const place = surface.type === 'note' && isKept(manifest) ? 'notes' : 'artifacts';
   const artifactDir = join(writablePlace(manifest, place), isKept(manifest) ? `${slug(surface.title)}-${artifactId}` : artifactId);
   const prompt = moveBundle(bundle, artifactDir);
-  const review = isTidyReview(manifest, surface) ? { role: TIDY_ROLE } : feedbackFields(manifest, surface);
+  const review = surface.type === 'questions' ? { role: ANSWERS_ROLE } : isTidyReview(manifest, surface) ? { role: TIDY_ROLE } : feedbackFields(manifest, surface);
   const artifact = {
     id: artifactId,
     type: surface.type,
@@ -344,7 +354,7 @@ export function archiveBundle({ manifest, surface }, bundle) {
   return artifact;
 }
 
-function dropSurface(manifest, surface) {
+export function dropSurface(manifest, surface) {
   updateManifest(manifest.id, (draft) => {
     draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
   });
@@ -511,6 +521,20 @@ async function popIn(manifest, surface, live) {
   const { host: _host, ...rest } = surface;
   rewriteSurface(manifest.id, { ...rest, pane, pid });
   return { id: surface.id, shown: 'pane', moved: true, pane };
+}
+
+// Ends a surface's host in its pane or window and waits for it to go. A closed one is left as it is.
+export async function endHost(live, surface) {
+  if (surface.host) {
+    if (!isWindowOpen(surface)) return;
+    killTerminal(surface.host);
+    await awaitHostEnd(surface.host);
+    return;
+  }
+  const paneHost = paneTerminal(live, surface.pane);
+  if (!paneHost) return;
+  act('pane.close', { pane: surface.pane });
+  await awaitHostEnd(paneHost);
 }
 
 // Shows a surface where it already is. A closed window starts again on its saved data.

@@ -24,6 +24,7 @@ import { ItemsStore } from './items';
 import { Mic, VoiceStrip } from './Mic';
 import { OutputsStore } from './outputs';
 import { PullIn } from './PullIn';
+import { QuestionsView } from './QuestionsView';
 import { ResumeRow } from './ResumeRow';
 import { ReviewMode } from './ReviewMode';
 import { SessionDot, SessionSidebar, sessionState, sidebarOrder, useSidebar } from './SessionSidebar';
@@ -40,6 +41,7 @@ import { useWorkspace } from './useWorkspace';
 import { WriteView } from './WriteView';
 import { deliveryOf } from './delivery';
 import { cleanError } from './ipc-error';
+import { NOTHING_ANSWERED, answersPrompt, type Answers } from '../shared/questions';
 
 interface Boot {
   info: InitInfo;
@@ -181,6 +183,12 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   const copyReference = (ref: ItemReference) =>
     void host.copyReference(ref).then(() => notify('Copied. Paste it into any Claude Code session.'), report('copy the reference'));
   const [surface, setSurface] = useState<SurfaceState | undefined>(info.surface);
+
+  // A questions surface shows its round over the board. Its answers live here and save as they change.
+  const questioning = surface?.type === 'questions';
+  const [answers, setAnswers] = useState<Answers>(info.surface?.answers ?? {});
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
   const [settings, setSettings] = useState<Settings>(info.settings);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [ipadSheetOpen, setIpadSheetOpen] = useState(false);
@@ -202,7 +210,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   } = useWorkspace({ host, info, controller, book, shelf, comments, board, notify, report });
   const micStarting = useSyncExternalStore((fn) => reviewVoice.subscribe(fn), () => reviewVoice.starting) && reviewing;
   const openPage = useSyncExternalStore((fn) => book.subscribe(fn), () => reviewPage(book.selected));
-  useCommentKeys(comments, mode === 'sketch');
+  useCommentKeys(comments, mode === 'sketch' && !questioning);
   const sidebar = useSidebar();
   const boardList = useBoards(host, controller, briefs);
   const activeBriefRef = useRef(activeBrief);
@@ -230,7 +238,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
     changeMode: (next) => {
       if (!surface) changeMode(next);
     },
-    onTalk: onMicrophone,
+    onTalk: questioning ? undefined : onMicrophone,
     popoverOpen: settingsOpen || historyOpen || chooserOpen,
     closePopovers: () => {
       setSettingsOpen(false);
@@ -297,8 +305,18 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   // A Feedback view on show turns Send into its Send decisions.
   const decisions = useSyncExternalStore(subscribeDecisions, decisionsClaim);
   const holder = mode === 'sketch' ? boardList.boards.find((b) => b.name === board)?.sessionId : book.selected?.sessionId;
+  const changeAnswers = (next: Answers) => {
+    setAnswers(next);
+    void host.surfaceAnswer(next).catch(report('save the answers'));
+  };
+  const sendAnswers = () =>
+    sendText(info.surface!.sessionId, async () => {
+      const text = answersPrompt(surface?.questions ?? [], answersRef.current);
+      return text ? { text } : NOTHING_ANSWERED;
+    });
+  const done = () => void (questioning ? sendAnswers() : send());
   const surfaceDone = useRef(() => {});
-  surfaceDone.current = () => void send();
+  surfaceDone.current = done;
   const surfaceSettle = useRef(() => {});
   surfaceSettle.current = () => void settleSurface();
   const lastSent = useRef(info.surface?.sent);
@@ -321,7 +339,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
       for (const fn of off) if (typeof fn === 'function') fn();
     };
   }, [host, info.surface, notify]);
-  const surfaceAct = (action: SurfaceAction) => void host.surfaceWant(action).then(() => (action === 'owner' || action === 'pop' ? undefined : send()));
+  const surfaceAct = (action: SurfaceAction) => void host.surfaceWant(action).then(() => (action === 'owner' || action === 'pop' ? undefined : done()));
   const micButton = onMicrophone && (
     <Mic
       recording={recording}
@@ -335,7 +353,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
     <SurfacePlace surface={surface} onAct={surfaceAct} onTargets={() => host.surfaceTargets()} onMove={(workspace) => void host.surfaceMove(workspace)} />
   );
   const sendBar = surface ? (
-    <SurfaceBar surface={surface} mic={micButton} onDone={() => void send()} onAct={surfaceAct} />
+    <SurfaceBar surface={surface} mic={questioning ? undefined : micButton} onDone={done} onAct={surfaceAct} />
   ) : (
     <SendTo
       sessions={sessions}
@@ -589,8 +607,9 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
               </div>
             )}
             {/* The canvas stays mounted under Write and Review, so a view switch keeps its scene and undo. */}
-            <BoardCanvas controller={controller} scene={scene} theme={theme} active={mode === 'sketch'} onReady={onReady} comments={comments} board={board} />
+            <BoardCanvas controller={controller} scene={scene} theme={theme} active={mode === 'sketch' && !questioning} onReady={onReady} comments={comments} board={board} />
           </div>
+          {questioning && <QuestionsView questions={surface.questions ?? []} answers={answers} onChange={changeAnswers} />}
           {commenting && (
             <CommentColumn
               comments={comments}
@@ -708,7 +727,7 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
         {!inlineSend && (
           <footer className="composer" data-testid="composer">
             {placeBar}
-            {onMicrophone && (
+            {onMicrophone && !questioning && (
               <VoiceStrip
                 recording={recording}
                 reviewing={reviewing}

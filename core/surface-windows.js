@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { isTerminalAlive } from './herdr.js';
 import { surfaceDataDir } from './paths.js';
+import { ANSWERS_FILE, isAnswered } from './questions.js';
 
 // A surface in its own window has no pane, so its host terminal says whether it is open.
 export const isWindowOpen = (surface) => isTerminalAlive(surface.host);
@@ -33,9 +34,14 @@ function boardFileHasWork(dir, name) {
   return false;
 }
 
-// True when a closed window left a drawing, comments or a note worth coming back to.
+function hasAnswers(data) {
+  if (!filesIn(data).includes(ANSWERS_FILE)) return false;
+  return fileHasWork(join(data, ANSWERS_FILE), (file) => Object.values(file.answers ?? {}).some(isAnswered));
+}
+
+// True when a closed window left a drawing, comments, a note or an answer worth coming back to.
 export function hasDraftWork(workspaceId, surfaceId) {
   const data = surfaceDataDir(workspaceId, surfaceId);
   const boards = join(data, 'boards');
-  return filesIn(boards).some((name) => boardFileHasWork(boards, name)) || filesIn(join(data, 'drafts')).length > 0;
+  return filesIn(boards).some((name) => boardFileHasWork(boards, name)) || filesIn(join(data, 'drafts')).length > 0 || hasAnswers(data);
 }
