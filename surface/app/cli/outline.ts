@@ -1,10 +1,11 @@
-/** `agent-brief outline`: list, make, show and change `<name>.outline.md` files through the app. */
+/** The `outline` verb: list, make, show and change `<name>.outline.md` files through the app. */
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { OpenRequest, OpenResponse, OutlineDocument, OutlineKind, OutlineOp, OutlineProject, OutlineSummary, OutlineUpdateResult } from '../src/protocol';
 import { cleanOutlineOps, isOutlinePath, OutlineOpError, outlinePathFor, outlineSlugPath, serializeOutline } from '../src/shared/outline';
 import { ApiError, callJson } from './http';
+import type { Cli } from './command';
 import { InputError } from './validate';
 
 export interface OutlineCtx {
@@ -20,6 +21,7 @@ export interface OutlineCtx {
   cwd: string;
   stdin: () => Promise<string>;
   out: (s: string) => void;
+  cli: Cli;
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -38,15 +40,15 @@ export const summaryLine = (s: OutlineSummary) =>
     ...(s.direction ? [`direction ${s.direction}`] : []),
   ].join(' · ');
 
-export function formatOutlineProject(project: OutlineProject): string {
-  if (!project.files.length) return 'no outlines in this project. Make one with "agent-brief outline new".';
+export function formatOutlineProject(project: OutlineProject, cli: Cli): string {
+  if (!project.files.length) return `no outlines in this project. Make one with "${cli.line('outline new')}".`;
   const lines = project.files.map(summaryLine);
   if (project.truncated) lines.push('(the scan stopped early; some files are not listed)');
   return lines.join('\n');
 }
 
-export function formatOutline(doc: OutlineDocument): string {
-  if (doc.version === 'missing') return `${doc.path} · no outline yet. Make one with "agent-brief outline new".`;
+export function formatOutline(doc: OutlineDocument, cli: Cli): string {
+  if (doc.version === 'missing') return `${doc.path} · no outline yet. Make one with "${cli.line('outline new')}".`;
   return `${doc.path} · version ${doc.version}\n${serializeOutline(doc)}`;
 }
 
@@ -101,7 +103,7 @@ const show = <T>(ctx: OutlineCtx, data: T, text: (d: T) => string) => ctx.out(ct
 
 export const OUTLINE_VERBS: Record<string, Verb> = {
   async list(ctx) {
-    show(ctx, await callJson<OutlineProject>(ctx.socket, 'GET', `${route(ctx)}/project`), formatOutlineProject);
+    show(ctx, await callJson<OutlineProject>(ctx.socket, 'GET', `${route(ctx)}/project`), (p) => formatOutlineProject(p, ctx.cli));
   },
 
   async new(ctx, words) {
@@ -120,7 +122,7 @@ export const OUTLINE_VERBS: Record<string, Verb> = {
       res = await callJson<OutlineUpdateResult>(ctx.socket, 'POST', route(ctx, file), { version: 'missing', ops });
     } catch (e) {
       if (e instanceof ApiError && e.code === 'conflict') {
-        throw new ApiError('conflict', `${file} already exists. Run "agent-brief outline show ${file}", or pass --path for a new file`);
+        throw new ApiError('conflict', `${file} already exists. Run "${ctx.cli.line(`outline show ${file}`)}", or pass --path for a new file`);
       }
       throw e;
     }
@@ -141,7 +143,7 @@ export const OUTLINE_VERBS: Record<string, Verb> = {
   },
 
   async show(ctx, [raw]) {
-    show(ctx, await readDoc(ctx, await projectRelative(ctx, outlinePath(raw, 'show'))), formatOutline);
+    show(ctx, await readDoc(ctx, await projectRelative(ctx, outlinePath(raw, 'show'))), (d) => formatOutline(d, ctx.cli));
   },
 
   async apply(ctx, [raw]) {
@@ -155,6 +157,6 @@ export const OUTLINE_VERBS: Record<string, Verb> = {
 export async function runOutline(ctx: OutlineCtx): Promise<void> {
   const [verb, ...words] = ctx.positional;
   const run = verb ? OUTLINE_VERBS[verb] : undefined;
-  if (!run) throw new InputError(`outline takes ${Object.keys(OUTLINE_VERBS).join(', ')}. Run "agent-brief outline --help".`);
+  if (!run) throw new InputError(`outline takes ${Object.keys(OUTLINE_VERBS).join(', ')}. Run "${ctx.cli.line('outline --help')}".`);
   await run(ctx, words);
 }

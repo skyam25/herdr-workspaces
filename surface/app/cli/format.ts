@@ -49,8 +49,8 @@ export function formatRead(r: ReadResponse): string {
   return lines.join('\n');
 }
 
-export function formatStatus(h: Health): string {
-  return `Agent Brief running · pid ${h.pid} · protocol v${h.version} · panel ${h.panelVisible ? 'visible' : 'hidden'} · current board ${JSON.stringify(h.currentBoard)}`;
+export function formatStatus(h: Health, name: string): string {
+  return `${name} running · pid ${h.pid} · protocol v${h.version} · panel ${h.panelVisible ? 'visible' : 'hidden'} · current board ${JSON.stringify(h.currentBoard)}`;
 }
 
 export function formatSessions(r: SessionsResponse): string {
