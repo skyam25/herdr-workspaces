@@ -182,7 +182,13 @@ export async function writeBundle(dir: string, input: DeliveryInput): Promise<vo
     const draftFile = `.feedback/sketches/${basename(dir)}/draft.md`;
     writes.push(writeFile(join(dir, 'annotations.md'), annotationsMarkdown(input.annotations, draftFile, cleanSourcePath(input.sourcePath))));
   }
-  if (input.comments && input.png) writes.push(writeFile(join(dir, 'comments.md'), boardCommentsMarkdown(input.boardName, input.comments)));
+  if (input.comments && input.png) {
+    // comments.json lets the sketch reopen with its pins where they were.
+    writes.push(
+      writeFile(join(dir, 'comments.md'), boardCommentsMarkdown(input.boardName, input.comments)),
+      writeFile(join(dir, 'comments.json'), JSON.stringify(input.comments, null, 2)),
+    );
+  }
   if (input.notes) writes.push(writeFile(join(dir, 'notes.md'), input.notes));
   if (input.timelineMd) writes.push(writeFile(join(dir, 'timeline.md'), input.timelineMd));
   if (input.transcript !== undefined) {

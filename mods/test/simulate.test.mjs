@@ -1149,13 +1149,36 @@ test("the artifact row has one line, with Open and a menu", async () => {
   assert.equal(H.overlays.at(-1).kind, "popup");
 });
 
-test("a board opens its comments in the companion, or else its sketch", async () => {
-  const H1 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
+test("a sketch's title and Open reopen it on a board, tied to the panel's agent", async () => {
+  const H = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" } });
+  const m = await mount("hws-panel", {});
+  await m.click("open-new");
+  await m.settle();
+  const reopen = ["surface", "open", "--type", "board", "--artifact", "new", "--terminal", "t13", "--json"];
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), reopen);
+  assert.deepEqual(H.calls.find((c) => c.command === "test").args, ["-f", "/art/new/board.excalidraw"]);
+  await m.click("artifact-open-new");
+  await m.settle();
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").length, 2);
+  assert.equal(H.calls.some((c) => c.command === "open"), false);
+});
+
+test("a flipped agent's sketch reopens with its chat pane named", async () => {
+  const H = kept({ terminals: [{ address: "t13", state: "live", labels: { "herdr.chat": "p7" } }] });
+  H.panes.push({ pane: "p7", terminal: null, tab: "tb1", mod: "hws-chat" });
+  const m = await mount("hws-panel", {});
+  await m.click("open-new");
+  await m.settle();
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1).slice(-7), ["--terminal", "t13", "--beside-pane", "p7", "--space", "spc1", "--json"]);
+});
+
+test("a board with no drawing opens its comments in the companion, or else its sketch", async () => {
+  const H1 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/comments.md": "# Comments" }, missingDirs: new Set(["/art/new/board.excalidraw"]) });
   const withComments = await mount("hws-panel", {});
   await withComments.click("open-new");
   await withComments.settle();
   assert.equal(args(H1).filter((a) => a[0] === "surface").at(-1)[5], "/art/new/comments.md");
-  const H2 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "@/art/new/sketch.png" } });
+  const H2 = kept({ files: { [NOTE_PATH]: NOTE, "/art/new/prompt.md": "@/art/new/sketch.png" }, missingDirs: new Set(["/art/new/board.excalidraw"]) });
   const noComments = await mount("hws-panel", {});
   await noComments.click("open-new");
   await noComments.settle();
@@ -1710,6 +1733,9 @@ test("the Unfiled dialog opens, trashes and moves each kind of item", async () =
   assert.deepEqual(args(H).at(-2), ["surface", "resume", "--id", "s1", "--json"]);
   await d.click("unfiled-open-s3");
   assert.deepEqual(args(H).at(-2), ["surface", "pop", "--id", "s3", "--to", "pane", "--json"]);
+  await d.click("unfiled-open-a1");
+  await d.settle();
+  assert.deepEqual(args(H).filter((a) => a[0] === "surface").at(-1), ["surface", "open", "--type", "board", "--artifact", "a1", "--standalone", "--json"]);
 
   assert.equal(d.clickable("unfiled-trash-s1"), false);
   assert.equal(d.clickable("unfiled-trash-s3"), false);

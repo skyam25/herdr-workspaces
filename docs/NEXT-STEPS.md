@@ -71,6 +71,7 @@ Nothing below has been done with a real pointer or keyboard.
 - [ ] Run Promote on a throwaway.
 - [ ] Reboot or kill a kept workspace's agents, then run `hws resume`.
 - [ ] Open Find throwaway, type a search, and reopen a row with the pointer and with Enter.
+- [ ] Reopen a finished sketch from its Workspace panel row. Check its drawing and pins load, draw more, press Done, and check the old row folds under Superseded.
 
 Drawing lag decides whether Pixel stays. Herdr app reports itself as Ghostty, and nobody has measured whether it gets partial or full frames.
 

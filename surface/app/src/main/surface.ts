@@ -12,7 +12,8 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync,
 import http from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { DeliveriesResponse, Delivery, OpenRequest } from '../protocol';
+import { CURRENT_BOARD, type DeliveriesResponse, type Delivery, type OpenRequest } from '../protocol';
+import { cleanBoardComments, parseBoardCommentsMarkdown, type BoardComments } from '../shared/board-comments';
 import type { SurfaceAction, SurfaceState, SurfaceTargets, SurfaceType } from '../shared/ipc';
 import { isLocalUrl } from '../shared/outputs';
 import { ANSWERS_FILE, QUESTIONS_FILE, readAnswers, readQuestions, type Answers } from '../shared/questions';
@@ -92,7 +93,61 @@ export function openRequest(cfg: SurfaceConfig, sessionId: string, cwd: string):
 
   // The questions view covers the board, which still opens because the session needs one.
   if (cfg.type === 'questions') return { sessionId };
-  return { sessionId, board: cfg.title };
+  return { sessionId, board: boardName(cfg.title) };
+}
+
+/**
+ * The board a sketch's title names. A board name is a file name, so other characters become spaces.
+ * A title that is already a valid name stays as it is.
+ */
+export function boardName(title: string): string {
+  const name = title
+    .replace(/[^\w .-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[ .-]+/, '')
+    .slice(0, 64)
+    .trim();
+  return !name || name === CURRENT_BOARD ? 'Sketch' : name;
+}
+
+/** Where `hws` leaves a drawing for a new sketch to start from: `board.excalidraw`, with `comments.json` or `comments.md` and `notes.md` from its bundle. */
+export const SEED_DIR = 'seed';
+
+export interface SeedStore {
+  create(name: string): string;
+  saveScene(name: string, json: string): void;
+  saveNotes(name: string, text: string): void;
+  saveComments(name: string, comments: BoardComments): void;
+}
+
+const readIfThere = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : undefined);
+
+/** The seed's comments, from comments.json when the bundle has it, else from comments.md. */
+function seedComments(dir: string): BoardComments | undefined {
+  const json = readIfThere(join(dir, 'comments.json'));
+  if (json !== undefined) return cleanBoardComments(parseJson(json));
+  const md = readIfThere(join(dir, 'comments.md'));
+  return md === undefined ? undefined : parseBoardCommentsMarkdown(md);
+}
+
+/**
+ * Loads the drawing `hws` seeded into a sketch's board, with its comments and notes, then removes the seed.
+ * The seed replaces whatever the board held. Returns the board's name, or undefined when there was no seed.
+ * A scene that does not parse throws and leaves the seed in place.
+ */
+export function importSeed(cfg: Pick<SurfaceConfig, 'type' | 'title' | 'dataDir'>, store: SeedStore): string | undefined {
+  if (cfg.type !== 'board' || !cfg.dataDir) return undefined;
+  const dir = join(cfg.dataDir, SEED_DIR);
+  const scene = readIfThere(join(dir, 'board.excalidraw'));
+  if (scene === undefined) return undefined;
+  const parsed = parseJson(scene) as { elements?: unknown } | undefined;
+  if (!Array.isArray(parsed?.elements)) throw new Error('the seeded drawing is not an Excalidraw scene');
+  const name = store.create(boardName(cfg.title));
+  store.saveScene(name, scene);
+  store.saveNotes(name, readIfThere(join(dir, 'notes.md')) ?? '');
+  store.saveComments(name, seedComments(dir) ?? { overall: '', pins: [] });
+  rmSync(dir, { recursive: true, force: true });
+  return name;
 }
 
 /**

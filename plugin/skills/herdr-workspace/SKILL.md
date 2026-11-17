@@ -165,9 +165,13 @@ The user can move a surface between a pane and a window with Pop out and Pop in.
 | Work | Run |
 |---|---|
 | An `.md` or `.html` file, or the artifact that tracks one | `hws review ARTIFACT` |
+| A finished sketch, which is a `board` artifact | `hws surface open --type board --artifact A --terminal $HC_TERMINAL_ID` |
+| An `.excalidraw` file | `hws surface open --type board --file F --terminal $HC_TERMINAL_ID` |
 | A sketch or note draft listed under `surfaces` in `hws current --json` | `hws surface resume --id S` |
 
 `hws surface resume` brings an open window forward, or starts a closed one again on the same data. Never reopen work with macOS `open`.
+
+A reopened sketch loads its drawing and pinned comments, and the bundle it came from stays as it was. Done delivers the new sketch to you and files it as an artifact that replaces the old one.
 
 ## Drive a surface
 

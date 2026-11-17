@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardCommentsAsk, boardCommentsMarkdown, cleanBoardComments, hasBoardComments } from './board-comments';
+import { boardCommentsAsk, boardCommentsMarkdown, cleanBoardComments, hasBoardComments, parseBoardCommentsMarkdown } from './board-comments';
 
 const pin = { id: 'p1', elementId: 'start', x: 160.4, y: 150, fx: 0.3, fy: 0.5, type: 'rectangle', label: 'Open the app', frame: 'Login flow', text: 'Say what opens.', createdAt: 1 };
 
@@ -31,5 +31,24 @@ describe('boardCommentsMarkdown', () => {
     expect(boardCommentsAsk('walkthrough', { overall: '', pins: [pin] })).toBe(
       'Feedback on the board "walkthrough" from Agent Brief, 1 comment pinned to the board. Make the changes, on the board where they belong, then say what changed.',
     );
+  });
+});
+
+describe('parseBoardCommentsMarkdown', () => {
+  it('reads back the overall note and each pin a Send wrote', () => {
+    const silent = { id: 'p2', x: 5, y: 6, text: '', createdAt: 1 };
+    const words = { ...pin, text: 'Say what opens.\n\nAnd when.' };
+    const md = boardCommentsMarkdown('flow', { overall: 'Tighter.\nMuch tighter.', pins: [words, silent] });
+    expect(parseBoardCommentsMarkdown(md)).toEqual({
+      overall: 'Tighter.\nMuch tighter.',
+      pins: [
+        { id: 'p1', elementId: 'start', x: 160, y: 150, type: 'rectangle', label: 'Open the app', frame: 'Login flow', text: 'Say what opens.\n\nAnd when.', createdAt: 0 },
+        { id: 'p2', x: 5, y: 6, text: '', createdAt: 0 },
+      ],
+    });
+  });
+
+  it('is undefined for a file with no comments', () => {
+    expect(parseBoardCommentsMarkdown('# Comments on the board "flow"\n\nIntro.\n')).toBeUndefined();
   });
 });

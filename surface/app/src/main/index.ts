@@ -84,7 +84,7 @@ import { TemplateStore } from './templates';
 import { Terminals } from './terminals';
 import { fileLog } from './update-log';
 import { Updater } from './updater';
-import { SurfaceHost, surfaceFromEnv } from './surface';
+import { importSeed, SurfaceHost, surfaceFromEnv } from './surface';
 import { BoardStore, cleanName, migrateData, StateFile } from './store';
 import { mainIpc, teeTransport } from './ipc';
 import { WebHost } from './web-host';
@@ -121,6 +121,15 @@ const dataDir = app.getPath('userData');
 const socketPath = process.env[SOCKET_ENV] ?? defaultSocketPath(homedir());
 
 const store = new BoardStore(dataDir);
+
+// A reopened sketch starts from the drawing hws left in its data folder.
+if (surfaceConfig) {
+  try {
+    importSeed(surfaceConfig, store);
+  } catch (err) {
+    console.error(`[companion] could not load the seeded drawing: ${(err as Error).message}`);
+  }
+}
 const state = new StateFile(dataDir);
 const history = new SendHistory(dataDir);
 const drafts = new DraftStore(dataDir);

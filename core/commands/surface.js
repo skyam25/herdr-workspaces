@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 
 import { ANSWERS_ROLE, FEEDBACK_ROLE, artifactOfFile, linkFor, moveBundle, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
@@ -133,13 +133,24 @@ function surfaceTitle(given, file, type) {
 
 // One file opens as one surface per workspace, so its draft is there when it reopens.
 // A terminal's questions open as one surface too, so a new round finds the answers held.
-function surfaceIdFor(workspace, { type, file, terminal }) {
-  const key = type === 'questions' ? `questions ${terminal}` : file;
+// A reopened sketch keys on its artifact, so a moved bundle still finds its surface.
+function surfaceKey({ type, file, terminal, reopens }) {
+  if (type === 'questions') return `questions ${terminal}`;
+  if (type !== 'board') return file;
+  if (reopens) return `board ${reopens}`;
+  return file ? `board ${file}` : '';
+}
+
+function surfaceIdFor(workspace, surface) {
+  const key = surfaceKey(surface);
   if (!key || isUrl(key)) return newId('s');
   return `s${createHash('sha256').update(`${workspace.id}\n${key}`).digest('hex').slice(0, 8)}`;
 }
 
 const DRAFT_ENTRIES = ['drafts', 'boards'];
+
+// A sketch's drafts folder carries its title, because its source is always board.excalidraw.
+const draftName = ({ type, file, title }) => (file && type !== 'board' ? basename(file) : title);
 
 function draftsPlace(workspace) {
   if (!isKept(workspace)) return null;
@@ -199,7 +210,7 @@ function paneTerminal(live, pane) {
 
 const paneIsOpen = (live, pane) => paneTerminal(live, pane) !== null;
 
-// `owner` is set only for a surface in its own window.
+// `owner` is set only for a surface in its own window. A sketch's drawing arrives as a seed, never as a file.
 function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
   const environment = {
     HWS_HOME: stateRoot(),
@@ -209,7 +220,7 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
     HWS_TERMINAL: terminal ?? '',
     HWS_SURFACE_TYPE: type,
     HWS_SURFACE_TITLE: title,
-    HWS_SURFACE_FILE: file,
+    HWS_SURFACE_FILE: type === 'board' ? '' : file,
     HWS_FOLDER: workspace.folder,
     COMPANION_SOCKET: socketPath(id),
     COMPANION_DATA_DIR: surfaceDataDir(workspace.id, id),
@@ -220,7 +231,82 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
 
 export function surfaceOpen(flags) {
   if (!SURFACE_TYPES.includes(flags.type)) throw new UsageError('--type must be board, note or page');
+  if (flags.artifact !== undefined && flags.type !== 'board') throw new UsageError('--artifact reopens a sketch, so use it with --type board');
   return openSurface(flags);
+}
+
+// A Done bundle keeps its drawing here, and its pinned comments and notes beside it.
+const BUNDLE_SCENE = 'board.excalidraw';
+const SEED_DIR = 'seed';
+const SEED_EXTRAS = ['comments.json', 'comments.md', 'notes.md'];
+
+function openManifestOf(artifactId) {
+  for (const manifest of listManifests({ includeStandalone: true })) {
+    const artifact = manifest.artifacts.find((item) => item.id === artifactId);
+    if (artifact) return { manifest, artifact };
+  }
+  return null;
+}
+
+// The board artifact whose bundle holds this drawing, or null.
+function boardArtifactOfFile(file) {
+  const real = realOf(file);
+  for (const manifest of listManifests({ includeStandalone: true })) {
+    const artifact = manifest.artifacts.find((item) => item.type === 'board' && item.path && realOf(join(item.path, BUNDLE_SCENE)) === real);
+    if (artifact) return { manifest, artifact };
+  }
+  return null;
+}
+
+function assertScene(file) {
+  let scene;
+  try {
+    scene = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new HwsError(`${file} is not valid JSON`);
+  }
+  if (!Array.isArray(scene?.elements)) throw new HwsError(`${file} is not an Excalidraw scene`);
+}
+
+function artifactSource({ manifest, artifact }) {
+  if (artifact.type !== 'board') throw new HwsError(`artifact ${artifact.id} is a ${artifact.type}, and only a sketch reopens on a board`);
+  if (manifest.archived) throw new HwsError(`${manifest.name} is archived, so restore it first`);
+  const file = join(artifact.path, BUNDLE_SCENE);
+  if (!existsSync(file)) throw new HwsError(`sketch ${artifact.id} has no drawing to reopen`);
+  assertScene(file);
+  return { file: realOf(file), manifest, artifact, title: artifact.title };
+}
+
+// What a board opens on: a sketch artifact, a file inside one, or a plain `.excalidraw` file. Null for a blank board.
+function boardSource(flags) {
+  if (flags.type !== 'board') return null;
+  if (flags.file !== undefined && flags.artifact !== undefined) throw new UsageError('use --file or --artifact, not both');
+  if (flags.artifact !== undefined) {
+    const found = openManifestOf(flags.artifact);
+    if (!found) throw new HwsError(`no artifact ${flags.artifact} in an open workspace`);
+    return artifactSource(found);
+  }
+  if (!flags.file) return null;
+  const file = resolve(flags.file);
+  if (extname(file).toLowerCase() !== '.excalidraw') throw new HwsError(`a sketch opens an .excalidraw file, so it cannot open ${basename(file)}`);
+  if (!existsSync(file)) throw new HwsError(`no file at ${file}`);
+  const bundled = boardArtifactOfFile(file);
+  if (bundled) return artifactSource(bundled);
+  assertScene(file);
+  return { file: realOf(file), manifest: null, artifact: null, title: basename(file, extname(file)) };
+}
+
+// Copies the drawing into the data folder, where the host loads it once. The source is only read.
+function seedBoard(dataDir, source) {
+  const seed = join(dataDir, SEED_DIR);
+  rmSync(seed, { recursive: true, force: true });
+  mkdirSync(seed, { recursive: true });
+  copyFileSync(source.file, join(seed, BUNDLE_SCENE));
+  if (!source.artifact) return;
+  for (const name of SEED_EXTRAS) {
+    const extra = join(source.artifact.path, name);
+    if (existsSync(extra)) copyFileSync(extra, join(seed, name));
+  }
 }
 
 // `prepare` writes into the data folder before the host starts. `hws ask` puts its round there.
@@ -229,12 +315,15 @@ export async function openSurface(flags, { prepare } = {}) {
   const windowed = opensInWindow(flags);
   const terminal = ownerTerminal(flags);
   if (terminal?.includes('/')) throw new HwsError(`surfaces run on this computer, and ${terminal} is on another machine`);
+  const source = boardSource(flags);
   const live = requireLive();
 
+  // A reopened sketch belongs to the workspace that holds its artifact.
   const placement = placementFor(live, terminal, flags);
-  const workspace = placement.workspace ?? ensureStandaloneManifest();
-  const file = flags.type === 'board' || flags.type === 'questions' ? '' : resolveFile(flags.file);
-  const surfaceId = surfaceIdFor(workspace, { type: flags.type, file, terminal });
+  const workspace = source?.manifest ?? placement.workspace ?? ensureStandaloneManifest();
+  const file = flags.type === 'questions' ? '' : flags.type === 'board' ? (source?.file ?? '') : resolveFile(flags.file);
+  const reopens = source?.artifact?.id;
+  const surfaceId = surfaceIdFor(workspace, { type: flags.type, file, terminal, reopens });
 
   // A file's surface shows again where it already is, whatever the flags say.
   const already = workspace.surfaces.find((surface) => surface.id === surfaceId);
@@ -247,22 +336,25 @@ export async function openSurface(flags, { prepare } = {}) {
     return { data: { ...already, workspace: workspace.id, focused: true, raised }, text: `showed ${surfaceId}` };
   }
 
-  const title = surfaceTitle(flags.title, file, flags.type);
+  const title = surfaceTitle(flags.title ?? source?.title, flags.type === 'board' ? '' : file, flags.type);
   const socket = socketPath(surfaceId);
   const dataDir = surfaceDataDir(workspace.id, surfaceId);
   mkdirSync(dataDir, { recursive: true });
 
   // Questions leave no drafts, so they get no folder in the workspace.
-  if (flags.type !== 'questions') linkDrafts(workspace, surfaceId, dataDir, file ? basename(file) : title);
+  if (flags.type !== 'questions') linkDrafts(workspace, surfaceId, dataDir, draftName({ type: flags.type, file, title }));
+
+  // A draft left from an earlier opening keeps its edits. Otherwise the board starts from the source.
+  if (source && !(already && hasDraftWork(workspace.id, surfaceId))) seedBoard(dataDir, source);
   prepare?.(dataDir);
 
   const owner = windowed ? (terminal ? windowOwnerLabel(live, terminal, placement) : '') : undefined;
   const argv = hostArgv({ workspace, id: surfaceId, type: flags.type, title, terminal, file, owner });
-  const fileField = file ? { file } : {};
+  const fileFields = { ...(file ? { file } : {}), ...(reopens ? { reopens } : {}) };
 
   if (windowed) {
     const host = runDetached(argv, workspace.folder);
-    const surface = { id: surfaceId, type: flags.type, title, terminal, pane: null, host, socket, pid: terminalInfo(host)?.pid ?? null, ...fileField };
+    const surface = { id: surfaceId, type: flags.type, title, terminal, pane: null, host, socket, pid: terminalInfo(host)?.pid ?? null, ...fileFields };
     replaceSurface(workspace.id, surface);
     return { data: { ...surface, workspace: workspace.id, hostTerminal: host }, text: `opened ${flags.type} ${surfaceId}` };
   }
@@ -273,7 +365,7 @@ export async function openSurface(flags, { prepare } = {}) {
   const pane = opened.pane ?? findTerminal(listLive() ?? { spaces: [] }, opened.terminal)?.pane ?? null;
   const pid = terminalInfo(opened.terminal)?.pid ?? null;
 
-  const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...fileField };
+  const surface = { id: surfaceId, type: flags.type, title, terminal, pane, socket, pid, ...fileFields };
   replaceSurface(workspace.id, surface);
   const data = { ...surface, workspace: workspace.id, hostTerminal: opened.terminal };
   return { data, text: `opened ${flags.type} ${surfaceId}` };
@@ -331,6 +423,7 @@ function feedbackFields(manifest, surface) {
 }
 
 // Kept bundles land under the workspace's artifacts place. The surface's record stays.
+// A reopened sketch's bundle replaces the one it reopened, and a second press replaces the first.
 export function archiveBundle({ manifest, surface }, bundle) {
   const artifactId = newId('a');
 
@@ -351,7 +444,12 @@ export function archiveBundle({ manifest, surface }, bundle) {
     ...review,
   };
   updateManifest(manifest.id, (draft) => {
+    const old = surface.reopens ? draft.artifacts.find((item) => item.id === surface.reopens) : null;
+    if (surface.reopens) artifact.supersedes = old ? old.id : null;
+    if (old) old.status = 'superseded';
     draft.artifacts.push(artifact);
+    const record = draft.surfaces.find((item) => item.id === surface.id);
+    if (record?.reopens) record.reopens = artifactId;
   });
   return artifact;
 }
@@ -596,7 +694,7 @@ function unlinkDrafts(dataDir) {
 function relinkDrafts(workspace, surface, dataDir) {
   const place = draftsPlace(workspace);
   if (!place) return;
-  const home = join(place, `${slug(surface.file ? basename(surface.file) : surface.title)}-${surface.id}`);
+  const home = join(place, `${slug(draftName(surface))}-${surface.id}`);
   for (const entry of DRAFT_ENTRIES) {
     const link = join(dataDir, entry);
     if (existsSync(link)) moveDir(link, join(home, entry));

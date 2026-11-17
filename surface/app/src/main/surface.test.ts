@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { SurfaceState } from '../shared/ipc';
 import { answersPrompt, type Question } from '../shared/questions';
-import { bundleSignature, openRequest, prepareBundle, readRound, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
+import { boardCommentsMarkdown } from '../shared/board-comments';
+import { BoardStore } from './store';
+import { boardName, bundleSignature, importSeed, openRequest, prepareBundle, readRound, SEED_DIR, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
 
 const QUESTIONS: Question[] = [
   { id: 'audience', text: 'Who reads it?', kind: 'options', options: ['Engineers', 'Managers'] },
@@ -97,6 +99,74 @@ describe('sessionCwd and openRequest', () => {
     writeFileSync(file, 'x');
     expect(sessionCwd(config({ type: 'page', file, folder: temp() }))).toBe(elsewhere);
     expect(sessionCwd(config({ type: 'page', file, folder: homedir() }))).toBe(elsewhere);
+  });
+});
+
+describe('boardName', () => {
+  it('keeps a valid title and turns other characters into spaces', () => {
+    expect(boardName('flow v2')).toBe('flow v2');
+    expect(boardName('Flow: login (v2)')).toBe('Flow login v2');
+    expect(boardName('...')).toBe('Sketch');
+    expect(boardName('current')).toBe('Sketch');
+    expect(boardName('x'.repeat(80))).toHaveLength(64);
+  });
+
+  it('names the board a sketch opens', () => {
+    expect(openRequest(config({ title: 'Flow: login' }), 'x', '/data/work')).toEqual({ sessionId: 'x', board: 'Flow login' });
+  });
+});
+
+describe('importSeed', () => {
+  const scene = JSON.stringify({ type: 'excalidraw', elements: [{ id: 'r1', type: 'rectangle' }] });
+  const pin = { id: 'p1', elementId: 'r1', x: 10, y: 20, fx: 0.5, fy: 0.5, type: 'rectangle', text: 'Bigger.', createdAt: 1 };
+
+  function seeded(files: Record<string, string>) {
+    const dataDir = temp();
+    mkdirSync(join(dataDir, SEED_DIR));
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(dataDir, SEED_DIR, name), text);
+    return { dataDir, store: new BoardStore(dataDir) };
+  }
+
+  it('loads the drawing, its pinned comments and its notes into the board, then drops the seed', () => {
+    const { dataDir, store } = seeded({ 'board.excalidraw': scene, 'comments.json': JSON.stringify({ overall: '', pins: [pin] }), 'notes.md': 'Remember the footer.' });
+    expect(importSeed(config({ title: 'flow', dataDir }), store)).toBe('flow');
+    expect(store.load('flow')).toEqual({ scene, notes: 'Remember the footer.' });
+    expect(store.listComments().flow.pins).toEqual([pin]);
+    expect(existsSync(join(dataDir, SEED_DIR))).toBe(false);
+  });
+
+  it('reads comments.md when the bundle has no comments.json', () => {
+    const md = boardCommentsMarkdown('flow', { overall: 'Tighter.', pins: [pin] });
+    const { dataDir, store } = seeded({ 'board.excalidraw': scene, 'comments.md': md });
+    importSeed(config({ title: 'Flow: v2', dataDir }), store);
+    expect(store.listComments()['Flow v2']).toEqual({ overall: 'Tighter.', pins: [{ id: 'p1', elementId: 'r1', x: 10, y: 20, type: 'rectangle', text: 'Bigger.', createdAt: 0 }] });
+  });
+
+  it('replaces what the board held before', () => {
+    const { dataDir, store } = seeded({ 'board.excalidraw': scene });
+    store.create('flow');
+    store.saveScene('flow', JSON.stringify({ elements: [{ id: 'old' }] }));
+    store.saveNotes('flow', 'old notes');
+    store.saveComments('flow', { overall: 'old', pins: [] });
+    importSeed(config({ title: 'flow', dataDir }), store);
+    expect(store.load('flow')).toEqual({ scene, notes: '' });
+    expect(store.listComments()).toEqual({});
+  });
+
+  it('does nothing without a seed or for another surface type', () => {
+    const { dataDir, store } = seeded({});
+    expect(importSeed(config({ dataDir }), store)).toBeUndefined();
+    expect(store.list()).toEqual([]);
+    const note = seeded({ 'board.excalidraw': scene });
+    expect(importSeed(config({ type: 'note', dataDir: note.dataDir }), note.store)).toBeUndefined();
+    expect(existsSync(join(note.dataDir, SEED_DIR))).toBe(true);
+  });
+
+  it('refuses a drawing that is not a scene and keeps the seed', () => {
+    const { dataDir, store } = seeded({ 'board.excalidraw': '{"nope": 1}' });
+    expect(() => importSeed(config({ dataDir }), store)).toThrow(/not an Excalidraw scene/);
+    expect(store.list()).toEqual([]);
+    expect(existsSync(join(dataDir, SEED_DIR, 'board.excalidraw'))).toBe(true);
   });
 });
 
