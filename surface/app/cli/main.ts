@@ -4,6 +4,7 @@ import { formatFeedbackGraph } from '../src/shared/feedback-graph';
 import { shortPath } from '../src/shared/sessions';
 import type { FeedbackWorkspace } from '../src/protocol';
 import { behaviorMarkdown } from '../src/shared/behavior';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -338,6 +339,32 @@ function projectPath(ctx: Ctx, root: string, file: string): string {
   const rel = path.relative(root, full);
   if (rel === '' || rel === '..' || rel.startsWith('../') || path.isAbsolute(rel)) {
     throw new UsageError(`${file} is outside the session's project, ${root}`);
+  }
+  return rel;
+}
+
+/** The nearest existing folder's real path, with the missing rest appended, so a new file resolves too. */
+function realPathOf(full: string): string {
+  const rest: string[] = [];
+  let at = full;
+  while (!existsSync(at) && path.dirname(at) !== at) {
+    rest.unshift(path.basename(at));
+    at = path.dirname(at);
+  }
+  return path.join(realpathSync(at), ...rest);
+}
+
+/**
+ * An absolute path becomes relative to the session's folder, which a surface's stand-in session
+ * may not share with the shell. A relative path is already project-relative and passes as it is.
+ */
+async function sessionRelative(ctx: Ctx, raw: string, verb: string): Promise<string> {
+  if (!path.isAbsolute(raw)) return raw;
+  const session = requireSession(ctx, verb);
+  const { cwd } = await callJson<SessionInfo>(ctx.socket, 'GET', `/sessions/${encodeURIComponent(session)}`);
+  const rel = path.relative(realPathOf(cwd), realPathOf(raw));
+  if (rel === '' || rel === '..' || rel.startsWith('../') || path.isAbsolute(rel)) {
+    throw new UsageError(`${raw} is outside the session's project, ${cwd}`);
   }
   return rel;
 }
@@ -767,7 +794,8 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     const [verb, html] = ctx.positional;
     if (!['show', 'update', 'export'].includes(verb) || !html) throw new UsageError('behavior needs show|update|export and a project-relative HTML path');
     const session = requireSession(ctx, 'behavior');
-    const route = `/sessions/${encodeURIComponent(session)}/behavior?path=${encodeURIComponent(html)}`;
+    const file = await sessionRelative(ctx, html, 'behavior');
+    const route = `/sessions/${encodeURIComponent(session)}/behavior?path=${encodeURIComponent(file)}`;
     const doc = await callJson<BehaviorDocument>(ctx.socket, verb === 'update' ? 'PUT' : 'GET', route, verb === 'update' ? await readInput(ctx) : undefined);
     if (verb === 'export') {
       const markdown = behaviorMarkdown(doc) + '\n';
@@ -792,7 +820,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
     const run = verb ? FEEDBACK_VERBS[verb] : undefined;
     if (!run) throw new UsageError(`feedback takes list, graph, ${Object.keys(FEEDBACK_VERBS).join(', ')}. Run "agent-brief feedback --help".`);
     if (!output) throw new UsageError(`feedback ${verb} needs a project-relative output path`);
-    await run(ctx, output, words);
+    await run(ctx, await sessionRelative(ctx, output, 'feedback'), words);
   },
 
   async outline(ctx) {
@@ -802,6 +830,7 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
       flag: (name) => str(ctx.args, name),
       has: (name) => ctx.args.flags.has(name),
       session: sessionOf(ctx),
+      relative: (raw) => sessionRelative(ctx, raw, 'outline'),
       cwd: cwdOf(ctx),
       stdin: ctx.io.stdin,
       out: ctx.out,

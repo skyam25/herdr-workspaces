@@ -365,6 +365,8 @@ export function OutlineEditor(props: {
   /** The file's title changed, so the list row follows it. */
   onRetitle: (title: string) => void;
   onCopyReference: () => void;
+  /** A surface's Pop out and workspace chip. The outline's own buttons send, so it has no Done. */
+  footer?: ReactNode;
 }) {
   const sessionId = props.draft.sessionId;
   const path = props.draft.outline!.path;
@@ -1090,6 +1092,7 @@ export function OutlineEditor(props: {
           </div>
         </aside>
       </div>
+      {props.footer && <footer data-testid="outline-footer">{props.footer}</footer>}
     </section>
   );
 

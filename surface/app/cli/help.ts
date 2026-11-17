@@ -18,7 +18,7 @@ Options:
 export const DOCS: Record<string, Doc> = {
   behavior: {
     usage: 'agent-brief behavior show|update|export <prototype.html> [--session <id>] [--file <patch.json>] [--out <acceptance.md>] [--json]',
-    about: 'Reads or updates behavior rules beside a prototype. Update reads a version-checked patch from stdin or --file. Export prints acceptance criteria and open assumptions. Requires the app and a registered session.',
+    about: 'Reads or updates behavior rules beside a prototype. Update reads a version-checked patch from stdin or --file. Export prints acceptance criteria and open assumptions. Requires the app and a registered session. An absolute path is taken relative to the session\'s folder.',
     example: 'agent-brief behavior show prototypes/onboarding.html --json',
   },
   feedback: {
@@ -45,7 +45,7 @@ A catalog file is a JSON list. Each point is a new item, or "same" joins an item
    {"same": 6, "src": ["Maya · 00:14 · \\"Still no filters\\""], "change": "the revised change"}]
 A src without a round number is in the catalog's round.`,
     about:
-      'Keeps feedback items beside an output in <output>.feedback.md. Every write only adds: a round, an item, a line, or a closed checkbox. Dates are added for you. Claude writes Claude lines; You lines come from the panel. Requires the app and a registered session.',
+      'Keeps feedback items beside an output in <output>.feedback.md. Every write only adds: a round, an item, a line, or a closed checkbox. Dates are added for you. Claude writes Claude lines; You lines come from the panel. Requires the app and a registered session. An absolute path is taken relative to the session\'s folder.',
     example: `agent-brief feedback catalog prototype/checkout.html --label customers --source transcripts/cust-1.md --date 2026-10-12 --items round-1.json\nagent-brief feedback add prototype/checkout.html --title "Hard to find the filters" --src '1 · Ana · 03:02 · "Where do I filter?"' --where '#filters'\nagent-brief feedback change prototype/checkout.html 6 "Put the filters in a sticky bar"\nagent-brief feedback done prototype/checkout.html 6 --commit 3f2a91c`,
   },
   outline: {
@@ -59,7 +59,7 @@ A src without a round number is in the catalog's round.`,
 A new outline's path is --path, else the target's with .outline.md for its extension, else the title as a slug.
 Ops target ids (s1, p3, S2). apply reads the version first and retries once when the file changed under it.`,
     about:
-      'Shapes a document or page as an outline in <name>.outline.md before it is written. Changes go through id-targeted ops the app checks against the file version, and the Write view reloads live. Requires the app and a registered session.',
+      'Shapes a document or page as an outline in <name>.outline.md before it is written. Changes go through id-targeted ops the app checks against the file version, and the Write view reloads live. Requires the app and a registered session. An absolute path is taken relative to the session\'s folder.',
     example: `agent-brief outline new "Onboarding memo" --target docs/memo.md\nagent-brief outline show docs/memo.outline.md\nagent-brief outline apply docs/memo.outline.md --ops .feedback/outline-ops.json`,
   },
   status: {

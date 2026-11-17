@@ -326,6 +326,7 @@ export function WriteView(props: {
           onError={props.onError}
           onRetitle={(title) => book.retitle(selected.id, title)}
           onCopyReference={() => props.onCopyReference(selected)}
+          footer={props.surface ? props.placeBar : undefined}
         />
       ) : selected ? (
         <DraftEditor

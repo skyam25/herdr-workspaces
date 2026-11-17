@@ -62,16 +62,20 @@ export function surfaceFromEnv(env: NodeJS.ProcessEnv): SurfaceConfig | undefine
 
 const inside = (root: string, target: string) => target === root || target.startsWith(root + sep);
 
+/** True when a path under the folder passes through a dot folder, which feedback, behavior and outline stores refuse. */
+const throughDotFolder = (folder: string, file: string) => relative(folder, file).split(sep).some((part) => part.startsWith('.'));
+
 /**
  * The stand-in session's folder. The app only opens files inside its session's folder, and writes
- * the bundle there. A file under the workspace keeps its workspace-relative path in the prompt.
+ * the bundle there. A file under the workspace keeps its workspace-relative path in the prompt,
+ * unless that path crosses a dot folder such as `.herdr-workspace`.
  */
 export function sessionCwd(cfg: SurfaceConfig): string {
   const work = join(cfg.dataDir, 'work');
   if (!cfg.file || isLocalUrl(cfg.file) || !isAbsolute(cfg.file)) return work;
   const file = existsSync(cfg.file) ? realpathSync(cfg.file) : cfg.file;
   const folder = existsSync(cfg.folder) ? realpathSync(cfg.folder) : cfg.folder;
-  return inside(folder, file) && folder !== homedir() ? folder : dirname(file);
+  return inside(folder, file) && folder !== homedir() && !throughDotFolder(folder, file) ? folder : dirname(file);
 }
 
 /** The `POST /open` body that shows this surface. */

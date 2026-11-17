@@ -15,6 +15,8 @@ export interface OutlineCtx {
   has: (name: string) => boolean;
   /** --session, else the Claude Code session running the command. */
   session?: string;
+  /** Makes an absolute path relative to the session's folder. */
+  relative?: (raw: string) => Promise<string>;
   cwd: string;
   stdin: () => Promise<string>;
   out: (s: string) => void;
@@ -65,6 +67,8 @@ function outlinePath(raw: string | undefined, verb: string): string {
   return raw;
 }
 
+const projectRelative = (ctx: OutlineCtx, raw: string) => (ctx.relative ? ctx.relative(raw) : Promise.resolve(raw));
+
 /** Validates ops before any call, so a bad file exits 2 and changes nothing. */
 function cleanOps(raw: unknown): OutlineOp[] {
   try {
@@ -103,12 +107,13 @@ export const OUTLINE_VERBS: Record<string, Verb> = {
   async new(ctx, words) {
     const title = words.join(' ').trim();
     if (!title) throw new InputError('outline new needs a title');
-    const target = ctx.flag('target');
+    const rawTarget = ctx.flag('target');
+    const target = rawTarget === undefined ? undefined : await projectRelative(ctx, rawTarget);
     const kind = ctx.flag('kind');
     if (kind !== undefined && kind !== 'document' && kind !== 'page') throw new InputError(`--kind is document or page, got "${kind}"`);
     const ops = cleanOps([{ op: 'setMeta', title, ...(target ? { target } : {}), ...(kind ? { kind: kind as OutlineKind } : {}) }]);
     const raw = ctx.flag('path');
-    const file = raw !== undefined ? outlinePath(raw, 'new') : target ? outlinePathFor(target) : outlineSlugPath(title);
+    const file = raw !== undefined ? outlinePath(await projectRelative(ctx, raw), 'new') : target ? outlinePathFor(target) : outlineSlugPath(title);
 
     let res: OutlineUpdateResult;
     try {
@@ -136,11 +141,11 @@ export const OUTLINE_VERBS: Record<string, Verb> = {
   },
 
   async show(ctx, [raw]) {
-    show(ctx, await readDoc(ctx, outlinePath(raw, 'show')), formatOutline);
+    show(ctx, await readDoc(ctx, await projectRelative(ctx, outlinePath(raw, 'show'))), formatOutline);
   },
 
   async apply(ctx, [raw]) {
-    const file = outlinePath(raw, 'apply');
+    const file = await projectRelative(ctx, outlinePath(raw, 'apply'));
     const ops = await readOps(ctx);
     const res = await write(ctx, file, ops);
     show(ctx, res, (r) => appliedLine(ops.length, r.added));

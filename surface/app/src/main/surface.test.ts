@@ -69,6 +69,15 @@ describe('sessionCwd and openRequest', () => {
     expect(openRequest(cfg, 'x', sessionCwd(cfg))).toEqual({ sessionId: 'x', output: { path: 'docs/a.md' } });
   });
 
+  it('uses the file folder for a file under a dot folder of the workspace', () => {
+    const folder = temp();
+    const artifacts = join(folder, '.herdr-workspace/w-1/artifacts');
+    mkdirSync(artifacts, { recursive: true });
+    const file = join(artifacts, 'proto.html');
+    writeFileSync(file, 'x');
+    expect(sessionCwd(config({ type: 'page', file, folder }))).toBe(artifacts);
+  });
+
   it('uses the file folder for a file outside the workspace or under a home-folder default', () => {
     const elsewhere = temp();
     const file = join(elsewhere, 'a.html');
