@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 
 import { artifactAdd, artifactList, artifactMove, artifactScan, artifactSet, artifactTerminal, artifactTrash, link, review } from './commands/artifact.js';
 import { agentAdd, agentsList } from './commands/agents.js';
+import { ask } from './commands/ask.js';
 import { archive, unarchive } from './commands/archive.js';
 import { doctor } from './commands/doctor.js';
 import { update } from './commands/update.js';
@@ -107,6 +108,7 @@ const ROUTES = [
   { path: ['artifact', 'scan'], run: artifactScan, options: { workspace: text } },
   { path: ['link'], run: link, options: {}, positionals: 1 },
   { path: ['review'], run: review, options: { title: text, terminal: text, window: flag }, positionals: 1 },
+  { path: ['ask'], run: ask, options: { title: text, file: text, terminal: text, window: flag } },
   { path: ['todo', 'list'], run: todoList, options: { archived: flag, reports: flag, space: text } },
   {
     path: ['todo', 'add'],

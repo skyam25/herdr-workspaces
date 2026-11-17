@@ -30,6 +30,7 @@ import type {
 import type { Region } from '../server/contract';
 import type { StrokeEvent } from '../voice/types';
 import type { Decision, ItemsDoc } from './items';
+import type { Answers, Question } from './questions';
 
 export type { Decision } from './items';
 
@@ -305,7 +306,7 @@ export interface InitInfo {
   surface?: SurfaceState;
 }
 
-export type SurfaceType = 'board' | 'note' | 'page';
+export type SurfaceType = 'board' | 'note' | 'page' | 'questions';
 export type SurfaceAction = 'terminal' | 'link' | 'owner' | 'pop';
 
 /** What the surface's Done area shows. */
@@ -330,6 +331,9 @@ export interface SurfaceState {
   /** The last delivery `hws` took. The renderer then clears what that Send handed over. */
   sent?: string;
   notice?: { text: string; error?: boolean };
+  /** A questions surface's round, and the answers held for it. */
+  questions?: Question[];
+  answers?: Answers;
 }
 
 export type BoardEntry = BoardsResponse['boards'][number];
@@ -545,6 +549,8 @@ export interface CompanionApi extends BoardHost {
   surfaceTargets(): Promise<SurfaceTargets>;
   /** Saves pending work and moves this surface to a workspace, or to `standalone` to unfile it. */
   surfaceMove(workspace: string): Promise<void>;
+  /** Holds a questions surface's answers, so they outlive the host. */
+  surfaceAnswer(answers: Answers): Promise<void>;
   onSurface(fn: (state: SurfaceState) => void): Subscription;
   onSurfaceDoneKey(fn: () => void): Subscription;
   listBoardComments(): Promise<Record<string, BoardComments>>;
@@ -751,6 +757,7 @@ export const CH = {
   surfaceRepeat: 'surface:repeat',
   surfaceTargets: 'surface:targets',
   surfaceMove: 'surface:move',
+  surfaceAnswer: 'surface:answer',
   init: 'app:init',
   listBoards: 'boards:list',
   loadBoard: 'boards:load',
@@ -886,6 +893,7 @@ export const IPC_INVOKE = {
   surfaceRepeat: CH.surfaceRepeat,
   surfaceTargets: CH.surfaceTargets,
   surfaceMove: CH.surfaceMove,
+  surfaceAnswer: CH.surfaceAnswer,
   ipadSheetOpen: CH.ipadSheetOpen,
   ipadNewCode: CH.ipadNewCode,
   ipadSheetClose: CH.ipadSheetClose,

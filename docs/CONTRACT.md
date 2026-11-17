@@ -9,7 +9,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Workspace | One or more separate Herdr spaces with one manifest. Its spaces share instructions, a Board, Outputs and surfaces. Kinds are `general`, `app`, `deliverable`, `throwaway` |
 | Kept kind | `general`, `app` or `deliverable`. A setting inside the workspace that tells agents what kind of work it is |
 | Normal terminal | A plain Herdr tab. No manifest |
-| Surface | A board, note or page, shown in a Herdr pane through Pixel or in its own window. Pop out and Pop in move it between the two |
+| Surface | A board, note, page or round of questions, shown in a Herdr pane through Pixel or in its own window. Pop out and Pop in move it between the two |
 | Glued surface | A surface opened by a terminal. Done returns to that terminal |
 | Standalone surface | A surface with no terminal. Offers Open terminal and Copy link, and its note source line and page comment line name those two buttons in place of Done |
 | Artifact | What a surface leaves behind after Done |
@@ -124,12 +124,12 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `agents[].role` | The terminal's role when the session registered. `tidy` keeps the session out of freshness |
 | `agents[].folder` | Where the session started, so `claude --resume` works there. Null when unknown, and the transcript is then looked up under the workspace folder |
 | `agents[].transcript` | The transcript's absolute path, when it is not where `folder` puts it. Absent otherwise |
-| `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. `feedback` on the Done bundle of any other page that shows a file. Freshness and `hws artifact scan` leave both out, and the panel lists neither as an artifact of its own. Absent on other artifacts |
+| `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. `feedback` on the Done bundle of any other page that shows a file. `answers` on the Done bundle of a round from `hws ask`. Freshness and `hws artifact scan` leave all three out, and the panel lists none as an artifact of its own. Absent on other artifacts |
 | `artifacts[].file` | On a `feedback` round, the absolute path of the file the page showed. Absent otherwise |
 | `artifacts[].reviewOf` | On a `feedback` round, the id of the `file` artifact that tracked that file at Done, or null when none did. Absent otherwise |
 | `artifacts[].status` | `draft`, `current` or `superseded`. Done writes `current`. A record without it reads as `current` |
 | `artifacts[].supersedes` | The id of the artifact this one replaces, or null. Absent reads as null |
-| `artifacts[].type` | `board`, `note` or `page` from Done, `file` or `link` from `hws artifact add` |
+| `artifacts[].type` | `board`, `note`, `page` or `questions` from Done, `file` or `link` from `hws artifact add` |
 | `artifacts[].inPlace` | True on a file registered with `--in-place`, which `hws` never moves. Absent otherwise |
 | `artifacts[].url` | The address of a `link` artifact. Absent otherwise |
 
@@ -209,6 +209,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws outline new TITLE... [--target P] [--path X.outline.md] [--kind document\|page] [--terminal T]` | Writes a new outline file and prints its path on the first line. Needs no surface. See [Outlines](#outlines) |
 | `hws surface open --type board\|note\|page [--title X] [--file F] [--terminal T [--beside-pane P --space S] \| --standalone] [--in-pane \| --window]` | Starts the host and records the surface. The title is `--title` on one line, else the file name, else the type. A board or note opens in its own window and a page splits a pane beside T. `--window` and `--in-pane` choose the place, and both together exit 2. For an agent flipped to Chat, `hws` reads the chat pane from T's `herdr.chat` label and finds the space as `hws todo` does, then from the tab T was recorded in. `--beside-pane` and `--space` name the pane P and space S outright, and fail unless T's `herdr.chat` label equals P. One file is one surface per workspace. A file already open in a pane gets the focus, and one already open in a window is raised, whatever the flags say. The result then has `focused: true`, and `raised` for a window. A file whose window is closed starts again on the same data in the place the flags or the default give |
 | `hws review FILE\|ARTIFACT [--title X] [--terminal T] [--window]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T --in-pane` does. `--window` opens it in its own window. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does, except an `.outline.md` or `.feedback.md` file, which is never tracked. An `.outline.md` file opens in Write's outline view. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane or window with no agent attached. Never opens standalone |
+| `hws ask [--title X] [--file Q.json] [--terminal T] [--window]` | Opens a round of questions beside T, default `$HC_TERMINAL_ID`, in a pane like `hws review`, or in its own window with `--window`. Reads the round from `--file`, else from stdin. The title defaults to `Questions`. A bad round exits 2 and names the field. Prints the surface with `asked` and `kept`, and text that tells the agent to end the turn. See [Questions](#questions). Never opens standalone |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
 | `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open}]`. Leaves out closed windows with no work |
 | `hws surface resume --id S` | Brings an open window forward, or starts a closed one again on the same id, data and file |
@@ -267,6 +268,29 @@ A page that shows a file is a round of feedback on that file. Tidy reviews are t
 | Prompt | Before a live terminal gets it, `prompt.md` gains a last line. It asks the agent to run `hws review <file>` after changing the page. An `.outline.md` round gains none, because the outline view reloads as the agent changes the file |
 | Freshness, scan, session start | Leave rounds out, because a round is a message and not work that landed |
 | Panel | Lists a round under the artifact it reviews. See [Workspace panel](#workspace-panel-hws-panel) |
+
+### Questions
+
+`hws ask` opens a `questions` surface. It records no `file`, and `hws surface open` refuses the type.
+
+| Item | Behaviour |
+|---|---|
+| Round | `[{id, text, kind, options?}]`, or `{questions: [...]}`, with 1 to 8 questions. `id` is unique and `text` is the question. `kind` is `options` (buttons), `select` (a dropdown) or `text` (a free answer). `options` lists 2 to 4 distinct choices for `options` and 2 to 6 for `select`, and a `text` question takes none. Strings are trimmed |
+| Other | Each `options` and `select` question ends with Other…, which opens a field for the person's own words |
+| Data folder | `hws` writes `questions.json` as `{questions}` and an empty `answers.json` before the host starts. The host rewrites `answers.json` as `{answers: {<id>: {answer, other?}}}` on each change |
+| One per terminal | A terminal's rounds share one surface id per workspace. A new round ends the open one, keeps its answered questions that the new round does not ask again, and puts them first |
+| Done | Refused with `Answer a question first, then press Done.` until one question has an answer. Then delivers the prompt below and closes the pane, as other surfaces do |
+| Record | `type: questions`, `role: answers`, titled as the surface |
+| Draft | A closed window with an answer stays a draft. One with none goes at the next prune |
+
+The prompt has one line per question, in the round's order. A typed answer to a choice question ends with `(their own words)`. Lines after the first of a multi-line answer are indented by two spaces.
+
+```text
+Answers to your questions:
+- Who reads it?: Engineers
+- Which format?: A one-pager (their own words)
+- When is it due?: (no answer)
+```
 
 ### Clearing what was delivered
 
@@ -562,7 +586,7 @@ Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live.
 | `HWS_WORKSPACE_ID` | Space id, or `standalone` |
 | `HWS_WORKSPACE_NAME` | Workspace name, empty when standalone |
 | `HWS_TERMINAL` | Owning terminal, empty when standalone |
-| `HWS_SURFACE_TYPE` | `board`, `note` or `page` |
+| `HWS_SURFACE_TYPE` | `board`, `note`, `page` or `questions` |
 | `HWS_SURFACE_TITLE` | Title. `run.sh` sets it as the terminal title, which the pane header shows |
 | `HWS_SURFACE_FILE` | File for a page or note, else empty |
 | `HWS_FOLDER` | Workspace folder, else `$HOME` |
@@ -647,7 +671,7 @@ Herdr resends a pane's whole image for each change to the page, so a surface in 
 
 `hws surface open` shows a board or a note in an ordinary window that other windows can cover, and a page too with `--window`. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The window draws the page directly, with no Pixel stream. The surface record has `pane: null`, `host`, that terminal's address, and `file` when the surface shows one.
 
-Closing the window quits the host. A closed window with a drawing, comments or a note stays in the manifest as a draft, with its data folder. Prune drops a closed window with no work. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host and moves drafts to the Trash.
+Closing the window quits the host. A closed window with a drawing, comments, a note or an answer stays in the manifest as a draft, with its data folder. Prune drops a closed window with no work. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host and moves drafts to the Trash.
 
 A running host raises its window on `POST /open`. The Window menu's Keep on Top floats it on request.
 

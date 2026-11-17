@@ -1,5 +1,5 @@
 /**
- * A surface: one board, note or page in a Herdr pane or in its own window.
+ * A surface: one board, note, page or round of questions in a Herdr pane or in its own window.
  *
  * The host stands in for the Claude plugin. It registers a session over the app's own socket,
  * opens the surface bound to that session, and long-polls for what Send delivers. Each delivery
@@ -15,6 +15,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node
 import type { DeliveriesResponse, Delivery, OpenRequest } from '../protocol';
 import type { SurfaceAction, SurfaceState, SurfaceTargets, SurfaceType } from '../shared/ipc';
 import { isLocalUrl } from '../shared/outputs';
+import { ANSWERS_FILE, QUESTIONS_FILE, readAnswers, readQuestions, type Answers } from '../shared/questions';
 import { portablePrompt } from '../shared/sessions';
 import type { HandedDraft } from './sender';
 
@@ -40,7 +41,8 @@ export interface SurfaceConfig {
 /** The surface this process hosts, or undefined when it runs as the plain app. */
 export function surfaceFromEnv(env: NodeJS.ProcessEnv): SurfaceConfig | undefined {
   if (!env.HWS_SURFACE_ID) return undefined;
-  const type: SurfaceType = env.HWS_SURFACE_TYPE === 'note' || env.HWS_SURFACE_TYPE === 'page' ? env.HWS_SURFACE_TYPE : 'board';
+  const named = env.HWS_SURFACE_TYPE;
+  const type: SurfaceType = named === 'note' || named === 'page' || named === 'questions' ? named : 'board';
   const folder = env.HWS_FOLDER || homedir();
   const raw = env.HWS_SURFACE_FILE ?? '';
   const file = !raw || isLocalUrl(raw) ? raw : resolve(folder, raw);
@@ -87,6 +89,9 @@ export function openRequest(cfg: SurfaceConfig, sessionId: string, cwd: string):
   }
   if (cfg.type === 'note') return { sessionId, mode: 'write' };
   if (cfg.type === 'page') return { sessionId, prompt: 'This page has no file to show.' };
+
+  // The questions view covers the board, which still opens because the session needs one.
+  if (cfg.type === 'questions') return { sessionId };
   return { sessionId, board: cfg.title };
 }
 
@@ -142,6 +147,30 @@ export interface SurfaceDeps {
   flush?: () => Promise<unknown>;
 }
 
+function readJsonFile(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The round `hws ask` wrote to the data folder, with the answers held so far. */
+export function readRound(dataDir: string): Pick<SurfaceState, 'questions' | 'answers'> {
+  return {
+    questions: readQuestions(readJsonFile(join(dataDir, QUESTIONS_FILE))),
+    answers: readAnswers(readJsonFile(join(dataDir, ANSWERS_FILE))),
+  };
+}
+
+/** Writes the answers whole, so a hangup mid-write never leaves half a file. */
+export function writeAnswers(dataDir: string, answers: Answers): void {
+  const path = join(dataDir, ANSWERS_FILE);
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify({ answers }, null, 2)}\n`);
+  renameSync(temp, path);
+}
+
 /** Names the draft `hws` is being handed. `hws` closes the pane on success, which ends this process before it can settle. */
 const handedFile = (dataDir: string) => join(dataDir, 'handed-off.json');
 
@@ -175,6 +204,7 @@ export class SurfaceHost {
       shown: cfg.shown,
       ...(cfg.web ? { web: true } : {}),
       ...(cfg.workspace ? { workspace: cfg.workspace } : {}),
+      ...(cfg.type === 'questions' ? readRound(cfg.dataDir) : {}),
     };
   }
 
@@ -251,6 +281,13 @@ export class SurfaceHost {
     } catch (err) {
       this.update({ busy: false, notice: { text: `Could not move: ${(err as Error).message}`, error: true } });
     }
+  }
+
+  /** Holds the answers on disk. The renderer keeps its own copy, so nothing is pushed back. */
+  answer(answers: Answers): void {
+    if (this.cfg.type !== 'questions') return;
+    writeAnswers(this.cfg.dataDir, answers);
+    this.state = { ...this.state, answers };
   }
 
   /** The workspaces this surface can move to. */

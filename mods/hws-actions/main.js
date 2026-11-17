@@ -10,7 +10,7 @@ import { hws, submitDialog, problemLine } from "./hws.js";
 import { openBoard } from "./board.js";
 
 const BOARD_LIST = "hws-pane.boards";
-const KINDS = { board: { name: "sketch", icon: "sketch" }, note: { name: "note", icon: "write" }, page: { name: "page", icon: "review" } };
+const KINDS = { board: { name: "sketch", icon: "sketch" }, note: { name: "note", icon: "write" }, page: { name: "page", icon: "review" }, questions: { name: "questions", icon: "review" } };
 
 const dropFromList = (id) => setShared(BOARD_LIST, (shared(BOARD_LIST) ?? []).filter((b) => b.id !== id));
 

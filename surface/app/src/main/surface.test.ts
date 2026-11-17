@@ -4,7 +4,13 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { SurfaceState } from '../shared/ipc';
-import { bundleSignature, openRequest, prepareBundle, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
+import { answersPrompt, type Question } from '../shared/questions';
+import { bundleSignature, openRequest, prepareBundle, readRound, sessionCwd, SurfaceHost, surfaceFromEnv, type SurfaceConfig } from './surface';
+
+const QUESTIONS: Question[] = [
+  { id: 'audience', text: 'Who reads it?', kind: 'options', options: ['Engineers', 'Managers'] },
+  { id: 'deadline', text: 'When is it due?', kind: 'text' },
+];
 
 const temp = () => realpathSync(mkdtempSync(join(tmpdir(), 'surface-')));
 
@@ -57,6 +63,13 @@ describe('sessionCwd and openRequest', () => {
 
   it('opens a note with no file as a new note', () => {
     expect(openRequest(config({ type: 'note' }), 'x', '/data/work')).toEqual({ sessionId: 'x', mode: 'write' });
+  });
+
+  it('opens questions on the session alone, in the data folder', () => {
+    const cfg = surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_TYPE: 'questions', COMPANION_DATA_DIR: '/data' })!;
+    expect(cfg.type).toBe('questions');
+    expect(sessionCwd(cfg)).toBe('/data/work');
+    expect(openRequest(cfg, 'x', '/data/work')).toEqual({ sessionId: 'x' });
   });
 
   it('keeps a file under the workspace relative to the workspace', () => {
@@ -119,7 +132,7 @@ describe('SurfaceHost', () => {
   const HANDED = { draftId: 'd1', draftRevision: 5 };
 
   /** A companion socket that hands out one delivery, and an `hws` that answers with `reply` or fails without one. */
-  async function harness(reply: object | undefined, over: Partial<SurfaceConfig> = {}) {
+  async function harness(reply: object | undefined, over: Partial<SurfaceConfig> = {}, draft = 'Read review.md') {
     const root = temp();
     const dataDir = join(root, 'data');
     const bundle = join(root, 'delivery');
@@ -127,11 +140,12 @@ describe('SurfaceHost', () => {
     mkdirSync(bundle);
     writeFileSync(join(bundle, 'review.md'), 'Move the header.');
     const seen = join(root, 'marker-seen');
+    const sentPrompt = join(root, 'sent-prompt.md');
     const hws = join(root, 'hws');
-    writeFileSync(hws, `#!/bin/sh\ntest -f '${join(dataDir, 'handed-off.json')}' && touch '${seen}'\n${reply ? `echo '${JSON.stringify(reply)}'` : 'echo no >&2; exit 1'}\n`, { mode: 0o755 });
+    writeFileSync(hws, `#!/bin/sh\ntest -f '${join(dataDir, 'handed-off.json')}' && touch '${seen}'\ncp "$6/prompt.md" '${sentPrompt}' 2>/dev/null\n${reply ? `echo '${JSON.stringify(reply)}'` : 'echo no >&2; exit 1'}\n`, { mode: 0o755 });
 
     const requests: string[] = [];
-    let pending = [{ id: 'dl1', dir: bundle, draft: 'Read review.md' }];
+    let pending = [{ id: 'dl1', dir: bundle, draft }];
     const server = createServer((req, res) => {
       requests.push(`${req.method} ${req.url?.split('?')[0]}`);
       req.resume();
@@ -156,7 +170,7 @@ describe('SurfaceHost', () => {
       server.close();
     };
     const until = (test: () => boolean) => vi.waitFor(() => expect(test()).toBe(true), { timeout: 5000 });
-    return { host, dataDir, seen, states, settle, requests, stop, until };
+    return { host, dataDir, seen, sentPrompt, states, settle, requests, stop, until };
   }
 
   it('settles the handed draft once hws delivers, and marks it while hws runs', async () => {
@@ -209,6 +223,15 @@ describe('SurfaceHost', () => {
     expect(await h.host.repeat()).toBe(true);
     h.stop();
     expect(h.states.at(-1)?.notice?.text).toBe('Copied the link.');
+  });
+
+  it('hands hws the answers prompt as the bundle prompt', async () => {
+    const text = answersPrompt(QUESTIONS, { audience: { answer: 'Engineers' } })!;
+    const h = await harness({ standalone: false, artifact: 'a1', delivered: true }, { type: 'questions' }, text);
+    h.host.start();
+    await h.until(() => h.states.some((state) => state.delivered));
+    h.stop();
+    expect(readFileSync(h.sentPrompt, 'utf8')).toBe('Answers to your questions:\n- Who reads it?: Engineers\n- When is it due?: (no answer)');
   });
 });
 
@@ -295,4 +318,29 @@ describe('SurfaceHost pop', () => {
     await h.settled();
     expect(h.states.at(-1)?.notice).toEqual({ text: 'Could not move: no open pane', error: true });
   });
+});
+
+describe('SurfaceHost questions', () => {
+  const ROUND = { questions: QUESTIONS };
+
+  it('shows the round with the answers held, and writes answers whole', () => {
+    const dataDir = join(temp(), 'data');
+    mkdirSync(dataDir);
+    writeFileSync(join(dataDir, 'questions.json'), JSON.stringify(ROUND));
+    writeFileSync(join(dataDir, 'answers.json'), JSON.stringify({ answers: { audience: { answer: 'Engineers' } } }));
+    const host = new SurfaceHost(config({ type: 'questions', dataDir }), { socket: join(dataDir, 'sock'), push: vi.fn(), copy: vi.fn() });
+
+    expect(host.info()).toMatchObject({ type: 'questions', questions: ROUND.questions, answers: { audience: { answer: 'Engineers' } } });
+    host.answer({ deadline: { answer: 'Friday' } });
+    expect(JSON.parse(readFileSync(join(dataDir, 'answers.json'), 'utf8'))).toEqual({ answers: { deadline: { answer: 'Friday' } } });
+    expect(readRound(dataDir).answers).toEqual({ deadline: { answer: 'Friday' } });
+  });
+
+  it('reads a missing round as empty and writes no answers for another type', () => {
+    const dataDir = temp();
+    expect(new SurfaceHost(config({ type: 'questions', dataDir }), { socket: join(dataDir, 'sock'), push: vi.fn(), copy: vi.fn() }).info()).toMatchObject({ questions: [], answers: {} });
+    new SurfaceHost(config({ dataDir }), { socket: join(dataDir, 'sock'), push: vi.fn(), copy: vi.fn() }).answer({ a: { answer: 'x' } });
+    expect(existsSync(join(dataDir, 'answers.json'))).toBe(false);
+  });
+
 });

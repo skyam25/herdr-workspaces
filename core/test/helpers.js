@@ -78,13 +78,13 @@ export function sandbox(t) {
         .filter((call) => !['ls', 'status'].includes(call.args[0]) && !(call.bin === 'hc' && call.args[0] === 'get'))
         .map((call) => [call.bin, ...call.args]),
 
-    hws(args, env = {}) {
-      const result = spawnSync(HWS, args, { env: { ...environment, ...env }, encoding: 'utf8' });
+    hws(args, env = {}, input = '') {
+      const result = spawnSync(HWS, args, { env: { ...environment, ...env }, encoding: 'utf8', input });
       return { code: result.status, stdout: result.stdout, stderr: result.stderr };
     },
 
-    json(args, env = {}) {
-      const result = box.hws([...args, '--json'], env);
+    json(args, env = {}, input = '') {
+      const result = box.hws([...args, '--json'], env, input);
       if (result.code !== 0) throw new Error(`hws ${args.join(' ')} exited ${result.code}: ${result.stdout}${result.stderr}`);
       return JSON.parse(result.stdout);
     },

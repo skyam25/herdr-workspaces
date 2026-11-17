@@ -35,8 +35,8 @@ let resuming = false;
 const hws = (args) => exec(`${home()}/.local/bin/hws`, [...args, "--json"]);
 const boardsOf = (terminal) => (shared(BOARDS) ?? []).filter((b) => b.terminal === terminal);
 
-// A window shows a board, a note or a page. A person reads a board as a sketch.
-const kindOf = (type) => (type === "note" || type === "page" ? type : "sketch");
+// A window shows a board, a note, a page or questions. A person reads a board as a sketch.
+const kindOf = (type) => (["note", "page", "questions"].includes(type) ? type : "sketch");
 const capital = (word) => word.charAt(0).toUpperCase() + word.slice(1);
 
 // One header copy reads the list, and shared state carries it to the others.
