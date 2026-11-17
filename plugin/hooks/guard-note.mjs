@@ -1,30 +1,14 @@
-import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
+import { hws, parse } from "./hws.mjs";
 import { readStdin } from "./stdin.mjs";
-
-const HWS_MS = 2000;
 
 const REASON = [
   "This file is the workspace's current note, and only a tidy pass may rewrite it, because the pass records what the note covers.",
   "Load the herdr-workspaces:tidy skill and run `hws tidy start --here` to start one in this session.",
   "To add a single dated decision line, use Edit instead.",
 ].join(" ");
-
-function hws(args) {
-  return new Promise((resolve) => {
-    execFile("hws", args, { timeout: HWS_MS, killSignal: "SIGKILL" }, (error, stdout) => resolve(error ? null : stdout.trim()));
-  });
-}
-
-function parse(text) {
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return null;
-  }
-}
 
 // The note may not exist yet, so only its folder can be resolved.
 function canonical(path) {

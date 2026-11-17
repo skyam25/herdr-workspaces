@@ -1,7 +1,8 @@
 // The "..." menu on an artifact row, holding every way to open it other than the companion.
 
 import { openOverlay, props } from "herdr";
-import { copy, openExternally, revealLabel, revealPath } from "./cites.js";
+import { copy } from "./clipboard.js";
+import { openExternally, revealLabel, revealPath } from "./cites.js";
 import { popupHeight, popupMenu } from "./rowmenu.js";
 
 const MOD = "hws-panel";

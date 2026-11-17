@@ -2126,6 +2126,21 @@ test("a .feedback change reloads Outputs", async () => {
   assert.equal(m.has("output-t1-two.md"), true);
 });
 
+test("a .feedback change while Outputs is hidden waits for the timer once Outputs shows", async () => {
+  let fire;
+  const H = world({ layout: panelLayout(false, "outputs"), found: { t1: rec("s1", [decl("one.md", 1)]) } });
+  H.watchResult = () => new Promise((resolve) => { fire = resolve; });
+  const m = await mount("hws-work", { view: "outputs" });
+  assert.equal(sessionsPolls(H), 1);
+  H.layout = panelLayout(true, "outputs");
+  fire(["/w/s1/.feedback"]);
+  await settle();
+  assert.equal(sessionsPolls(H), 1);
+  H.layout = panelLayout(false, "outputs");
+  await m.fireTimer(10000);
+  assert.equal(sessionsPolls(H), 2);
+});
+
 // Source checks
 
 test("nothing in hws-work resizes the layout", () => {

@@ -1041,7 +1041,7 @@ Reads, on each `hws list` refresh:
 | `[card:ID]` chip | Shows the Board, then opens `hws-work` with `{view:"todo",space,id}` as a dialog |
 | `[session:ID]` chip | Focuses the terminal recorded with that session while it lives. Otherwise `tab.new` in this space running `claude --resume ID`, in the workspace folder unless the caller names the session's own |
 | `[commit:SHA]` chip | Copies the sha with `pbcopy` |
-| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board with `board.excalidraw` reopens on a board for editing with `hws surface open --type board --artifact A`, with `--terminal T` and the chat pane flags as a page gets them, or `--standalone`. A board without one opens its `comments.md`, or its sketch in the default app when it has none. Another Done bundle opens the first it has of `review.md`, `annotations.md`, `comments.md` and `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
+| `[artifact:ID]` and `[file:PATH]` chips | A `.md`, `.markdown`, `.html` or `.htm` file opens in the companion with `hws surface open --type page`, beside T when there is one and `--standalone` otherwise, so it can take comments. A board reopens on a board for editing with `hws surface open --type board --artifact A`, with `--terminal T` and the chat pane flags as a page gets them, or `--standalone`. When hws answers that the sketch has no drawing to reopen, the board opens its `comments.md`, or its sketch in the default app when it has none. Any other failure shows hws's message. Another Done bundle opens the first it has of `review.md`, `annotations.md`, `comments.md` and `prompt.md`. A file already open there gets the focus. Anything else goes to macOS `open`. A file path is relative to the workspace folder |
 | Artifact title and Open | Run the `[artifact:ID]` action. A `file` artifact is the page itself, so its row opens the page |
 | Dragging an artifact title | Drops its path into a terminal, the same path Copy for Claude gives. A link has no drag |
 | `N feedback` on an artifact row | Shown when rounds name the artifact in `reviewOf`. Unfolds them beneath the row, newest first |
@@ -1180,7 +1180,7 @@ The header shows `Models  <orchestrator model> → <worker model>`, which opens 
 
 A missing folder or file, malformed JSON, a file whose `version` is not 1, or a session id that is not a plain file name gives an empty `outputs`. A record without a `ref`, a `kind`, or a `tier` of `declared` or `detected` is dropped, and unknown fields are left out. Any `kind` string is kept. The command exits 0 in each of these cases.
 
-Outputs lists each agent's outputs under the agent's Herdr title or its folder's name, the agent with the newest output first. With none it says `No outputs recorded yet.` An `hws outputs` failure shows hws's message. Outputs watches the `.feedback` folder of each agent with outputs and runs `hws outputs` again on a change.
+Outputs lists each agent's outputs under the agent's Herdr title or its folder's name, the agent with the newest output first. With none it says `No outputs recorded yet.` An `hws outputs` failure shows hws's message. Outputs watches the `.feedback` folder of each agent with outputs and runs `hws outputs` again on a change while it shows. A change while it is hidden waits for the 10 second poll after it shows again.
 
 | Rows | |
 |---|---|
@@ -1194,7 +1194,7 @@ Outputs lists each agent's outputs under the agent's Herdr title or its folder's
 |---|---|---|
 | Review | `.html`, `.htm` and `.md` | What a click does |
 | Open as note | `.md` and `.markdown` | `hws surface open --type note --file F --terminal T`, with `--beside-pane` and `--space` for a flipped agent |
-| Copy path | Files | Copies the absolute path with `pbcopy`, or `wl-copy` or `xclip` on Linux |
+| Copy path | Files | Copies the absolute path with `pbcopy`. On Linux it uses `wl-copy` under Wayland when installed, and `xclip` otherwise |
 | Copy link | Links | Copies the link |
 
 A failed action shows its message under the list. A copy shows `Copied` and what it copied.
@@ -1290,11 +1290,12 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 `plugin/hooks/guard-note.sh` runs on `PreToolUse` for `Write`. It denies a write to the current note when `hws` owns that place and tells the agent to run a tidy pass. `Edit` stays allowed so an agent can add one dated decision line. It exits 0 on every path, so a failed lookup allows the write.
 
-`plugin/hooks/output-touch.sh` runs on `PostToolUse` for `Write`, `Edit`, `MultiEdit` and `NotebookEdit`, only in a Herdr app terminal, the same check `ask-hook.sh` makes. It prints nothing and exits 0 on every path.
+`plugin/hooks/output-touch.sh` runs on `PostToolUse` for `Write`, `Edit`, `MultiEdit` and `NotebookEdit`, only in a Herdr app terminal, the same check `ask-hook.sh` makes. It prints nothing and exits 0 on every path. It is `async` in `hooks.json`, so Claude does not wait for it.
 
 | Step | |
 |---|---|
-| Path | `tool_input.file_path`, else `tool_input.notebook_path`. A path without a document extension stops here, so a code edit starts no `hws` |
+| Extension | The script reads stdin and stops unless the payload has a `file_path` or `notebook_path` that ends in a document extension, so a code edit starts no `node`. The extensions are the keys of `KIND_BY_EXTENSION` in `core/commands/outputs.js`, and a plugin test keeps them equal |
+| Path | `tool_input.file_path`, else `tool_input.notebook_path`. A path outside the payload's `cwd`, or under `.claude/`, `.feedback/` or `node_modules/` inside it, stops here, so it starts no `hws` |
 | Failure | A `tool_response` that is a string, or holds `error`, `is_error: true` or `success: false`, records nothing |
 | Origin | `created` when Write's `tool_response.type` is `create`, or when Write's `originalFile` is under half the length of its `content`. Every other write is `edited` |
 | Call | `hws output touch --path P --origin O`, run in the payload's `cwd` with `CLAUDE_CODE_SESSION_ID` set to its `session_id`. It gets 3 seconds and stdin gets 1, under the 5 second `timeout` in `hooks.json` |

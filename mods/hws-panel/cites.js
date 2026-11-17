@@ -2,19 +2,14 @@
 // Each action resolves with a note to show, or null.
 
 import { agents, exec, openOverlay, panes, readTextFile, run, terminals, window } from "herdr";
+import { copy } from "./clipboard.js";
 import { hws } from "./hws.js";
 import { opensAsPage, resolvePath, roundFiles } from "./context.js";
 
 // The Board's card dialog, at the size the Board itself prefers.
 const CARD_DIALOG = { width: 920, height: 760 };
-const LINUX_COPY = 'if [ -n "${WAYLAND_DISPLAY:-}" ]; then wl-copy; else xclip -selection clipboard; fi';
 
 const onLinux = () => window()?.platform === "linux";
-
-export async function copy(text) {
-  const r = await exec("sh", ["-c", `printf %s "$1" | ${onLinux() ? LINUX_COPY : "pbcopy"}`, "sh", text]);
-  if (r.code !== 0) throw new Error("Could not copy.");
-}
 
 // A flipped agent's surface opens beside its chat pane, as hws surface open requires.
 // With no agent the surface opens standalone.
@@ -69,13 +64,16 @@ async function bundleFile(artifact) {
   return null;
 }
 
-const isFile = async (path) => (await exec("test", ["-f", path])).code === 0;
-
 // A sketch with a drawing reopens on a board. Its Done files a bundle that replaces this one.
+// Resolves to false when the sketch has no drawing, so its bundle opens instead.
 async function reopenSketch(artifact, target) {
-  if (!(await isFile(`${artifact.path}/board.excalidraw`))) return false;
-  await hws(["surface", "open", "--type", "board", "--artifact", artifact.id, ...ownerArgs(target)]);
-  return true;
+  try {
+    await hws(["surface", "open", "--type", "board", "--artifact", artifact.id, ...ownerArgs(target)]);
+    return true;
+  } catch (e) {
+    if (/has no drawing to reopen/.test(String(e?.message))) return false;
+    throw e;
+  }
 }
 
 async function openArtifact(artifact, { target, workspace }) {
