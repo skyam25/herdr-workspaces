@@ -9,7 +9,7 @@ Interfaces are in `docs/CONTRACT.md`.
 | Folder | Holds |
 |---|---|
 | `bin/hws`, `core/` | The CLI that creates, tracks and closes workspaces |
-| `surface/` | Agent Brief's board, Write and Review in a Herdr pane, through Pixel |
+| `surface/` | The companion app. Sketches, notes, review pages and questions, in a Herdr pane through Pixel or in their own window |
 | `mods/` | Herdr mods: launcher, workspace panel, Brief |
 | `plugin/` | Claude Code plugin: workspace awareness and the `/workspace` command |
 
@@ -52,6 +52,9 @@ Update with `hws update`, which pulls `main`, reinstalls every part when the ins
 - Done delivers to the terminal that opened the surface and closes the pane. The work stays in `.herdr-workspace/` inside the workspace folder.
 - A standalone surface offers Open terminal and Copy link.
 - An agent shows a page for comments with `hws review FILE`. Done sends the comments back and clears them from the page, and the agent runs the command again after its changes.
+- An agent asks the person a round of questions with `hws ask`. The answers arrive as its next prompt.
+- An agent declares a deliverable with `hws output add`, and it shows under Outputs in the right panel.
+- An agent draws on a sketch or edits an outline with `hws surface cli -- VERB`.
 - `hws resume` restarts recorded Claude sessions after a reboot.
 - Delivery failures are written to `~/.local/state/herdr-workspaces/delivery.log`.
 

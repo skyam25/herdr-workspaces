@@ -216,7 +216,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface pop --id S [--to window\|pane]` | Moves a surface between a pane and its own window, and picks the other place without `--to`. Prints `{id,shown,moved}` with `host` or `pane`. See [Pop out and pop in](#pop-out-and-pop-in) |
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
 | `hws surface done --id S --bundle DIR` | Moves DIR under the workspace's `artifacts` place, records it with status `current`, delivers, closes the pane. Fails and leaves DIR when another writer owns that place. See [Delivery on Done](#delivery-on-done) |
-| `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface, so agents can drive it with `agent-brief` |
+| `hws surface socket [--terminal T] [--title X]` | Prints the socket of that terminal's surface. Agents drive a surface with `hws surface cli` |
 | `hws surface cli [--terminal T] [--title X] [--type board\|note\|page] -- VERB [ARGS...]` | Runs the surface's `agent-brief` CLI on the newest open surface of T that matches, as that surface's stand-in session. See [Surface CLI](#surface-cli) |
 | `hws surface move --id S --workspace W` | Moves a surface's record and data folder to W and keeps its id. W `standalone` takes it out of every workspace. An open window ends and starts again on the moved data, and its drafts link into W's drafts place. Prints `{id,from,workspace,moved,restarted}`. Fails on a surface in a pane, an archived W and an unknown W. A surface already in W prints `moved: false` |
 | `hws surface targets [--id S]` | Prints `{current,suggested,workspaces}`. `current` is S's workspace, or null without `--id`. `suggested` is the workspace of the selected space when it differs from `current`, else null. `workspaces` lists each open workspace as `{id,name,kind}` |
@@ -1203,6 +1203,11 @@ A surface runs on this computer. The `+` menu is hidden for a remote agent, and 
 |---|---|---|
 | `herdr-workspace` | When the person mentions a workspace, the task list, where files land, a surface, looking over a page, or reviewing on their phone or iPad | Explains the manifest, places, the task list, `hws review` and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
 | `orchestrate` | By the first prompt of `hws orchestrator start` | Runs the board |
+| `sketch-board` | When the person asks to draw on or read a sketch | Drives a board surface with `hws surface cli --type board` |
+| `wireframe` | When the person wants a UI wireframe or mockup | Renders the wireframe DSL to SVG with `plugin/bin/wireframe-render.mjs`, and shows it through `hws review` on request |
+| `outline-first` | When the person asks to outline a document or page before writing it | Creates the outline with `hws outline new`, opens it with `hws review` and edits it with `hws surface cli --type page -- outline` |
+| `behavior-review` | When the person asks for behavior rules or acceptance criteria beside an HTML prototype | Edits rules with `hws surface cli --type page -- behavior` on a prototype open in `hws review` |
+| `feedback-items` | When the person hands over feedback, transcripts or review notes about an output | Keeps items in `<output>.feedback.md` with `hws surface cli --type page -- feedback` |
 | `tidy` | By the first prompt of `hws tidy start` | Reads the packet, writes `proposal.json` and `proposal.md` beside it, opens `proposal.md` with `hws surface open --type page --file F --terminal T` and ends the turn. On Done it runs `hws tidy apply --file proposal.json`, with `--skip` for parts the person turned down |
 
 ### Session start
@@ -1215,7 +1220,7 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 1. Runs `hws register --terminal T --session S --folder F --json` and `hws current --line` in parallel. F is the hook's `cwd`, so Outputs finds the session's outputs file.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
-3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE` and rules out `--standalone`. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` for a Markdown file and rules out `open` and other editors, then a paragraph that teaches `hws phone send FILE --prompt X` and says Agent Brief's Outputs panel does not reach the phone.
+3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE`, rules out `--standalone` and says to open a note when the person only wants to read or edit. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` for a Markdown file and rules out `open` and other editors, and says to use `hws review` when the agent wants comments, then a paragraph that teaches `hws output add` for a requested doc, brief, report, spec, page or deck, then a paragraph that teaches `hws ask`, then a paragraph that teaches `hws phone send FILE --prompt X`.
 
 | Places sentence | |
 |---|---|

@@ -124,7 +124,9 @@ const PHONE =
   'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn. Their markup arrives as your next prompt. Run `~/.local/bin/hws` if `hws` is not on PATH.';
 
 // Every Herdr app terminal ends with these three paragraphs, in a workspace or not.
-const HERDR_TAIL = `${NOTE_EDITOR}\n\n${OUTPUTS}\n\n${PHONE}`;
+const ASK =
+  "When a request leaves real choices open and the answers would change what you build, run `hws ask` with 1 to 8 questions as JSON on stdin or with `--file`, then end the turn. Each question is `{id, text, kind, options}`, where kind is `options` for 2 to 4 short choices, `select` for up to 6 or `text` for an open answer. The answers arrive as your next prompt.";
+const HERDR_TAIL = `${NOTE_EDITOR}\n\n${OUTPUTS}\n\n${ASK}\n\n${PHONE}`;
 
 function contextOf(result) {
   assert.equal(result.status, 0);

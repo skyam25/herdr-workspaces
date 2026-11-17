@@ -49,7 +49,9 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Plain space on a workspace's folder | `hws space match` finds the workspace. The panel offers Add this space to NAME and session start tells the agent once |
 | Moving a space | A right-click on a space's sidebar row opens the space menu. Move to workspace… lists every open workspace and New workspace from this space…, which runs `hws new workspace --space S`. A drag between the two sidebar lists is left out, because they are separate mods |
 | Throwaway scratch | Shells start in `<state>/workspaces/<id>/scratch`. Keep moves it under `~/Documents/Herdr Workspaces/<name>/`, Trash and purge trash it |
-| Agent Brief panel | Herdr comes first. The Agent Brief Mac app stays as the path for terminals outside Herdr. In a Herdr terminal the Agent Brief plugin steps back to pictures, wireframes, Talk, output recording and its skills (plugin 0.6.31, on a branch in the agent-brief repo as of 2026-11-09) |
+| Agent Brief panel | Retired on this Mac on 2026-11-17. Its plugin, CLI link and app are gone. Herdr Workspaces carries what agents still need |
+| Agent Brief replacements | `hws output add` replaces `declare_output`. `hws ask` and the `questions` surface replace `ask_questions`. `hws surface cli` replaces the `agent-brief` CLI on a surface. `hws outline new` and `hws review X.outline.md` carry outlines. The plugin owns the `sketch-board`, `wireframe`, `outline-first`, `behavior-review` and `feedback-items` skills |
+| Dropped with Agent Brief | Talk dictation, pictures in the chat, `/mode`, `/grill`, `/apply-feedback` from the browser extension, initiatives and the Brief pane. The current note and tidy cover initiatives, and Outputs and Tasks cover the Brief pane |
 | App copy | `surface/app` leads for the board, Write and Review inside Herdr. The agent-brief repo leads for the phone app (`companion/ios`) and the phone protocol (`companion/src/ipad`), and `surface/app/src/ipad` follows it |
 | Outputs | Read from `.feedback/outputs/<session>.json` through `hws`. The Agent Brief app is not needed |
 
@@ -117,7 +119,9 @@ The audit found these from reading code.
 
 - [x] Add an orchestrator that runs a space's board, using `hc run` children.
 - [x] Decide whether this replaces the Agent Brief panel or runs beside it. Decided for this Mac under Agent Brief panel in Decisions. The work Mac still needs the same installs.
-- [ ] Open Outputs in the real window with the Agent Brief app closed, and click a declared page. Only fakes have run `hws outputs`.
+- [ ] Open Outputs in the real window, declare a page with `hws output add`, and click it. Only fakes have run `hws outputs`.
+- [ ] Answer a round from `hws ask` in a real pane and press Done.
+- [ ] Draw on a sketch with `hws surface cli --type board -- draw`, and edit an outline with `hws surface cli --type page -- outline apply`.
 
 ### 8. Finish the chat flip
 
