@@ -41,6 +41,10 @@ mkdir -p "$TARGET"
 failed=0
 for folder in "$SOURCE"/hws-*/; do
   mod="$(basename "$folder")"
+
+  # A deleted mod's folder can linger, holding only the type files Herdr writes.
+  [ -f "$folder/mod.json" ] || continue
+
   dest="$TARGET/$mod"
   if [ -d "$dest" ] && [ "$FORCE" -eq 0 ]; then
     echo "$mod: already installed, skipped (use --force to replace)"
