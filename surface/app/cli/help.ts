@@ -140,16 +140,6 @@ Ops target ids (s1, p3, S2). apply reads the version first and retries once when
       about: `Saves Markdown as a note in Agent Brief's Write mode without opening the panel. Prints the note's id and the \`${c('open --note')}\` line that shows it. --id replaces that note's text in place, and its title when one is given, so the user keeps one copy. Reads stdin unless --text or --file is given. Files a new note under the Claude Code session that runs it, or --session, else under Notes. Exits 3 when the app is not running.`,
       example: `${c('note "Launch message"')} <<'EOF'\nHi team, **v2 is live**.\nEOF`,
     },
-    ipad: {
-      usage: c('ipad [--json]'),
-      about: 'Shows whether an iPad is paired, and which. Pair one from the app with File > Pair iPad….',
-      example: c('ipad'),
-    },
-    handoff: {
-      usage: c('handoff [--prompt <text>] [--board <name> | --page <file.html>] [--session <id>] [--json]'),
-      about: "Asks the paired iPad for a sketch or note. It lists in the iPad's inbox, and Send there returns to this session and no other. --board starts from that board's drawing, and Send there updates that board unless it changed on the Mac, else makes a new board. Without --board, it starts blank and makes a new board. --page hands over an HTML file of the session's project instead of a board: the iPad or iPhone opens it as the page itself, to pin comments on and talk through as in Review, and Send returns review.md. --session defaults to the Claude Code session that runs it. Fails when no iPad is paired.",
-      example: c('handoff --prompt "Mark up the checkout flow" --board checkout-flow'),
-    },
     'herdr-pictures': {
       usage: c('herdr-pictures [on|off|status]'),
       about: 'Lets Claude Code draw pictures in Herdr panes. "on" adds a marked block to your zsh and bash startup files, and a fish conf.d file, that sets CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 only when HERDR_ENV is set. "off" removes it. "status" shows each file and this shell.',

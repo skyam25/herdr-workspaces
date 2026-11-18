@@ -25,7 +25,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 - The manifest lives until its workspace closes. Artifacts outlive the manifest.
 - A closed throwaway leaves a retired record, unless the user chose Trash.
 - Only `hws` writes the manifest. Every other part calls `hws`.
-- No background jobs and no notifications. Pruning runs inside `hws` commands. The one exception is the [phone listener](#phone), which runs in a Herdr terminal, starts on `hws phone` and ends with Herdr. The Dock badge is a count, not a notification, and the Workspaces section sets it.
+- No background jobs and no notifications. Pruning runs inside `hws` commands. The Dock badge is a count, not a notification, and the Workspaces section sets it.
 - Mods never run `hws` or `hc` during `herdr-app check`. `checking()` is true then, and `hws` would prune for real.
 - User work moves to the macOS Trash. It is never deleted outright.
 
@@ -45,8 +45,6 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Kept throwaway work | `~/Documents/Herdr Workspaces/<name>/<artifactId>/` and `.../<name>/scratch-<id tail>/`, written by `hws close --keep` |
 | Standalone artifacts | `<root>/standalone/artifacts/<artifactId>/` |
 | Retired throwaways | `<root>/retired/<spaceId>.json` |
-| Phone data | `<root>/phone/`, holding `ipad/`, `sends/`, `boards/` and `bundles/` |
-| Phone socket | `/tmp/hws-phone-<hash of the state root>.sock`, mode 600 |
 | Tidy packet | `<root>/workspaces/<spaceId>/tidy/packet.json` |
 | Settings | `<root>/settings.json`, which may hold `places`, the default place map for kept workspaces |
 
@@ -227,14 +225,6 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface move --id S --workspace W` | Moves a surface's record and data folder to W and keeps its id. W `standalone` takes it out of every workspace. An open window ends and starts again on the moved data, and its drafts link into W's drafts place. A `questions` surface keeps no drafts, so it gets no folder there. Prints `{id,from,workspace,moved,restarted}`. Fails on a surface in a pane, an archived W and an unknown W. A surface already in W prints `moved: false` |
 | `hws surface targets [--id S]` | Prints `{current,suggested,workspaces}`. `current` is S's workspace, or null without `--id`. `suggested` is the workspace of the selected space when it differs from `current`, else null. `workspaces` lists each open workspace as `{id,name,kind}` |
 | `hws unfiled` | Prints `{surfaces,artifacts}` for work in no workspace, newest first. Each surface is `{id,type,title,file,state}`, where `state` is `open`, `draft` or `pane`. A closed window with no work and a closed pane are left out. Each artifact is `{id,type,title,path,createdAt}` |
-| `hws phone pair` | In a terminal, shows a QR code and waits for a phone. Without a terminal on stdout, opens a Pair phone tab that does this. See [Phone](#phone) |
-| `hws phone send FILE\|ARTIFACT [--prompt X] [--terminal T] [--space S]` | Puts an `.html` or `.excalidraw` file in the phone's inbox, tied to T. Prints the hand-off. Fails when no phone is paired or the file is another type |
-| `hws phone status` | Prints `{running,paired,devices,handoffs}`, each device `{id,name,lastSeen,pairedAt}`. Starts the listener when a phone is paired, and never otherwise |
-| `hws phone forget NAME\|ID` | Revokes one paired phone |
-| `hws phone stop` | Quits the listener |
-| `hws phone targets` | Lists the terminals that run an agent now, as `{targets:[{id,label}]}`. Panes come from `herdr-app ls`, and agents flipped to Chat come from `hc ls` by their `herdr.chat` label. Terminals on other machines are left out, because the answer is a file on this Mac. The listener runs it when a phone asks where a whiteboard can go |
-| `hws phone accept --terminal T [--space S]` | Called by the listener. Opens a send of type `board` and title `Whiteboard` for a whiteboard the phone started, tied to T. Fails when T sits at a shell, has ended or is on another machine |
-| `hws phone deliver --send P --bundle DIR` | Called by the listener. Files DIR as an artifact and delivers it. See [Phone](#phone) |
 | `hws artifact list [--workspace W]` | Artifacts, including those of retired throwaways when W is absent. The text gives one line per artifact with its id, type, status, title and path, separated by tabs. A missing status reads as `current` |
 | `hws artifact set ID [--status draft\|current\|superseded] [--supersedes ID]` | Changes an artifact in an open workspace and prints its record. Needs one of the two flags. `--supersedes` must name another artifact of the same workspace, and an empty value clears it |
 | `hws artifact add --file F [--title X] [--workspace W]` | Registers F as an artifact with type `file` and status `current`, and prints its record. `path` and `prompt` are the file. A file inside the `artifacts` place stays where it is. Any other file moves to `<artifacts place>/<file name>`, and the command fails when that name is taken or another writer owns the place. The title defaults to the file name |
@@ -643,7 +633,7 @@ Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live.
 
 The host's start script is `surface/run.sh`.
 
-The host registers a stand-in session `surface-<surface id>` on the surface socket. Its folder decides what project-relative paths mean on that socket. `hws` works it out with `projectRootFor` in `core/artifacts.js`, and `hws phone send` serves a page from the same folder.
+The host registers a stand-in session `surface-<surface id>` on the surface socket. Its folder decides what project-relative paths mean on that socket. `hws` works it out with `projectRootFor` in `core/artifacts.js`.
 
 | Surface | Session folder |
 |---|---|
@@ -676,7 +666,6 @@ The first page to load opens the surface's file with `POST /open`. The host's st
 | `outline new` | Any | Works, and opens the outline in that surface. `hws outline new` makes one before any surface exists |
 | `feedback list\|graph\|show\|round\|catalog\|add\|log\|change\|done\|related\|workspace\|snap` | Page on the output, or any surface whose session folder holds it | Works. Review's Feedback tab shows the items |
 | `behavior show\|update\|export` | Page on the prototype | Works. Review's Behavior tab shows beside the page |
-| `handoff`, `ipad` | Any | Exit 2, because a surface keeps no iPad pairing. They name `hws phone send FILE` and `hws phone status` |
 | `show` | Any | Exits 2 and names `snap FILE` on a board and `hws review FILE` |
 | `output` | Any | Exits 2 and names `hws output add` |
 | `note`, `open --note` | Any | Exit 2, because a surface keeps no saved notes. They name `hws surface open --type note --file F` |
@@ -823,51 +812,6 @@ A review page loads in a frame from a second loopback server, because a web view
 
 A dev server's page loads as it is, with no overlay and no pictures, because main cannot reach into a web view's frames. A feedback item's workspace snapshot has no picture in a web view.
 
-## Phone
-
-The Agent Brief app on an iPad or iPhone pairs with Herdr as one more host. `surface/app/src/phone/` wraps the unmodified iPad module in `surface/app/src/ipad/`. Surfaces never listen.
-
-| Item | Behaviour |
-|---|---|
-| Process | One per state root, plain Node, `surface/app/out/phone/host.cjs`, started with `hc run --bg` in a terminal with no pane |
-| Lifetime | Ends with Herdr. `hws phone pair`, `send` and `status` restart it, and the [sidebar footer](#sidebar-footer) runs `status` when Herdr starts. It exits when no phone is paired and no code is open |
-| Network | HTTPS on port 47614, peers on this Mac's subnets only. Agent Brief keeps 47613 |
-| Pairing | One-use code, 10 minutes. The QR code carries the certificate fingerprint, and the phone pins it |
-| Control | HTTP on the phone socket. `hws` is the only client |
-| Environment | `HWS_PHONE_DATA`, `HWS_PHONE_SOCKET`, `HWS_BIN`, and optional `HWS_PHONE_HOST`, `HWS_PHONE_PORT` |
-
-| Control route | Result |
-|---|---|
-| `GET /status` | `{pid,paired,devices,handoffs,error?}`, with only open hand-offs |
-| `POST /pair` | Opens pairing and returns `{url,qrSvg,qrText,network?,devices,error?}` |
-| `GET /pair` | The same sheet. `url` is gone once a phone has paired |
-| `DELETE /pair` | Cancels the code |
-| `POST /handoffs` | Body `{session,label,prompt?,page?,root?,board?}` |
-| `POST /forget` | Body `{id}` |
-| `POST /stop` | Quits |
-
-A send has an id `p<hex>` and a record at `<root>/phone/sends/<id>.json` with its workspace, terminal, type and file. A send that `hws phone accept` opened for a whiteboard has no file. Records and board copies older than 90 days go when a later send runs.
-
-| Sent | Phone shows | Root |
-|---|---|---|
-| `.html`, `.htm` | The page, to pin comments on | The workspace folder when the file is inside it with no dot segment, and is not home. Otherwise the file's folder |
-| `.excalidraw` | A copy of the drawing, to mark up | Not served as files |
-| Artifact id | The artifact's file, or its `board.excalidraw`, `index.html` or only `.html` | As above |
-
-The listener never serves a path with a segment starting with a dot. The phone cannot open Markdown, so render a note to HTML first.
-
-A whiteboard starts on the phone with nothing sent from the Mac. Send on the phone asks each paired host `GET /v1/targets`, the person picks a session, and the phone opens a hand-off for it with `POST /v1/handoffs {target,prompt?}`. On Herdr the listener runs `hws phone targets` and `hws phone accept --terminal T` for those, so the hand-off's session is a send id as for `hws phone send`. Only the phone that opened such a hand-off lists it. From there the answer follows the steps below, and its prompt starts `From the phone, a new whiteboard.`
-
-An answer from the phone follows these steps.
-
-1. The listener writes a bundle, as Done does, and calls `hws phone deliver`.
-2. `hws` adds a first line naming the file, moves the bundle under the workspace's `artifacts` place and records it with `fromTerminal`.
-3. A live terminal running an agent gets the prompt through `hc send`. Focus does not move.
-4. A terminal that ended or sits at a shell gets nothing, because `hc send` to a shell runs the text. The phone reports the artifact id.
-5. When `hws` fails, the phone keeps the work and retries.
-
-The original `.excalidraw` file is never overwritten. The bundle's `board.excalidraw` holds the phone's version.
-
 ## Moving off Agent Brief
 
 `hws migrate agent-brief` finds each part below. `docs/GUIDE.md` explains the move for people.
@@ -913,7 +857,7 @@ The scan reads these files and never changes them.
 | `agent-brief note`, `agent-brief open --note` | A Markdown file and `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` |
 | `agent-brief open --output` | `hws review FILE` |
 | `agent-brief open` otherwise | `hws surface open --type board --terminal $HC_TERMINAL_ID` |
-| `agent-brief handoff` | `hws phone send` |
+| `agent-brief handoff` | Nothing, so delete the line |
 | `agent-brief initiative`, `agent-brief open --initiative` | The workspace's current note and `herdr-workspaces:tidy` |
 | Any other `mcp__agent-brief__` tool | The matching `hws` command in `docs/GUIDE.md` |
 | `agent-brief@agent-brief` | `herdr-workspaces@herdr-workspaces` |
@@ -1011,20 +955,6 @@ The `spaces` block runs `hws-spaces`, a copy of Herdr's `spaces`.
 | Drag, worktree order, rail numbers | Count hidden spaces too, matching `space.move` and `space.select:N` |
 | Worktree whose checkout is hidden | Shows as a plain row |
 | Divider | A top border, as Agents and the footer draw, with 8px above the heading |
-
-## Sidebar footer
-
-The `sidebar-footer` block runs `hws-footer`, 97px tall. It keeps `workspace-chrome`'s footer rows and adds Phone, because Herdr's Settings has no section a mod can add to.
-
-| Row | Shows | Click |
-|---|---|---|
-| Settings | An accent dot when an app update is ready | `app.settings` |
-| Add machine | Always | `mod.open` for `machine-add` |
-| Phone | `Pair phone` when none is paired. Else the paired names, then `Active`, `N of M active` or `Idle` after a done dot, or after a ring when none is active | With none paired, `hws phone pair`, which opens the Pair phone tab. Otherwise the Phones popup |
-
-The row reads `hws phone status --json` when the footer loads, and once a minute while a phone is paired. That restarts the listener for a paired phone each time Herdr starts. After Pair it reads status every 3 seconds until a new phone appears or 10 minutes pass. The sidebar rail shows icons with tooltips, and its Phone icon opens the same popup beside the rail.
-
-The Phones popup is `hws-footer` with `{"view":"phones","status"}`, where `status` is the footer's last read, and it opens above the Phone row. Herdr sizes a popup to its content, so the popup gives its body a fixed height from the status and the body scrolls past 440px in all. It reads `hws phone status --json` when it opens and every 3 seconds while open. A phone reaches this Mac only while Agent Brief is open on it, and sends wait in its inbox until then, so every paired phone is a target. A device is active when its `lastSeen` is under two minutes old. Each paired device shows its name, then `Active now` or `Idle · last active …`, then when it paired. With two or more paired, the title shows `N of M active` or `Active`. When none is active, a line says sends wait on the phone until Agent Brief opens. `lastSeen` moves on a request from the phone, at most once a minute. Forget asks in place, then runs `hws phone forget ID` and reloads. One line says how many pages wait on the phone, or that this Mac isn't listening when the listener is down, and up to five are listed by page or board and session label, then `N more`. Pair another phone or iPad sets `shared("hws-footer.pair")` to `{at}` and closes the popup, and the footer runs `hws phone pair` with its polling. Every status read sets `shared("hws-footer.devices")` to `[{id,name,connected}]`, where `connected` means active, when it changes, and the footer row shows those names and states.
 
 ## Chat and Terminal flip
 
@@ -1179,7 +1109,6 @@ A popup that the pane header and the chat composer open at the pointer.
 | Write a note | Always | `hws surface open --type note` |
 | Write a note from last reply | `lastReply` is set | Writes the reply to a file, then opens it with `--type note --file F` |
 | Review a page… | Always | macOS file chooser, then `--type page --file F` |
-| Send to phone… | Always | macOS file chooser, then `hws phone send F --terminal T` |
 | Attach file… | `chat` is true | `setShared("hws-chat.attach", { pane, at })` |
 | Tasks | Always | Opens the Board tab |
 | Outputs | Always | Selects `outputs` in `panel-body` and shows `panel` |
@@ -1362,7 +1291,7 @@ A surface runs on this computer. The `+` menu is hidden for a remote agent, and 
 
 | Skill | Loaded | Does |
 |---|---|---|
-| `herdr-workspace` | When the person mentions a workspace, the task list, where files land, a surface, looking over a page, or reviewing on their phone or iPad | Explains the manifest, places, the task list, `hws review` and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
+| `herdr-workspace` | When the person mentions a workspace, the task list, where files land, a surface, or looking over a page | Explains the manifest, places, the task list, `hws review` and surfaces. Allows one dated line with a cite under Decisions in force in the current note |
 | `orchestrate` | By the first prompt of `hws orchestrator start` | Runs the board |
 | `sketch-board` | When the person asks to draw on or read a sketch | Drives a board surface with `hws surface cli --type board` |
 | `wireframe` | When the person wants a UI wireframe or mockup | Renders the wireframe DSL to SVG with `plugin/bin/wireframe-render.mjs`, and shows it through `hws review` on request |
@@ -1391,7 +1320,7 @@ In a kept workspace the hook also tells the session to use the `herdr-workspaces
 
 1. Runs `hws register --terminal T --session S --folder F --json` and `hws current --line` in parallel. F is the hook's `cwd`, so Outputs finds the session's outputs file.
 2. When the line is non-empty, runs `hws tidy status --json`. It reads `places` and `line` from it, and never calls `hws place`, because that creates folders and a session start must not write to the person's folder.
-3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE`, rules out `--standalone` and says to open a note when the person only wants to read or edit. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` for a Markdown file and rules out `open` and other editors, and says to use `hws review` when the agent wants comments, then a paragraph that sends paste-ready text to a Markdown file opened as a note, then a paragraph that teaches `hws output add` for a requested doc, brief, report, spec, page or deck and says touched documents are listed already, so the agent declares only the deliverable asked for, then a paragraph that teaches `hws ask`, then a paragraph that teaches `hws phone send FILE --prompt X`.
+3. Prints `additionalContext` with the line, the places sentence built from `places`, and `line`, joined by spaces. Each sentence is left out when empty. In a Herdr app terminal the task list paragraph follows after a blank line, then a paragraph that teaches `hws review FILE`, rules out `--standalone` and says to open a note when the person only wants to read or edit. Every Herdr app terminal, in a workspace or not, then gets a paragraph that teaches `hws surface open --type note --file F --terminal $HC_TERMINAL_ID` for a Markdown file and rules out `open` and other editors, and says to use `hws review` when the agent wants comments, then a paragraph that sends paste-ready text to a Markdown file opened as a note, then a paragraph that teaches `hws output add` for a requested doc, brief, report, spec, page or deck and says touched documents are listed already, so the agent declares only the deliverable asked for, then a paragraph that teaches `hws ask` and says to run `~/.local/bin/hws` when `hws` is not on PATH.
 
 | Places sentence | |
 |---|---|

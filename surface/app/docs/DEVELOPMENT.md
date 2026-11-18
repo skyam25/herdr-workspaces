@@ -237,27 +237,6 @@ On a fresh checkout or worktree, run `pnpm setup:worktree`. Electron's own insta
 - Main transcribes the clips with ffmpeg and yap, which it finds in Homebrew or on PATH. It writes `timeline.md`, `transcript.json` and `audio/` into the bundle.
 - If either tool is missing, the sketch and audio still go out, and a message at the foot of the panel says so.
 
-## iPad
-
-- `src/ipad/` serves a TLS LAN API on port 47613, IPv4 only, and refuses peers outside the Mac's subnets. `COMPANION_IPAD_HOST` and `COMPANION_IPAD_PORT` override the address.
-- The iPad pins the certificate fingerprint from the pairing QR. Pairing is many-to-many, and each hand-off stays bound to one Mac and one session.
-- The panel's iPad button shows on a board while an iPad is paired. It hands off a copy of the board's drawing and notes to the Send target, or to the session picked in the chooser. Board comments stay on the Mac.
-- The iPad's Send updates the board a hand-off started from, and reloads it if it is open. If that board changed on the Mac since the hand-off, by a saved or pending edit, or a recording is running on it, the work becomes a new `ipad-<id>` board instead. A blank hand-off makes a new board, and the panel opens it if it is on that session in Sketch.
-- The app runs on iPad and iPhone, including iPhone Duo. Its toolbar holds Talk, the panel toggle and Send. The panel holds Comments, with the Pin tool, and the Note.
-- The panel sits at the side, and at 700 points wide or less it docks under the board. On a partly folded iPhone Duo it takes the far side of an upright fold, or the half under a flat one (`reservedRegions(kind: .division)`).
-- Comments reuse the Mac's pin layer and comment column, in its compact form, which folds every card but the selected one to a line. A finger or Pencil tap pins, and a drag or pinch moves the view. Comments live with the hand-off's work on the iPad, and Send delivers them as `comments.md`. Comments on the Mac stay on the Mac.
-- Each word goes to the comment selected when the word began, as on the Mac, so a tap mid-phrase splits the phrase. Words still settling show in their comment before the phrase ends. Words that go to comments stay out of the timeline.
-- `src/ipad-client/pinch.ts` lets a pinch zoom after a Pencil turned on Excalidraw's pen mode, which otherwise fixes the scale at 1 under the draw tool.
-- Undo and Redo sit in the app's toolbar. `src/ipad-client/history.ts` presses Excalidraw's own buttons, which `ipad.css` hides.
-- A prompt shows two lines with the rest on request. `PromptText.swift` shows each link as a short name, such as claude.ai artifact, that opens in the browser.
-- The inbox names a hand-off by its prompt, else by its page or `fromBoard`, the Mac board it starts from.
-- A page hand-off (`handoff --page`, or the panel's iPad button in Review) carries an HTML file of the session's project. The device loads it over `abpage://<token>/<path>`, which `PageSchemeHandler` proxies to `GET /v1/handoffs/:id/page/*`. The Mac serves files as the Review pane does, inside the project with no dot folders, and adds the overlay's script tag to HTML. The app serves `overlay.js` itself, built by `vite.ipad.config.ts`.
-- Pins on a page are board comments with their anchor kept beside them. Send delivers `{ review, notes }`, and the Mac sends it as a review, so the session gets review.md. A review whose session ended becomes a note under it.
-- `src/ipad-client/settle-fit.ts` fits an opened board again while the native view settles, until the first touch. On an iPhone the view changes size after the navigation push.
-- Hand-offs are store and forward, with no live sync. A second iPad's Send becomes its own delivery on its own board.
-- The iPad transcribes on device and sends phrases, not audio. Strokes and phrases share its clock, and `composeDelivery` uses them as `utterances`.
-- App source and test recipes live in `ios/README.md`. `node ios/test/run-sim.mjs` runs the simulator suite and `node ios/test/run-device.mjs <udid>` runs a real iPad.
-
 ## Tests
 
 - `COMPANION_TEST=1` runs the app off screen, unfocused, out of the Dock, without a tray, and with a fake hotkey registrar. It exposes `globalThis.__companion` in main and `window.__board`/`window.__excalidraw` in the renderer.

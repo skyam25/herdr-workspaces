@@ -1,11 +1,9 @@
-import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const STANDALONE = 'standalone';
 export const HOST_SCRIPT = fileURLToPath(new URL('../surface/run.sh', import.meta.url));
-export const PHONE_HOST = fileURLToPath(new URL('../surface/app/out/phone/host.cjs', import.meta.url));
 export const SURFACE_CLI = fileURLToPath(new URL('../surface/app/bin/agent-brief.mjs', import.meta.url));
 export const HWS_BIN = fileURLToPath(new URL('../bin/hws', import.meta.url));
 
@@ -40,15 +38,6 @@ export function surfaceDataDir(workspaceId, surfaceId) {
 
 export function socketPath(surfaceId) {
   return `/tmp/hws-${surfaceId}.sock`;
-}
-
-export function phoneDir() {
-  return join(stateRoot(), 'phone');
-}
-
-// Kept short for the Unix limit. The hash gives each state root its own listener.
-export function phoneSocket(root = stateRoot()) {
-  return `/tmp/hws-phone-${createHash('sha256').update(root).digest('hex').slice(0, 8)}.sock`;
 }
 
 export const slug = (name) => name.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';

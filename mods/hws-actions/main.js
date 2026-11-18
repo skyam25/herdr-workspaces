@@ -35,7 +35,6 @@ exec "$h" ${command} "$@"
 `;
 
 const reviewPage = () => chooseThenRun('"html", "htm", "md"', "Review a page", 'surface open --type page --file "$f"');
-const sendToPhone = () => chooseThenRun('"html", "htm", "excalidraw"', "Send to phone", 'phone send "$f"');
 
 function showPanel(view) {
   run("layout.select", { stack: "panel-body", child: view });
@@ -72,12 +71,6 @@ export default class Actions extends View {
   async reviewPage() {
     const r = await exec("sh", ["-c", reviewPage(), "hws-actions", ...this.owner(), "--json"]);
     if (r.code !== 0) throw new Error(r.stderr.trim() || "Couldn't open that page.");
-  }
-
-  async sendToPhone() {
-    const p = props();
-    const r = await exec("sh", ["-c", sendToPhone(), "hws-actions", "--terminal", p.terminal, ...(p.space ? ["--space", p.space] : [])]);
-    if (r.code !== 0) throw new Error(r.stderr.trim() || "Couldn't send that file.");
   }
 
   // The list refreshes when a terminal changes, and discarding a draft changes none.
@@ -118,7 +111,6 @@ export default class Actions extends View {
       { id: "write", name: "Write a note", icon: "write", work: () => this.openSurface("note") },
       ...(p.lastReply ? [{ id: "write-reply", name: "Write a note from last reply", icon: "reply", work: () => this.writeFromReply(p.lastReply) }] : []),
       { id: "review", name: "Review a page…", icon: "review", work: () => this.reviewPage() },
-      { id: "phone-send", name: "Send to phone…", icon: "phone", work: () => this.sendToPhone() },
       ...(p.chat ? [{ id: "attach", name: "Attach file…", icon: "attach", work: () => setShared("hws-chat.attach", { pane: p.pane, at: Date.now() }) }] : []),
       { id: "tasks", name: "Tasks", icon: "tasks", divided: true, work: openBoard },
       { id: "outputs", name: "Outputs", icon: "outputs", work: () => showPanel("outputs") },

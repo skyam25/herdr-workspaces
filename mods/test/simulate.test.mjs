@@ -2095,7 +2095,7 @@ const TALL_LAYOUT = {
     id: "sidebar", type: "column", size: { px: 268 }, children: [
       { id: "brand", type: "block", size: { px: 46 } },
       { id: "sidebar-lists", type: "column", children: [{ id: "workspaces", type: "block", size: { px: 69 }, min: 31 }, { id: "spaces", type: "block", size: { weight: 1 }, min: 90 }, { id: "agents", type: "block", size: { weight: 1 }, min: 90 }] },
-      { id: "sidebar-footer", type: "block", size: { px: 97 } },
+      { id: "sidebar-footer", type: "block", size: { px: 69 } },
     ],
   }],
 };
@@ -2104,8 +2104,8 @@ const MANY = Array.from({ length: 30 }, (_, i) => ({ ...APP, id: `w${i}`, name: 
 test("the list grows to the room the window leaves the other sidebar blocks", async () => {
   const H = setup({ hws: { list: MANY }, spaces: SPACED, layout: structuredClone(TALL_LAYOUT), window: { titlebar: "none" }, files: { "/Users/me/.config/herdr-app/window.json": JSON.stringify({ bounds: [31, 40, 1994, 1211] }) } });
   await mount("hws-panel", { view: "sidebar" });
-  // 1211 less 46, 97 and two 90px minimums leaves 888 for the block.
-  assert.deepEqual(H.runs.filter((r) => r.name === "layout.resize").at(-1), { name: "layout.resize", args: { id: "workspaces", px: 888 } });
+  // 1211 less 46, 69 and two 90px minimums leaves 916 for the block.
+  assert.deepEqual(H.runs.filter((r) => r.name === "layout.resize").at(-1), { name: "layout.resize", args: { id: "workspaces", px: 916 } });
 
   const small = setup({ hws: { list: MANY }, spaces: SPACED, layout: structuredClone(TALL_LAYOUT) });
   await mount("hws-panel", { view: "sidebar" });

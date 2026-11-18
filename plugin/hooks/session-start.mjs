@@ -46,11 +46,6 @@ const ASK = [
   "When a request leaves real choices open and the answers would change what you build, run `hws ask` with 1 to 8 questions as JSON on stdin or with `--file`, then end the turn.",
   "Each question is `{id, text, kind, options}`, where kind is `options` for 2 to 4 short choices, `select` for up to 6 or `text` for an open answer.",
   "The answers arrive as your next prompt.",
-].join(" ");
-
-const PHONE = [
-  'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn.',
-  "Their markup arrives as your next prompt.",
   "Run `~/.local/bin/hws` if `hws` is not on PATH.",
 ].join(" ");
 
@@ -160,7 +155,7 @@ async function main() {
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PASTE, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, inHerdrApp() && PHONE, matchContext(match)].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PASTE, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

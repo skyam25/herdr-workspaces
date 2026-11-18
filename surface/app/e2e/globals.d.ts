@@ -1,5 +1,4 @@
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
-import type { Ipad } from '../src/ipad';
 import type { SendHistory } from '../src/main/history';
 import type { DraftStore } from '../src/main/drafts';
 import type { FakeRegistrar, Hotkey } from '../src/main/hotkey';
@@ -36,8 +35,6 @@ interface CompanionTestHooks {
   clipboard(): Terminals['copied'];
   richClipboard(): { html: string; text: string } | undefined;
   openedOutputs: string[];
-  ipad: Ipad;
-  pairIpad(): void;
 }
 
 declare global {

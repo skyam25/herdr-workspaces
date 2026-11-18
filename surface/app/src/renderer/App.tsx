@@ -30,13 +30,12 @@ import { ReviewMode } from './ReviewMode';
 import { SessionDot, SessionSidebar, sessionState, sidebarOrder, useSidebar } from './SessionSidebar';
 import { SendTo } from './SendTo';
 import { SurfaceBar, SurfacePlace } from './SurfaceBar';
-import { IpadSheet } from './IpadSheet';
 import { SettingsPopover } from './SettingsPopover';
 import { Toast, type ToastKind, type ToastMessage } from './Toast';
 import { PromptBanner, TopStrip } from './TopStrip';
 import { useBoards } from './useBoards';
 import { usePanelKeys } from './usePanelKeys';
-import { reviewPage, useSend } from './useSend';
+import { useSend } from './useSend';
 import { useWorkspace } from './useWorkspace';
 import { WriteView } from './WriteView';
 import { deliveryOf } from './delivery';
@@ -196,14 +195,9 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
   const [answerSaver] = useState(() => throttledWrite((next: Answers) => void host.surfaceAnswer(next).catch(report('save the answers')), ANSWER_SAVE_MS));
   const [settings, setSettings] = useState<Settings>(info.settings);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [ipadSheetOpen, setIpadSheetOpen] = useState(false);
   const [update, setUpdate] = useState<UpdateStatus>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [chooserOpen, setChooserOpen] = useState(false);
-  const [ipadPicking, setIpadPicking] = useState(false);
-  useEffect(() => {
-    if (!chooserOpen) setIpadPicking(false);
-  }, [chooserOpen]);
   const commentError = useSyncExternalStore((fn) => comments.subscribe(fn), () => comments.saveError);
   useEffect(() => {
     if (commentError) notify(`Could not save board comments: ${commentError}`, 'error');
@@ -214,13 +208,10 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
     reviewing, commenting, recording, hasVoice, since, voiceMs, input, discardVoice, onMicrophone,
   } = useWorkspace({ host, info, controller, book, shelf, comments, board, notify, report });
   const micStarting = useSyncExternalStore((fn) => reviewVoice.subscribe(fn), () => reviewVoice.starting) && reviewing;
-  const openPage = useSyncExternalStore((fn) => book.subscribe(fn), () => reviewPage(book.selected));
   useCommentKeys(comments, mode === 'sketch' && !questioning);
   const sidebar = useSidebar();
   const boardList = useBoards(host, controller, briefs);
-  const activeBriefRef = useRef(activeBrief);
-  activeBriefRef.current = activeBrief;
-  const { send, sendTo, sendNew, copyPrompt, openChooser, handOffToIpad, sendText, settleSurface } = useSend({
+  const { send, sendTo, sendNew, copyPrompt, openChooser, sendText, settleSurface } = useSend({
     host,
     book,
     controller,
@@ -274,11 +265,6 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
     const subscriptions = [
       host.onPrompt(setPrompt), host.onTheme(setTheme),
       host.onOpenSettings(() => setSettingsOpen(true)), host.onUpdate(setUpdate),
-      host.onOpenIpadSheet(() => setIpadSheetOpen(true)),
-      host.onIpadBoard(({ name, sessionId }) => {
-        if (modeRef.current !== 'sketch' || activeBriefRef.current !== sessionId || controller.recorder.recording) return;
-        void controller.switchTo(name).catch(report('open the iPad board'));
-      }),
       // Edit › Find opens the find of the view on show.
       host.onFind(() => {
         if (modeRef.current === 'sketch' && controller.api) openBoardSearch(controller.api);
@@ -381,15 +367,6 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
       loadPlaces={() => host.sessionPlaces()}
       chooseFolder={() => host.chooseFolder()}
       decisions={mode === 'review' && claim?.holds === 'decisions' ? claim : undefined}
-      ipadPicking={ipadPicking}
-      onIpad={sessions.ipadPaired && (mode === 'sketch' || (mode === 'review' && !!openPage)) ? (id) => {
-        if (id) void handOffToIpad(id);
-        else if (chooserOpen && ipadPicking) setChooserOpen(false);
-        else {
-          setIpadPicking(true);
-          setChooserOpen(true);
-        }
-      } : undefined}
       mic={micButton}
     />
   );
@@ -594,7 +571,6 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
           />
         )}
         <PromptBanner prompt={prompt} onDismiss={() => setPrompt(undefined)} />
-        {ipadSheetOpen && <IpadSheet host={host} onClose={() => setIpadSheetOpen(false)} />}
         <main className="body">
           <div className="sheet">
             {mode === 'sketch' && (

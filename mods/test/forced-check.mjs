@@ -130,34 +130,6 @@ const MOVE_ITEM = { view: "move-item", kind: "surface", id: "s1", title: "Untitl
 const DESTINATIONS = [{ id: "w1", name: "docs", kind: "app" }, { id: "w2", name: "a workspace with a name long enough to truncate in its row", kind: "general" }, { id: "w3", name: "scrap", kind: "throwaway" }];
 const spaceMenuFile = (menuProps) => ({ "spacemenu.js": { header: `const __props = () => (${JSON.stringify(menuProps)});\n`, patch: (s) => s.replaceAll("props()", "__props()") } });
 
-// The sidebar footer and its Phones popup. phones.js goes through `files`, because main.js imports it.
-const PHONE_NOW = "Date.now()";
-const PHONES = [
-  `{ id: "d1", name: "iPhone", lastSeen: ${PHONE_NOW} - 30000, pairedAt: ${PHONE_NOW} - 3 * 86400000 }`,
-  `{ id: "d2", name: "iPad with a name long enough to truncate in the popup", lastSeen: ${PHONE_NOW} - 2 * 86400000, pairedAt: ${PHONE_NOW} - 40 * 86400000 }`,
-];
-const HANDOFFS = Array.from({ length: 7 }, (_, i) => `{ id: "h${i}", sessionId: "p${i}", sessionLabel: "demo · Claude Code", page: "docs/page-${i}.html", boardName: "ipad-h${i}", createdAt: 1, state: "open" }`);
-const phonesFile = (patch = (s) => s) => ({ "phones.js": { header: "", patch } });
-const PHONES_STATUS_ANCHOR = "this.status = status ? { ...status, devices: status.devices ?? [], handoffs: status.handoffs ?? [] } : null;";
-function forcePhones(s, status, extra) {
-  if (!s.includes(PHONES_STATUS_ANCHOR)) throw new Error("hws-footer/phones.js has no status line to force a state on");
-  return s.replace(PHONES_STATUS_ANCHOR, `this.status = ${status};`).replace("this.seq = 0;", `this.seq = 0; ${extra}`).replace("async load() {", "async load() { return;");
-}
-const phonesState = (status, extra = "", more = (s) => s) => phonesFile((s) => forcePhones(more(s), status, extra));
-const footerPaired = (s) => s.replace("this.devices = null;", `this.devices = [${PHONES[0]}];`);
-const POPUP_PROPS = { view: "phones", overlay: "o" };
-const FOOTER_VARIANTS = [
-  { mod: "hws-footer", name: "footer-paired", props: undefined, patch: footerPaired, files: phonesFile() },
-  { mod: "hws-footer", name: "footer-rail-paired", props: undefined, patch: (s) => footerPaired(s).replace("const narrow = () =>", "const narrow = () => true || "), files: phonesFile() },
-  { mod: "hws-footer", name: "phones-reading", props: POPUP_PROPS, files: phonesState("null") },
-  { mod: "hws-footer", name: "phones-two-waiting", props: POPUP_PROPS, files: phonesState(`{ running: true, devices: [${PHONES.join(", ")}], handoffs: [${HANDOFFS.join(", ")}] }`) },
-  { mod: "hws-footer", name: "phones-confirm", props: POPUP_PROPS, files: phonesState(`{ running: true, devices: [${PHONES.join(", ")}], handoffs: [] }`, 'this.confirming = "d2";') },
-  { mod: "hws-footer", name: "phones-forgetting", props: POPUP_PROPS, files: phonesState(`{ running: true, devices: [${PHONES.join(", ")}], handoffs: [] }`, 'this.forgetting = "d1";') },
-  { mod: "hws-footer", name: "phones-none", props: POPUP_PROPS, files: phonesState("{ running: false, devices: [], handoffs: [] }") },
-  { mod: "hws-footer", name: "CONTROL-phones-typo", props: POPUP_PROPS, expectFailure: true, files: phonesState(`{ running: true, devices: [${PHONES[0]}], handoffs: [] }`, 'this.confirming = "d1";', (s) => s.replace(".id(`forget-${device.id}-confirm`)", ".id(`forget-${device.id}-confirm`).no_such_builder()")) },
-  { mod: "hws-footer", name: "phones-problem", props: POPUP_PROPS, files: phonesState("null", 'this.problem = "Couldn\'t read the phone status.";') },
-];
-
 const VARIANTS = [
   { mod: "hws-work", name: "board-run-allow", props: { view: "tasks" }, patch: boardState('this.todos = [{ id: "r1", title: "Ready", notes: "", column: "todo", owner: "agent", kind: "todo" }, { id: "u1", title: "One", notes: "", column: "todo", owner: "unassigned", kind: "todo" }, { id: "u2", title: "Two", notes: "", column: "todo", owner: "unassigned", kind: "todo" }, { id: "x1", title: "Ended", notes: "", column: "done", terminal: "t99", owner: "agent", session: { tool: "codex", id: "c1", folder: "/w" }, kind: "todo" }];') },
   { mod: "hws-work", name: "board-linked-card", props: { view: "tasks" }, header: LINKED_HEADER, patch: (s) => useLinked(boardState(`this.todos = [${JSON.stringify(LINKED_CARD)}];`)(s)) },
@@ -250,7 +222,6 @@ const VARIANTS = [
   { mod: "hws-agents", name: "agents-rail", props: {}, header: FLIP_HEADER, patch: (s) => flipWorld(s).replace("const narrow = () =>", "const narrow = () => true || ") },
   { mod: "hws-spaces", name: "spaces-hidden", props: {}, header: FLIP_HEADER, patch: (s) => s.replaceAll("spaces()", '[...__spaces(), { id: "spc2", name: "hidden", active: false, machine: null, tabs: [] }, { id: "spc3", name: "other", active: false, machine: null, tabs: [] }]').replace("shared(WORKSPACE_SPACES)", '["spc2"]') },
   { mod: "hws-spaces", name: "spaces-all-hidden-rail", props: {}, header: FLIP_HEADER, patch: (s) => s.replaceAll("spaces()", "__spaces()").replace("shared(WORKSPACE_SPACES)", '["spc1"]').replace("const narrow = () =>", "const narrow = () => true || ") },
-  ...FOOTER_VARIANTS,
   { mod: "hws-work", name: "CONTROL-board-typo", props: { view: "tasks" }, expectFailure: true, patch: (s) => boardState("")(s).replace("rowAction(t, id, text, action, primary = false) {\n    return buttonLook(div()", "rowAction(t, id, text, action, primary = false) {\n    return buttonLook(div().no_such_builder()") },
   { mod: "hws-new", name: "CONTROL-typo", props: { step: "workspace" }, expectFailure: true, patch: (s) => s.replace('dialogRoot(t, "hws-new-form")', 'dialogRoot(t, "hws-new-form").no_such_builder()') },
 ];

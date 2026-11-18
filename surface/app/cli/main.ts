@@ -15,8 +15,6 @@ import {
   type BoardsResponse,
   type DetachInitiativeResponse,
   type DrawResponse,
-  type Handoff,
-  type HandoffRequest,
   type Health,
   type Initiative,
   type InitiativeCreateRequest,
@@ -24,7 +22,6 @@ import {
   type InitiativeSnapshot,
   type InitiativeSummary,
   type InitiativeUpdateRequest,
-  type IpadStatus,
   type MutateResponse,
   type NoteRequest,
   type NoteResponse,
@@ -738,31 +735,6 @@ const COMMANDS: Record<string, (ctx: Ctx) => Promise<void>> = {
       `Saved "${title || 'Untitled note'}" to ${where} in Agent Brief, Write mode. The user can edit it there and press Copy.\n` +
       `To show it, run: agent-brief open --note ${res.draftId}\n` +
       `To change it later, run: agent-brief note --id ${res.draftId} with the full new text`,
-    );
-  },
-
-  async ipad(ctx) {
-    const status = await callJson<IpadStatus>(ctx.socket, 'GET', '/ipad');
-    show(ctx, status, (s) =>
-      s.paired
-        ? `Paired: ${s.devices.map((d) => d.name).join(', ')}`
-        : 'No iPad is paired. In Agent Brief, choose File > Pair iPad…',
-    );
-  },
-
-  async handoff(ctx) {
-    const sessionId = sessionOf(ctx);
-    if (!sessionId) throw new UsageError('handoff needs --session, or run it from Claude Code');
-    const prompt = str(ctx.args, 'prompt');
-    const board = str(ctx.args, 'board');
-    const page = str(ctx.args, 'page');
-    if (board && page) throw new UsageError('handoff takes --board or --page, not both');
-    const body: HandoffRequest = { sessionId, ...(prompt ? { prompt } : {}), ...(board ? { board } : {}), ...(page ? { page: path.resolve(page) } : {}) };
-    const handoff = await callJson<Handoff>(ctx.socket, 'POST', '/handoffs', body);
-    show(ctx, handoff, (h) =>
-      h.page
-        ? `Handed ${h.page} to the iPad as ${h.id}. Its review comes back to this session as review.md when the user presses Send there.`
-        : `Handed off to the iPad as ${h.id}. It comes back to this session when the user presses Send there.`,
     );
   },
 

@@ -31,6 +31,7 @@ const NOTE = 'write a Markdown file and `hws surface open --type note --file F -
 const REVIEW = '`hws review FILE`';
 const PICTURE = 'name the file, or `hws review` an .md that embeds it';
 const INITIATIVE = "the workspace's current note and `herdr-workspaces:tidy`";
+const DROPPED = 'nothing, so delete the line';
 
 const TOOL_REPLACEMENTS = {
   declare_output: '`hws output add`',
@@ -45,7 +46,7 @@ function verbReplacement(verb, line) {
   if (verb === 'note') return NOTE;
   if (verb === 'show') return PICTURE;
   if (verb === 'output') return '`hws output add`';
-  if (verb === 'handoff') return '`hws phone send`';
+  if (verb === 'handoff') return DROPPED;
   if (verb === 'initiative') return INITIATIVE;
   if (/--note\b/.test(line)) return NOTE;
   if (/--output\b/.test(line)) return REVIEW;

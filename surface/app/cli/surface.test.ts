@@ -54,8 +54,6 @@ describe('under hws surface cli', () => {
     const cases: [string[], string][] = [
       [['show', 'a.png'], 'hws surface cli --type board -- snap FILE'],
       [['output', 'Brief', '--path', 'a.md'], 'hws output add'],
-      [['handoff', '--prompt', 'x'], 'hws phone send FILE'],
-      [['ipad'], 'hws phone status'],
       [['initiative', 'list'], 'hws current --line'],
       [['note', '--text', 'hi'], 'hws surface open --type note --file F'],
       [['open', '--note', 'd1'], 'hws surface open --type note --file F'],

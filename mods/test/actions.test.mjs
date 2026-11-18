@@ -34,13 +34,13 @@ const osascriptCalls = (H) => H.calls.filter((c) => c.command === "osascript");
 test("a terminal agent's menu has the rows every agent gets", async () => {
   world();
   const m = await mount("hws-actions", TERMINAL);
-  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Review a page…", "Send to phone…", "Tasks", "Outputs"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Review a page…", "Tasks", "Outputs"]);
 });
 
 test("a flipped agent with a reply gets every row in table order", async () => {
   world();
   const m = await mount("hws-actions", { ...FLIPPED, lastReply: "Done." });
-  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Write a note from last reply", "Review a page…", "Send to phone…", "Attach file…", "Tasks", "Outputs"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Write a note from last reply", "Review a page…", "Attach file…", "Tasks", "Outputs"]);
 });
 
 // The 240px popup leaves 191px for a label after padding, icon and gap. At 13px a
@@ -55,7 +55,7 @@ test("every fixed row fits the 240px popup", async () => {
 test("Orchestrate this space comes last, after its own divider", async () => {
   world(IN_WORKSPACE);
   const m = await mount("hws-actions", { ...TERMINAL, space: "spc1", cwd: "/w/proj" });
-  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Review a page…", "Send to phone…", "Tasks", "Outputs", "Orchestrate this space"]);
+  assert.deepEqual(rows(m), ["Sketch", "Write a note", "Review a page…", "Tasks", "Outputs", "Orchestrate this space"]);
   const last = m.render().node.children.at(-1).node;
   assert.equal(last.children.length, 2);
   assert.equal(last.children[1].node.id, "orchestrate");
@@ -588,44 +588,4 @@ test("an open window moves into a pane and leaves the shared list, and a draft h
   await settle();
   assert.ok(openArgs(H).some((args) => args.join(" ") === "surface pop --id s2 --to pane --json"));
   assert.deepEqual(H.sharedSets.at(-1).value.map((b) => b.id), ["s1"]);
-});
-
-// The sidebar footer's Phone row
-
-const NO_PHONE = { running: false, paired: false, devices: [], handoffs: [] };
-const IPHONE = { running: true, paired: true, devices: [{ id: "d1", name: "iPhone" }], handoffs: [] };
-
-test("the footer keeps Settings and Add machine and offers Pair phone when none is paired", async () => {
-  const H = world({ hws: { "phone status": NO_PHONE } });
-  const m = await mount("hws-footer", undefined);
-  assert.equal(m.text(), "Settings | Add machine | Pair phone");
-
-  await m.click("settings");
-  await m.click("machine");
-  assert.deepEqual(H.runs, [{ name: "app.settings", args: undefined }, { name: "mod.open", args: { name: "machine-add" } }]);
-});
-
-test("the footer names the paired phone", async () => {
-  world({ hws: { "phone status": IPHONE } });
-  const m = await mount("hws-footer", undefined);
-  assert.match(m.text(), /^Settings \| Add machine \| iPhone \| (Active|Idle)$/);
-});
-
-test("Pair phone opens the pairing tab and stops checking once a phone pairs", async () => {
-  let answer = NO_PHONE;
-  const H = world({ hws: { "phone status": () => answer, "phone pair": { opened: "t9" } } });
-  const m = await mount("hws-footer", undefined);
-  await m.click("phone");
-  assert.ok(openArgs(H).some((args) => args.join(" ") === "phone pair --json"));
-  const pairing = () => m.timers.filter((t) => t.ms === 3000);
-  assert.equal(pairing().length, 1);
-
-  answer = IPHONE;
-  await m.fireTimer(3000);
-  assert.match(m.text(), /^Settings \| Add machine \| iPhone \| /);
-  assert.equal(pairing()[0].cancelled, true);
-});
-
-test("the + menu no longer pairs a phone", () => {
-  assert.doesNotMatch(read("../hws-actions/main.js"), /phone", "pair"/);
 });

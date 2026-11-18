@@ -29,7 +29,6 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 |---|---|
 | Starting work | The launcher offers New terminal, New workspace, Throwaway, Find throwaway, New board and New note |
 | Folders | Workspaces start in one parent folder. Nothing creates a folder per workspace |
-| Phone review | One listener per machine runs in a Herdr terminal, on port 47614 beside Agent Brief. The iOS app pairs with it as another host. See `docs/CONTRACT.md` |
 | Context rules | `CLAUDE.md` in the parent folder holds them. Claude Code already reads it |
 | Custom instructions | Each workspace has its own, and agents get them at session start |
 | Manifest | JSON that lives until the workspace closes. Artifacts outlive it |
@@ -52,7 +51,7 @@ Start with `README.md` for setup and `docs/CONTRACT.md` for interfaces.
 | Agent Brief panel | Retired on this Mac on 2026-11-17. Its plugin, CLI link and app are gone. Herdr Workspaces carries what agents still need |
 | Agent Brief replacements | `hws output add` replaces `declare_output`. The plugin's `PostToolUse` hook and `hws output touch` replace its write hook, so Outputs lists touched documents again. `hws ask` and the `questions` surface replace `ask_questions`. `hws surface cli` replaces the `agent-brief` CLI on a surface. `hws outline new` and `hws review X.outline.md` carry outlines. The plugin owns the `sketch-board`, `wireframe`, `outline-first`, `behavior-review` and `feedback-items` skills |
 | Dropped with Agent Brief | Talk dictation, pictures in the chat, `/mode`, `/grill`, `/apply-feedback` from the browser extension, initiatives and the Brief pane. The current note and tidy cover initiatives, and Outputs and Tasks cover the Brief pane |
-| App copy | `surface/app` leads for the board, Write and Review inside Herdr. The agent-brief repo leads for the phone app (`companion/ios`) and the phone protocol (`companion/src/ipad`), and `surface/app/src/ipad` follows it |
+| App copy | `surface/app` leads for the board, Write and Review inside Herdr |
 | Outputs | Read from `.feedback/outputs/<session>.json` through `hws`. The Agent Brief app is not needed |
 
 ## Next steps, in order
@@ -147,8 +146,6 @@ Pixel streams frames through the terminal. Herdr shows a full-window board at 1-
 - [x] Serve page surfaces over loopback, one port per project folder. `node scripts/verify-web.mjs` pins a comment in WebKit and Chromium and checks the review and its picture.
 - [ ] Give a dev server's page the overlay in a web view, and give feedback workspace snapshots a picture there.
 - [ ] Test notes, Talk and the microphone in WebKit.
-- [ ] Scan the pairing code with a real iPhone and iPad, then send a page and a board and press Send on the device.
-- [ ] Start a whiteboard on the phone, press Send, pick a Herdr terminal and check the prompt lands there. Only the listener test and the simulator test have run it. `hws phone targets` offers agents flipped to Chat too, tested with fakes only.
 - [ ] Replace the remaining Electron APIs in `src/main`, so the host is a plain Node process.
 - [ ] Revisit a board inside the pane if Herdr ships a browser mod that can load a local app. Patching Herdr is ruled out.
 - [ ] Add the host address to the manifest through `hws`.
@@ -256,8 +253,6 @@ Built 2026-11-09 by six Opus workers against fakes, after a review of the live w
 - [ ] Read the Agents list with agents in two spaces, and the tab names of unnamed Claude tabs.
 - [ ] Open the launcher and the `+` menu on a plain space. Neither should offer Orchestrate this space.
 - [ ] Open a standalone note and read the line under its title. It should name Open terminal and Copy link.
-- [ ] Click the Phone row with a phone paired. The Phones popup should open above the row, list the phone as Connected or with its last seen time, and Forget should ask first.
-- [ ] Press Pair another phone or iPad in that popup. The Pair phone tab should open, and the row should gain the new name.
 - [ ] Close the panes that started before commit 015706a. They still show a terminal address as their title.
 - [ ] Section 14 expects a menu on a workspace's only space. That space no longer has a row, so decide whether the workspace row's menu should carry Rename and Close for it.
 

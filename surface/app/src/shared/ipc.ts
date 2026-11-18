@@ -1,4 +1,4 @@
-import type { BehaviorDocument, BehaviorDecision, FeedbackDocument, FeedbackProject, FeedbackUpdate, FeedbackUpdateResult, Handoff, IpadDevice } from '../protocol';
+import type { BehaviorDocument, BehaviorDecision, FeedbackDocument, FeedbackProject, FeedbackUpdate, FeedbackUpdateResult } from '../protocol';
 import type { FeedbackWorkspace, OutlineDocument, OutlineKind, OutlineProject, OutlineUpdate, OutlineUpdateResult } from '../protocol';
 import type { OutlineChanges } from './outline-changes';
 import type { WorkspaceSnapshot } from './feedback-workspace';
@@ -52,8 +52,6 @@ export interface BoardOps {
   flush: { args: Record<string, never>; result: void };
   /** Sets a board's layout. */
   layout: { args: { board: string; layout: BoardLayout }; result: void };
-  /** Shows new content on a board if it is open. False means the open board has edits of its own, or a recording, so it stayed as it was. */
-  replaceBoard: { args: { board: string; scene: string; notes: string }; result: boolean };
 }
 
 export type BoardOpName = keyof BoardOps;
@@ -521,19 +519,6 @@ export interface OutputsInfo {
   hiddenRefs?: string[];
 }
 
-/** What File › Pair iPad… shows. */
-export interface IpadSheetStatus {
-  devices: IpadDevice[];
-  /** The pairing link the QR code holds. Absent after a pairing used it, or with no network. */
-  url?: string;
-  qrSvg?: string;
-  /** The Mac's network, such as `192.168.1.x`, for the iPad to join. */
-  network?: string;
-  error?: string;
-  /** A device the listener turned away for being on another network. */
-  refused?: string;
-}
-
 /** What `hws surface targets` reports. `current` is `standalone` for an unfiled surface. */
 export interface SurfaceTargets {
   current: string | null;
@@ -572,19 +557,6 @@ export interface CompanionApi extends BoardHost {
   setSettings(patch: Partial<Settings>): Promise<SettingsResult>;
   requestMicrophone(): Promise<MicrophoneAccess>;
   onOpenSettings(fn: () => void): Subscription;
-  /** Starts the iPad listener if needed and makes a fresh pairing code. */
-  ipadSheetOpen(): Promise<IpadSheetStatus>;
-  /** Makes a fresh pairing code. The previous code stops working. */
-  ipadNewCode(): Promise<IpadSheetStatus>;
-  ipadSheetClose(): Promise<void>;
-  ipadForget(id: string): Promise<IpadSheetStatus>;
-  /** Hands a board, or a project HTML file to review as a page, to the paired iPad. Its answer returns to `sessionId`. */
-  ipadHandoff(sessionId: string, target: { board: string } | { page: string }): Promise<Handoff>;
-  /** Fires when File › Pair iPad… is chosen. */
-  onOpenIpadSheet(fn: () => void): Subscription;
-  onIpadStatus(fn: (status: IpadSheetStatus) => void): Subscription;
-  /** Fires when an iPad's answer made a new board for a session. */
-  onIpadBoard(fn: (board: { name: string; sessionId: string }) => void): Subscription;
   /** Fires when Edit › Find is chosen. */
   onFind(fn: () => void): Subscription;
   onNewBoard(fn: () => void): Subscription;
@@ -789,14 +761,6 @@ export const CH = {
   setSettings: 'settings:set',
   mic: 'mic:request',
   openSettings: 'panel:open-settings',
-  ipadSheetOpen: 'ipad:sheet-open',
-  ipadNewCode: 'ipad:new-code',
-  ipadSheetClose: 'ipad:sheet-close',
-  ipadForget: 'ipad:forget',
-  ipadHandoff: 'ipad:handoff',
-  openIpadSheet: 'ipad:open-sheet',
-  ipadStatus: 'ipad:status',
-  ipadBoard: 'ipad:board',
   newBoard: 'panel:new-board',
   visibility: 'panel:visibility',
   historyList: 'history:list',
@@ -896,11 +860,6 @@ export const IPC_INVOKE = {
   surfaceTargets: CH.surfaceTargets,
   surfaceMove: CH.surfaceMove,
   surfaceAnswer: CH.surfaceAnswer,
-  ipadSheetOpen: CH.ipadSheetOpen,
-  ipadNewCode: CH.ipadNewCode,
-  ipadSheetClose: CH.ipadSheetClose,
-  ipadForget: CH.ipadForget,
-  ipadHandoff: CH.ipadHandoff,
   listBoards: CH.listBoards,
   loadBoard: CH.loadBoard,
   saveBoard: CH.saveBoard,
@@ -1001,9 +960,6 @@ export const IPC_EVENT = {
   onSessions: CH.sessions,
   onTheme: CH.theme,
   onOpenSettings: CH.openSettings,
-  onOpenIpadSheet: CH.openIpadSheet,
-  onIpadStatus: CH.ipadStatus,
-  onIpadBoard: CH.ipadBoard,
   onFind: CH.find,
   onNewBoard: CH.newBoard,
   onUpdate: CH.update,

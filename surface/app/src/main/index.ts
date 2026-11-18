@@ -28,8 +28,7 @@ import {
   webFrameMain,
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { CURRENT_BOARD, defaultSocketPath, SOCKET_ENV, type HandoffRequest, type OpenResponse, type SessionsResponse } from '../protocol';
-import { notFound } from '../board/errors';
+import { defaultSocketPath, SOCKET_ENV, type OpenResponse, type SessionsResponse } from '../protocol';
 import type { BoardBackend } from '../server/contract';
 import { createCompanionServer, type CompanionServer } from '../server/index';
 import { BadRequest, parseInitiativeCreate, parseInitiativeUpdate } from '../server/validate';
@@ -78,7 +77,6 @@ import { unfiledBoardChoice } from './session-briefs';
 import { SessionNames } from './session-names';
 import { forgetMarks, mark, renameMarks } from './board-marks';
 import { SessionFiles, webUrl, type Opener } from './session-files';
-import { Ipad } from '../ipad';
 import { SessionModes } from './session-modes';
 import { TemplateStore } from './templates';
 import { Terminals } from './terminals';
@@ -508,54 +506,6 @@ async function start(): Promise<void> {
     },
   });
 
-  // The paired iPad's hand-offs. Its LAN listener is separate from the socket server.
-  const ipadPort = process.env.COMPANION_IPAD_PORT;
-  const ipad = new Ipad({
-    dataDir,
-    isLive: (id) => server.sessions().sessions.some((s) => s.sessionId === id),
-    sessionLabel: (id) => {
-      const s = server.sessions().sessions.find((x) => x.sessionId === id);
-      return names.name(id) || s?.title || s?.cwd.split('/').filter(Boolean).pop() || id;
-    },
-    resolveBoard: (name) => {
-      const board = name === CURRENT_BOARD ? state.state.currentBoard : cleanName(name);
-      if (!store.exists(board)) throw notFound(`no board named ${JSON.stringify(board)}`);
-      return board;
-    },
-    loadBoard: (name) => store.load(name),
-    saveBoard: (name, scene, notes) => {
-      store.create(name);
-      store.saveScene(name, scene);
-      if (notes) store.saveNotes(name, notes);
-    },
-    fileBoard: (name, sessionId) => briefs.move([name], sessionId),
-    updateBoard: async (name, scene, notes, unchanged) => {
-      await bridge.request('flush', {}, 2000);
-      if (!unchanged() || !(await bridge.request('replaceBoard', { board: name, scene, notes }, 5000))) return false;
-      store.saveScene(name, scene);
-      store.saveNotes(name, notes);
-      briefs.touched({ board: name });
-      return true;
-    },
-    onNewBoard: (name, sessionId) => send(CH.ipadBoard, { name, sessionId }),
-    send: (payload, sessionId) => sender.send(payload, sessionId),
-    sessionRoot: (id) => briefs.cwdOf(id) ?? server.sessions().sessions.find((s) => s.sessionId === id)?.cwd,
-    fileReview: (sessionId, payload) => {
-      drafts.addNote({ text: payload.text, sessionId, review: payload.review });
-      send(CH.draftsChanged);
-    },
-    onStatus: (status) => send(CH.ipadStatus, status),
-    onPairedChange: () => server.refreshSessions(),
-    ...(process.env.COMPANION_IPAD_HOST ? { host: process.env.COMPANION_IPAD_HOST } : {}),
-    ...(ipadPort ? { port: Number(ipadPort) } : {}),
-  });
-  const createHandoff = async (req: HandoffRequest) => {
-    // The brief outlives the session, so an answer after it ends still has somewhere to file.
-    if (!briefs.get(req.sessionId)) briefs.remember(req.sessionId, {});
-    // A pending edit reaches disk first, so the hand-off records what the board really holds.
-    if (req.board) await bridge.request('flush', {}, 2000).catch(() => undefined);
-    return ipad.createHandoff(req);
-  };
   const server: CompanionServer = createCompanionServer({
     socketPath,
     backend,
@@ -565,18 +515,12 @@ async function start(): Promise<void> {
     feedbackSnaps,
     workspaces,
     outlines,
-    ipad: {
-      status: () => ipad.status(),
-      createHandoff,
-      listHandoffs: (sessionId) => ipad.listHandoffs(sessionId),
-      removeHandoff: (id) => ipad.removeHandoff(id),
-    },
   });
 
   // Writes pending saves and closes the socket once before quitting.
   const quitter = new Quitter({
     flush: () => bridge.request('flush', {}, 2000),
-    closeServer: () => Promise.all([server.close(), ipad.stop()]),
+    closeServer: () => server.close(),
     quit: () => app.quit(),
     exit: () => app.exit(0),
   });
@@ -622,7 +566,6 @@ async function start(): Promise<void> {
   files.sync();
 
   const sender = new Sender({ state, history, drafts, server, briefs, terminals, voiceDir, keepsDrafts: !!surfaceConfig });
-  if (!surfaceConfig) void ipad.sync();
   const surfaceHost = surfaceConfig && new SurfaceHost(surfaceConfig, {
     socket: socketPath,
     push: (s) => send(CH.surface, s),
@@ -825,14 +768,6 @@ async function start(): Promise<void> {
     else if (target) briefs.remember(target, { board, last: 'board' }, false);
   });
   ipc.handle('detachBoard', (sessionId: string, name: string) => briefs.detach(sessionId, name));
-  ipc.handle('ipadSheetOpen', () => ipad.openSheet());
-  ipc.handle('ipadNewCode', () => ipad.newCode());
-  ipc.handle('ipadSheetClose', () => ipad.closeSheet());
-  ipc.handle('ipadForget', async (id: string) => ipad.forget(id));
-  ipc.handle('ipadHandoff', async (sessionId: string, target: { board?: string; page?: string }) => {
-    if (!server.sessions().sessions.some((s) => s.sessionId === sessionId)) throw new Error('That session has ended.');
-    return createHandoff(target.page ? { sessionId, page: target.page } : { sessionId, board: target.board });
-  });
   ipc.handle('moveBoards', (raw: string[], sessionId: string) => {
     const names = raw.map(cleanName);
     briefs.move(names, sessionId);
@@ -1057,8 +992,6 @@ async function start(): Promise<void> {
         clipboard: () => terminals.copied,
         richClipboard: () => copiedRich,
         openedOutputs,
-        ipad,
-        pairIpad: () => controls.actions().pairIpad(),
       },
     });
   }

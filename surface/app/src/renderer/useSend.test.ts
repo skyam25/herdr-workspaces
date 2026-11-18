@@ -20,7 +20,6 @@ function setup(mode: Mode = 'write') {
     listDrafts: async () => [...disk.values()],
     send: vi.fn(async (): Promise<SendResult> => ({ ok: true, message: 'Sent' })),
     setTarget: vi.fn(async (_id: string | undefined) => {}),
-    ipadHandoff: vi.fn(async () => ({})),
     hidePanel: vi.fn(),
   } as unknown as CompanionApi;
   const book = new DraftBook(host);
@@ -83,33 +82,4 @@ it('keeps and resaves a review pin added while delivery is pending', async () =>
   await pending;
   expect(book.get(draft.id)?.review?.comments[0].text).toBe('New feedback');
   expect(disk.get(draft.id)?.review?.comments[0].text).toBe('New feedback');
-});
-
-it('saves the board before handing it to the iPad, and leaves the panel open', async () => {
-  const { host, send, deps } = setup('sketch');
-  const order: string[] = [];
-  vi.mocked(deps.controller.flush).mockImplementationOnce(async () => { order.push('flush'); });
-  vi.mocked(host.ipadHandoff).mockImplementationOnce(async () => { order.push('handoff'); return {} as never; });
-  await send.handOffToIpad('B');
-  expect(order).toEqual(['flush', 'handoff']);
-  expect(host.ipadHandoff).toHaveBeenCalledWith('B', { board: 'flow' });
-  expect(host.setTarget).toHaveBeenCalledWith('B');
-  expect(deps.setChooserOpen).toHaveBeenCalledWith(false);
-  expect(deps.notify).toHaveBeenLastCalledWith('Sent to your iPad.');
-  expect(host.hidePanel).not.toHaveBeenCalled();
-});
-
-it('says comments stay on the Mac when the board has them', async () => {
-  const { send, deps } = setup('sketch');
-  deps.comments.setOverall('flow', 'Check the header');
-  await send.handOffToIpad('B');
-  expect(deps.notify).toHaveBeenLastCalledWith('Sent to your iPad. Comments stay on this Mac.');
-});
-
-it('reports a failed hand-off and keeps the chooser as it was', async () => {
-  const { host, send, deps } = setup('sketch');
-  vi.mocked(host.ipadHandoff).mockRejectedValueOnce(new Error('That session has ended.'));
-  await send.handOffToIpad('B');
-  expect(deps.notify).toHaveBeenLastCalledWith(expect.stringContaining('That session has ended.'), 'error');
-  expect(deps.setChooserOpen).not.toHaveBeenCalled();
 });

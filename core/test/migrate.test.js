@@ -79,13 +79,13 @@ test('the scanner matches real references and skips file names', () => {
   assert.deepEqual(terms('agent brief, Agent brief, agent-brief drawing'), []);
   assert.deepEqual(terms('run agent-brief draw then agent-brief png'), ['agent-brief draw', 'agent-brief png']);
   assert.deepEqual(terms('mcp__agent-brief__declare_output'), ['declare_output']);
-  assert.deepEqual(terms('mcp__agent-brief__ipad_status'), ['mcp__agent-brief__ipad_status']);
+  assert.deepEqual(terms('mcp__agent-brief__list_sessions'), ['mcp__agent-brief__list_sessions']);
   assert.deepEqual(terms('enable agent-brief@agent-brief in Agent Brief'), ['agent-brief@agent-brief', 'Agent Brief']);
   assert.match(matchLine('agent-brief open --output page.html')[0].replacement, /hws review FILE/);
   assert.match(matchLine('agent-brief open --note n1')[0].replacement, /--type note --file F/);
   assert.match(matchLine('agent-brief feedback list')[0].replacement, /--type page -- feedback/);
   assert.match(matchLine('agent-brief initiative show')[0].replacement, /herdr-workspaces:tidy/);
-  assert.match(matchLine('agent-brief handoff --board x')[0].replacement, /hws phone send/);
+  assert.match(matchLine('agent-brief handoff --board x')[0].replacement, /delete the line/);
 });
 
 test('a clean Mac reports nothing to do', (t) => {

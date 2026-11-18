@@ -242,11 +242,11 @@ test('the capture shortcut opens a new note in Write mode', async () => {
   await expect(page.getByTestId('write')).toBeVisible();
   await expect(page.getByTestId('draft-body')).toHaveText('');
   await expect(page.getByTestId('draft-body')).toBeFocused();
-  await page.keyboard.type('remember to check the iPad network');
+  await page.keyboard.type('remember to check the staging network');
   // Escape hides the panel; the note is already saved.
   await page.keyboard.press('Escape');
   await expect.poll(panelVisible).toBe(false);
-  await expect.poll(() => draftsOnDisk().map((d) => d.body)).toEqual(['remember to check the iPad network']);
+  await expect.poll(() => draftsOnDisk().map((d) => d.body)).toEqual(['remember to check the staging network']);
 });
 
 test('/sketch with no prompt leaves Write mode, and capture afterwards picks no session', async () => {

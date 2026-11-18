@@ -120,15 +120,13 @@ const NOTE_EDITOR =
   "To show the person a Markdown file to read or edit, run `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn. It opens in a Herdr note window, in a workspace or not. When you want their comments on something you wrote, run `hws review FILE` instead. Never open the file with `open`, VS Code or another editor.";
 const OUTPUTS =
   "When the person asks for a doc, brief, report, spec, page or deck, run `hws output add --title T --path P --status drafting` as you start it, and run it again with `--status ready` when it is done. Use `--url U` in place of `--path` for a web document. The work then shows under Outputs in Herdr's right panel. Outputs already lists every document you write as touched, so declare only the deliverable the person asked for. Never declare code, config or tests.";
-const PHONE =
-  'To put a page on the person\'s iPhone or iPad, run `hws phone send FILE --prompt "What to look at"` with an .html or .excalidraw file, then end the turn. Their markup arrives as your next prompt. Run `~/.local/bin/hws` if `hws` is not on PATH.';
 
 // Every Herdr app terminal ends with these three paragraphs, in a workspace or not.
 const ASK =
-  "When a request leaves real choices open and the answers would change what you build, run `hws ask` with 1 to 8 questions as JSON on stdin or with `--file`, then end the turn. Each question is `{id, text, kind, options}`, where kind is `options` for 2 to 4 short choices, `select` for up to 6 or `text` for an open answer. The answers arrive as your next prompt.";
+  "When a request leaves real choices open and the answers would change what you build, run `hws ask` with 1 to 8 questions as JSON on stdin or with `--file`, then end the turn. Each question is `{id, text, kind, options}`, where kind is `options` for 2 to 4 short choices, `select` for up to 6 or `text` for an open answer. The answers arrive as your next prompt. Run `~/.local/bin/hws` if `hws` is not on PATH.";
 const PASTE =
   "When the person asks for text to paste somewhere else, such as a message, an email or a post, write it to a Markdown file instead of printing it, and open it with `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn. In a workspace, put the file in `hws place scratch`. The note's Copy button copies it as rich text. When they ask for changes, edit the same file, because the open note reloads it.";
-const HERDR_TAIL = `${NOTE_EDITOR}\n\n${PASTE}\n\n${OUTPUTS}\n\n${ASK}\n\n${PHONE}`;
+const HERDR_TAIL = `${NOTE_EDITOR}\n\n${PASTE}\n\n${OUTPUTS}\n\n${ASK}`;
 
 function contextOf(result) {
   assert.equal(result.status, 0);
@@ -368,7 +366,7 @@ describe("session-start hook", () => {
     assert.ok(!contextOf(run(HOOK, { bundle: "com.apple.Terminal" })).includes("hws output add"));
   });
 
-  it("teaches only the note editor and the phone outside a workspace in a Herdr app terminal", () => {
+  it("teaches only the Herdr app paragraphs outside a workspace in a Herdr app terminal", () => {
     homeStub({ current: ":" });
     assert.equal(contextOf(run(HOOK, { bundle: HERDR_APP })), HERDR_TAIL);
   });

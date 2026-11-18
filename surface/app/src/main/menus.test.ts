@@ -12,7 +12,6 @@ const actions = (update: Partial<UpdateStatus>): MenuActions => ({
   newBoard: vi.fn(),
   newNote: vi.fn(),
   openSettings: vi.fn(),
-  pairIpad: vi.fn(),
   find: vi.fn(),
   installCli: vi.fn(),
   installPlugin: vi.fn(),
@@ -86,15 +85,6 @@ describe('updateItems', () => {
     expect(a.updateNow).toHaveBeenCalled();
     expect(a.openSettings).not.toHaveBeenCalled();
     expect(a.showPanel).not.toHaveBeenCalled();
-  });
-});
-
-describe('appMenuTemplate', () => {
-  it('offers Pair iPad… in the File menu', () => {
-    const a = actions({ state: 'idle' });
-    const file = appMenuTemplate(a).find((m) => m.label === 'File')!.submenu as { label?: string; click?: () => void }[];
-    file.find((i) => i.label === 'Pair iPad…')!.click!();
-    expect(a.pairIpad).toHaveBeenCalled();
   });
 });
 

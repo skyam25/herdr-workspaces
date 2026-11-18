@@ -125,14 +125,14 @@ async function main() {
   await page.getByTestId('draft-body').waitFor()
   const focused = await page.getByTestId('draft-body').evaluate(el => el === document.activeElement)
   report('1 capture opens a focused, empty note', focused && (await page.getByTestId('draft-body').inputValue()) === '')
-  await page.keyboard.type('iPad pairing fails on guest wifi? check with design')
+  await page.keyboard.type('Checkout fails on guest wifi? check with design')
   await shot('1-capture')
   await page.keyboard.press('Escape')
   const hid = await until(async () => !(await visible()), 3000)
-  const saved = await until(() => drafts().some(d => d.body.startsWith('iPad pairing')), 3000)
+  const saved = await until(() => drafts().some(d => d.body.startsWith('Checkout fails')), 3000)
   report('1 Escape hides the panel and the note is saved', Boolean(hid && saved))
   await sleep(1500)
-  report('1 nothing reached Claude Code', !/iPad pairing/.test(grab()))
+  report('1 nothing reached Claude Code', !/Checkout fails/.test(grab()))
 
   // 2. Midday: two prompts from templates, queued.
   await showStandalone()

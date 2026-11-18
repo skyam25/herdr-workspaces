@@ -14,10 +14,9 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 | Piece | Lives in | Does |
 |---|---|---|
 | `hws` | `bin/hws`, `core/` | The only writer of workspace manifests. Every mod, surface and hook calls it |
-| Mods | `mods/`, installed into Herdr | Workspaces sidebar, Workspace panel, Tasks, Outputs, pane header, New menu, phone footer |
+| Mods | `mods/`, installed into Herdr | Workspaces sidebar, Workspace panel, Tasks, Outputs, pane header, New menu |
 | Surface app | `surface/app` | Draws sketches, notes, review pages, outlines and questions, in a pane through Pixel or in its own window |
 | Claude plugin | `plugin/` | Session-start text, write hooks, skills and `/workspace` |
-| Phone listener | `surface/app/src/phone` | Lets the iPhone or iPad app review pages and sketches sent with `hws phone send` |
 
 ## What the person sees
 
@@ -36,8 +35,8 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 
 | Source | When | Says |
 |---|---|---|
-| Session-start hook | Every Claude session in a Herdr terminal | The workspace, where files land, how fresh the note is, and how to review, write notes, declare outputs, ask questions and use the phone |
-| `herdr-workspace` skill | The person mentions a workspace, tasks, a surface, review or the phone | Full command reference |
+| Session-start hook | Every Claude session in a Herdr terminal | The workspace, where files land, how fresh the note is, and how to review, write notes, declare outputs and ask questions |
+| `herdr-workspace` skill | The person mentions a workspace, tasks, a surface or review | Full command reference |
 | Feature skills | On matching requests | `sketch-board`, `wireframe`, `outline-first`, `behavior-review`, `feedback-items`, `tidy`, `orchestrate` |
 | Delivered prompts | Each Done | What the person did and the `hws` command to run next |
 | `hws surface cli` help | When the agent asks | Verb usage, written as `hws surface cli` lines |
@@ -56,7 +55,6 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 | Outline before writing | `hws outline new`, `hws review X.outline.md`, `hws surface cli --type page -- outline ...` |
 | Feedback items and behavior rules | `hws surface cli --type page -- feedback\|behavior ...` |
 | Reopen earlier work | `hws review ARTIFACT`, `hws surface open --type board --artifact A`, `hws surface resume --id S` |
-| Send to the phone | `hws phone send FILE --prompt X` |
 | Update the current note | Load `herdr-workspaces:tidy`. Never rewrite the note directly |
 
 After opening any surface, the agent ends its turn. The person's answer arrives as the next prompt.
@@ -86,7 +84,6 @@ hws migrate agent-brief --apply    # uninstall and move the rest to the Trash
 | `agent-brief outline`, `feedback`, `behavior` | `hws surface cli --type page -- VERB` |
 | `agent-brief note`, `open --note` | A Markdown file opened as a note |
 | `agent-brief open --output`, Review | `hws review FILE` |
-| iPad hand-off | `hws phone send` |
 | Initiatives | The workspace's current note and the tidy pass |
 | Brief pane | Outputs and Tasks |
 | `.feedback/` files in projects | Unchanged. Herdr reads the same formats |
@@ -98,6 +95,7 @@ hws migrate agent-brief --apply    # uninstall and move the rest to the Trash
 - `/mode` and `/grill`
 - `/apply-feedback` from the browser extension
 - The floating board outside Herdr
+- The iPad hand-off
 
 ### Check project instructions
 

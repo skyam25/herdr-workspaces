@@ -7,7 +7,6 @@ import { draftImages, inWrite } from '../shared/drafts';
 import { hasReviewContent } from '../shared/review';
 import type { NoteAnnotations } from '../shared/annotations';
 import type { CompanionApi, Decision, Draft, Launcher, Mode, Outgoing, SendResult } from '../shared/ipc';
-import { isLocalUrl } from '../shared/outputs';
 import { findSlots } from '../shared/slots';
 import type { BoardCommentsStore } from './board-comments';
 import type { BoardController } from './controller';
@@ -64,8 +63,6 @@ export interface PanelSend {
   sendNew: (cwd: string, via: Launcher) => Promise<void>;
   copyPrompt: (cwd: string) => Promise<void>;
   openChooser: (open: boolean) => void;
-  /** Hands the open board, or in Review the open page, to the paired iPad. Its answer returns to `sessionId`. */
-  handOffToIpad: (sessionId: string) => Promise<void>;
   /** Hands a running session what `build` makes, or says why `build` made nothing. */
   sendText: (sessionId: string, build: () => Promise<FixedSend | string>) => Promise<void>;
   /** Clears what a surface's last Send handed over, once the host says `hws` took it. */
@@ -99,10 +96,6 @@ const fromDraft = (draft: Draft) => {
     ...(annotations ? { annotations } : {}),
   };
 };
-
-/** The project HTML file a review draft shows, which an iPad can review as a page. Undefined for a dev server's page. */
-export const reviewPage = (draft: Draft | undefined): string | undefined =>
-  draft?.review && !isLocalUrl(draft.review.path) ? draft.review.path : undefined;
 
 export function useSend({ host, book, controller, comments, items, reviewVoice, modeRef, activeBrief, targetSessionId, notify, setChooserOpen, surface }: SendDeps): PanelSend {
   /** The text whose empty slots were already pointed out, so a second Send goes through. */
@@ -289,30 +282,6 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
     deliver((p) => host.send(p, sessionId), build, () => host.setTarget(sessionId));
   const sendNew = (cwd: string, via: Launcher) => deliver((p) => host.sendNew(p, { cwd, via }));
   const copyPrompt = (cwd: string) => deliver((p) => host.copyPrompt(p, cwd));
-  const handOffToIpad = async (sessionId: string) => {
-    if (sending.current) return;
-    sending.current = true;
-    try {
-      const page = modeRef.current === 'review' ? reviewPage(book.selected) : undefined;
-      if (page) {
-        await host.setTarget(sessionId);
-        await host.ipadHandoff(sessionId, { page });
-        setChooserOpen(false);
-        notify(book.selected?.review?.comments.length ? 'Sent the page to your iPad. Comments stay on this Mac.' : 'Sent the page to your iPad.');
-        return;
-      }
-      const board = controller.board;
-      await Promise.all([controller.flush(), comments.flush()]);
-      await host.setTarget(sessionId);
-      await host.ipadHandoff(sessionId, { board });
-      setChooserOpen(false);
-      notify(hasBoardComments(comments.of(board)) ? 'Sent to your iPad. Comments stay on this Mac.' : 'Sent to your iPad.');
-    } catch (err) {
-      notify(`Could not hand off to the iPad: ${(err as Error).message}`, 'error');
-    } finally {
-      sending.current = false;
-    }
-  };
   /** An empty note says so before any session is picked. */
   const openChooser = (open: boolean) => {
     const blocked = open ? chooserBlocker() : undefined;
@@ -334,5 +303,5 @@ export function useSend({ host, book, controller, comments, items, reviewVoice, 
     return !note || (!note.body.trim() && !note.board) ? 'Write something first.' : undefined;
   };
 
-  return { send, sendTo, sendNew, copyPrompt, openChooser, handOffToIpad, sendText, settleSurface };
+  return { send, sendTo, sendNew, copyPrompt, openChooser, sendText, settleSurface };
 }

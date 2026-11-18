@@ -646,10 +646,9 @@ test("a worktree whose checkout is hidden stands alone, and the last shown workt
   assert.deepEqual(shape(["a"]), [["a1", null], ["a2", null], ["b", null], ["b1", "└─"]]);
 });
 
-test("the spaces list draws a top border like Agents and the footer, with room above its heading", () => {
+test("the spaces list draws a top border like Agents, with room above its heading", () => {
   const border = /\.border_t\(1\)\.border_color\(t\.border\)/;
   assert.match(read("hws-agents/main.js").replace(/\s+/g, ""), border);
-  assert.match(read("hws-footer/main.js"), border);
   const render = read("hws-spaces/main.js").split("  render() {")[1];
   assert.match(render, /return v_flex\(\)\.size_full\(\)\.min_h\(0\)\.bg\(t\.chrome\)\.border_t\(1\)\.border_color\(t\.border\)/);
   assert.match(render, /\.child\(h_flex\(\)\.h\(39\)\.pt\(8\)/);

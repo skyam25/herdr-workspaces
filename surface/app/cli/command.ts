@@ -44,10 +44,6 @@ export function surfaceRefusal(verb: string, cli: Cli): string | undefined {
       return `a surface shows no pictures in the session. Put one on a board with "${cli.line('snap FILE')}", or open a page with "hws review FILE".`;
     case 'output':
       return 'a surface records no outputs. Declare one with "hws output add --title T --path P".';
-    case 'handoff':
-      return 'a surface keeps no iPad pairing. Send a page or board to the phone with "hws phone send FILE".';
-    case 'ipad':
-      return 'a surface keeps no iPad pairing. "hws phone status" lists paired phones.';
     case 'initiative':
       return 'a surface keeps no initiatives. The workspace holds the standing brief, and "hws current --line" prints it.';
     case 'note':

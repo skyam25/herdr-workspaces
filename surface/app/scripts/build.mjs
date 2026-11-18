@@ -16,7 +16,7 @@ const shared = {
 
 export const mainOptions = {
   ...shared,
-  entryPoints: { 'main/index': 'src/main/index.ts', 'preload/index': 'src/preload/index.ts', 'phone/host': 'src/phone/host.ts' },
+  entryPoints: { 'main/index': 'src/main/index.ts', 'preload/index': 'src/preload/index.ts' },
   outdir: 'out',
   outExtension: { '.js': '.cjs' },
 };
