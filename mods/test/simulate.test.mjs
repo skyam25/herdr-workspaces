@@ -2047,6 +2047,22 @@ test("the minus shows only on a hovered row with two or more working spaces", as
   assert.equal(lone.has("sidebar-remove-spc1"), false);
 });
 
+test("a hovered workspace row offers + to add a space, which unfolds it", async () => {
+  localStorage.setItem("sidebar.folded", JSON.stringify(["spc1"]));
+  const H = setup({ hws: { list: [GROUP], "space add": { workspace: "spc1", space: "spc5" } }, spaces: SPACED });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  assert.equal(m.has("sidebar-add-space-spc1"), false);
+  await hover(m, "sidebar-workspace-spc1", true);
+  assert.equal(m.has("sidebar-add-space-spc1"), true);
+  assert.equal(m.has("sidebar-remove-spc1"), false);
+  await m.click("sidebar-add-space-spc1");
+  assert.deepEqual(args(H).find((a) => a[0] === "space"), ["space", "add", "--workspace", "spc1", "--json"]);
+  assert.deepEqual(JSON.parse(localStorage.getItem("sidebar.folded")), []);
+  assert.equal(m.has("sidebar-space-spc3"), true);
+  await hover(m, "sidebar-workspace-spc1", false);
+  assert.equal(m.has("sidebar-add-space-spc1"), false);
+});
+
 test("the sidebar counts Waiting on you per Board and shares the map by space", async () => {
   const items = [{ id: "a", column: "waiting", archived: false }, { id: "b", column: "waiting", archived: true }, { id: "c", column: "todo", archived: false }, { id: "d", column: "waiting" }];
   const quiet = { ...APP, id: "spc2", name: "billing", spaces: ["spc2", "spq"], board: { space: "spq", tab: "tbq" } };

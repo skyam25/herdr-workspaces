@@ -456,7 +456,13 @@ function removeSpace(state, id, cx) {
   changeThenLoad(state, cx, () => hws(["space", "remove", "--space", id]));
 }
 
-// The minus shows only while the pointer is over its row.
+// Unfolds the workspace so the new space's row shows. Herdr shows a new space at once.
+function addSpace(state, id, cx) {
+  if (state.folded.delete(id)) localStorage.setItem(FOLDED_KEY, JSON.stringify([...state.folded]));
+  changeThenLoad(state, cx, () => hws(["space", "add", "--workspace", id]));
+}
+
+// The workspace row's + and a space row's minus show only while the pointer is over their row.
 function trackHover(state, id) {
   return (isHovered, cx) => {
     if (isHovered) state.hovered = id;
@@ -584,6 +590,7 @@ function workspaceRow(t, state, workspace, members) {
   const ahead = state.ahead?.[workspace.id] ?? 0;
   const fresh = state.fresh?.[workspace.id] ?? null;
   const windows = state.openWindows?.[workspace.id] ?? [];
+  const hoverKey = `workspace:${workspace.id}`;
   return h_flex()
     .id(`sidebar-workspace-${workspace.id}`)
     .h(ROW_PX)
@@ -597,6 +604,7 @@ function workspaceRow(t, state, workspace, members) {
     .when(!isSelected, (el) => el.hover((s) => s.bg(t.hover)))
     .on_click(() => target && run("space.select", { id: target.id }))
     .on_mouse_down("right", rightClick(workspace, false, target?.id ?? null))
+    .on_hover(trackHover(state, hoverKey))
     .child(childSpaces(workspace, members).length > 0 ? foldButton(t, state, workspace.id) : div().size(CHEVRON_PX).flex_none())
     .child(tile(t, workspace, isActive))
     .child(div().flex_1().min_w(0).truncate().text_color(isActive ? t.foreground : t.muted).child(workspace.name))
@@ -605,6 +613,7 @@ function workspaceRow(t, state, workspace, members) {
     .when(windows.length > 0, (el) => el.child(windowsBadge(t, state, workspace, windows)))
     .when(Boolean(status), (el) => el.child(statusDot(t, status)))
     .when(ahead > 0, (el) => el.child(div().flex_none().text_size(11.5).text_color(t.ansi2).child(`↑${ahead}`)))
+    .when(state.hovered === hoverKey, (el) => el.child(iconButton(t, `sidebar-add-space-${workspace.id}`, "plus", 18, (cx) => addSpace(state, workspace.id, cx)).tooltip("New space in this workspace")))
     .when(isActive, (el) => el.child(iconButton(t, "sidebar-panel", "panel-right", 22, () => run("mod.open", { name: "hws-panel" })).tooltip("Show or hide the workspace panel")));
 }
 
