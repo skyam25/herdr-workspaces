@@ -56,6 +56,11 @@ const NOTE_RULE = [
 
 const LISTED_ARTIFACTS = 12;
 
+// `hws current --line` says a workspace has no Tasks in its first line. Instructions follow on later lines.
+function hasNoTasks(line) {
+  return / has no Tasks, /.test(line.split("\n")[0]);
+}
+
 function print(text) {
   return new Promise((resolve) => process.stdout.write(text, resolve));
 }
@@ -155,7 +160,8 @@ async function main() {
   const workspace = [line, placesSentence(status?.places ?? {}, folder), freshness];
 
   const kept = Boolean(status?.places?.current);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), line && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PASTE, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, matchContext(match)].filter(Boolean).join("\n\n");
+  const tasks = Boolean(line) && !hasNoTasks(line);
+  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), tasks && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PASTE, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

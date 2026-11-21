@@ -348,6 +348,15 @@ describe("session-start hook", () => {
     assertTaskList(context);
   });
 
+  it("leaves out the task list paragraph when the workspace has no Tasks", () => {
+    const line = `${LINE} It has no Tasks, so it has no task list for cards.`;
+    homeStub({ current: `echo '${line}'` });
+    const context = contextOf(run(HOOK, { bundle: HERDR_APP }));
+
+    assert.ok(context.startsWith(`${line}\n\n`));
+    assert.ok(!context.includes("`hws todo add"));
+  });
+
   it("teaches the review command after the task list in a Herdr app terminal", () => {
     homeStub();
     const context = contextOf(run(HOOK, { bundle: HERDR_APP }));

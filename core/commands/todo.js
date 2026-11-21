@@ -56,6 +56,16 @@ export function resolveBoard(flags) {
   return boardOf(resolveSpace(flags));
 }
 
+// The person sees cards only in Tasks, so an agent cannot add one to a workspace without it.
+function addingBoard(flags) {
+  const space = resolveSpace(flags);
+  const manifest = manifestOfSpace(space);
+  if (callerIsAgent() && !manifest.board) {
+    throw new HwsError(`the workspace "${manifest.name}" has no Tasks, so the person would never see this card. Tell them, and run \`hws board add\` only if they ask for Tasks`);
+  }
+  return boardOf(space);
+}
+
 // Adds to the new board before clearing the old one, so a failure cannot lose a card.
 export function moveCards(from, to) {
   const { items, orchestrator } = readTodos(from);
@@ -235,7 +245,7 @@ export function todoList(flags) {
   const manifest = manifestOfSpace(space);
 
   // A mod asks with no terminal, and a plain space answers that it has no Board.
-  if (!manifest && !callerIsAgent()) return { data: { items: [], orchestrator: null, spaces: [space], workspace: null } };
+  if (!manifest && !callerIsAgent()) return { data: { items: [], orchestrator: null, spaces: [space], workspace: null, tasks: false } };
 
   requireWorkspace(space);
   const todos = readTodos(boardOf(space));
@@ -243,7 +253,7 @@ export function todoList(flags) {
 
   // An agent reading the board skips the reports, which can be long.
   const items = callerIsAgent() && !flags.reports ? shown.map(({ report, reportFrom, ...item }) => item) : shown;
-  return { data: { items, orchestrator: orchestratorState(todos), spaces: manifest.spaces, workspace: manifest.id } };
+  return { data: { items, orchestrator: orchestratorState(todos), spaces: manifest.spaces, workspace: manifest.id, tasks: Boolean(manifest.board) } };
 }
 
 function addTitles(flags) {
@@ -254,7 +264,7 @@ function addTitles(flags) {
   const titles = flags.titles.split('\n').map((line) => line.trim()).filter(Boolean);
   if (titles.length === 0) throw new UsageError('--titles must have a line that is not blank');
   const items = titles.map((title) => newItem(title, agentFields()));
-  updateTodos(resolveBoard(flags), (todos) => todos.items.push(...items));
+  updateTodos(addingBoard(flags), (todos) => todos.items.push(...items));
   return { data: { items } };
 }
 
@@ -266,7 +276,7 @@ export function todoAdd(flags) {
     worktree: Boolean(flags.worktree),
     ...agentFields(flags.owner),
   });
-  updateTodos(resolveBoard(flags), (todos) => todos.items.push(item));
+  updateTodos(addingBoard(flags), (todos) => todos.items.push(item));
   return { data: item };
 }
 

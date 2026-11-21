@@ -49,6 +49,18 @@ test('current --line prints one sentence inside a workspace', (t) => {
   assert.equal(result.stdout.trim().split('\n').length, 1);
 });
 
+test('current --line says when the workspace has no Tasks', (t) => {
+  const box = sandbox(t);
+  const manifest = box.app();
+  const address = manifest.terminals[0].terminal;
+  assert.match(box.hws(['current', '--line', '--terminal', address]).stdout, /has no Tasks/);
+  assert.equal(box.json(['current', '--line', '--terminal', address]).tasks, false);
+
+  box.rewriteManifest(manifest.id, (draft) => ({ ...draft, board: { space: 'spB', tab: 'tbB' } }));
+  assert.doesNotMatch(box.hws(['current', '--line', '--terminal', address]).stdout, /Tasks/);
+  assert.equal(box.json(['current', '--line', '--terminal', address]).tasks, true);
+});
+
 test('current --line prints nothing outside a workspace', (t) => {
   const box = sandbox(t);
   box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t1', 'p1')])])] });

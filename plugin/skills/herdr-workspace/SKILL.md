@@ -56,7 +56,12 @@ When the person lands a decision mid-session, such as "we're going with X", offe
 
 ## Task list
 
-All the spaces in a workspace share one task list. The person sees it in Tasks. The task list exists only inside a workspace, so when `hws current --line` prints nothing, tell the person Tasks needs a workspace and run none of these commands. These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
+All the spaces in a workspace share one task list. The person sees it in Tasks. Check `hws current --line` before you use it or mention it.
+
+- It prints nothing outside a workspace. Tell the person Tasks needs a workspace, and run none of these commands.
+- It says the workspace has no Tasks when no one has added them. Tell the person, and never send them to Tasks or promise a card there.
+
+These commands find the list from this terminal's space. They fail and ask for `--space` when Herdr cannot place the terminal.
 
 | Command | Does |
 |---|---|
@@ -64,7 +69,7 @@ All the spaces in a workspace share one task list. The person sees it in Tasks. 
 | `hws todo status --json` | Prints what is ready, in flight and waiting, without the text of finished cards |
 | `hws todo add --title="..."` | Adds a card for follow-up work the person should see |
 
-A workspace starts with no Tasks space, and cards still save without one. Run `hws board add` when the person asks for Tasks or the work needs a place for agents to run from. It adds one Tasks space to this workspace, and running it again finds the same one.
+A workspace starts with no Tasks space, and `hws todo add` from an agent fails until it has one. Run `hws board add` only when the person asks for Tasks. It adds one Tasks space to this workspace, and running it again finds the same one.
 
 Every card has an owner.
 

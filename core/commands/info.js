@@ -8,13 +8,14 @@ function oneLine(manifest) {
   const instructions = manifest.instructions?.trim();
   const custom = instructions ? `\n\nWorkspace instructions:\n${instructions}` : '';
   const kind = manifest.kind === 'general' ? '' : `${manifest.kind} `;
-  return `This terminal is in the ${kind}workspace "${manifest.name}" at ${manifest.folder}.${custom}`;
+  const tasks = manifest.board ? '' : ' It has no Tasks, so it has no task list for cards.';
+  return `This terminal is in the ${kind}workspace "${manifest.name}" at ${manifest.folder}.${tasks}${custom}`;
 }
 
 function currentLine(terminal) {
   const manifest = terminal ? locateTerminal(terminal).manifest : null;
   const line = manifest ? oneLine(manifest) : '';
-  return { data: { line: line || null }, text: line };
+  return { data: { line: line || null, tasks: Boolean(manifest?.board) }, text: line };
 }
 
 export function current(flags) {

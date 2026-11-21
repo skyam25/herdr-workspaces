@@ -35,7 +35,7 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 
 | Source | When | Says |
 |---|---|---|
-| Session-start hook | Every Claude session in a Herdr terminal | The workspace, where files land, how fresh the note is, and how to review, write notes, declare outputs and ask questions |
+| Session-start hook | Every Claude session in a Herdr terminal | The workspace, where files land, how fresh the note is, the task list when the workspace has Tasks, and how to review, write notes, declare outputs and ask questions |
 | `herdr-workspace` skill | The person mentions a workspace, tasks, a surface or review | Full command reference |
 | Feature skills | On matching requests | `sketch-board`, `wireframe`, `outline-first`, `behavior-review`, `feedback-items`, `tidy`, `orchestrate` |
 | Delivered prompts | Each Done | What the person did and the `hws` command to run next |

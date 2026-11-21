@@ -8,11 +8,12 @@ import { liveFixtures, sandbox as plainSandbox } from './helpers.js';
 
 const { space, tab, terminal } = liveFixtures;
 
-// Agents use a Board only inside a workspace.
+// Agents use a Board only inside a workspace that has Tasks.
 
 function sandbox(t) {
   const box = plainSandbox(t);
   box.inWorkspace('sp1');
+  box.rewriteManifest('sp1', (draft) => ({ ...draft, board: { space: 'spB', tab: 'tbB' } }));
   return box;
 }
 
@@ -68,7 +69,7 @@ test('todo add needs a title that is not blank', (t) => {
 
 test('todo list prints unarchived items, newest updatedAt first', (t) => {
   const box = sandbox(t);
-  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'], workspace: 'sp1' });
+  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'], workspace: 'sp1', tasks: true });
 
   const first = add(box, 'first');
   const second = add(box, 'second');
@@ -1130,13 +1131,27 @@ test('an agent in a plain space cannot use the Board', (t) => {
 test('a plain space has no Board for the person either', (t) => {
   const box = plainSandbox(t);
 
-  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'], workspace: null });
+  assert.deepEqual(box.json(['todo', 'list', '--space', 'sp1']), { items: [], orchestrator: null, spaces: ['sp1'], workspace: null, tasks: false });
   for (const args of [['add', '--title', 'x'], ['send', '--id', 'a', '--terminal', 't7'], ['reply', '--id', 'a', '--text', 'go'], ['resume', '--id', 'a'], ['status']]) {
     const result = box.hws(['todo', ...args, '--space', 'sp1']);
     assert.notEqual(result.code, 0, args[0]);
     assert.match(result.stderr, /only available inside a workspace/);
   }
   assert.equal(existsSync(todoFile(box)), false);
+});
+
+test('an agent cannot add a card to a workspace with no Tasks', (t) => {
+  const box = plainSandbox(t);
+  box.inWorkspace('sp1');
+  box.setState({ spaces: [space('sp1', [tab('tb1', [terminal('t7', 'p7')])])], selected: 'sp1' });
+
+  for (const args of [['--title', 'x'], ['--titles', 'x\ny']]) {
+    const result = box.hws(['todo', 'add', ...args, '--space', 'sp1'], { HC_TERMINAL_ID: 't7' });
+    assert.notEqual(result.code, 0, args[0]);
+    assert.match(result.stderr, /has no Tasks/);
+  }
+  assert.equal(existsSync(todoFile(box)), false);
+  assert.equal(box.json(['todo', 'list', '--space', 'sp1'], { HC_TERMINAL_ID: 't7' }).tasks, false);
 });
 
 test('an agent can reach a workspace board from any terminal', (t) => {
