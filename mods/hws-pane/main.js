@@ -5,10 +5,11 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { props, run, theme, home, exec, hc, nextCommand, shared, setShared, openOverlay, checking } from "herdr";
+import { props, run, theme, home, exec, hc, nextCommand, shared, setShared, openOverlay, checking, settings } from "herdr";
 import { panes, terminals, spaces, inRender } from "./live.js";
 import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { LABEL, sweep } from "./parked.js";
+import { copy } from "./clipboard.js";
 
 const CHAT = "hws-chat";
 const BOARD = "hws-work";
@@ -179,6 +180,30 @@ export default class Pane extends View {
       .child(svg(`mods/hws-pane/${name}.svg`).size(14));
   }
 
+  // The terminal's hc address. People quote it to agents in other conversations, so a click copies it.
+  addressChip(t, address, pane) {
+    return div()
+      .id(`ph-addr-${pane}`)
+      .flex_none()
+      .px(4)
+      .rounded(RADIUS.control)
+      .font_family(settings()?.font_family ?? "JetBrains Mono")
+      .text_size(TEXT.id)
+      .text_color(t.dim)
+      .cursor_pointer()
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip(`Terminal ${address}. Click to copy`)
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        copy(address).then(
+          () => toast({ title: `Copied ${address}`, timeout: 2000 }),
+          (e) => toast({ title: "Couldn't copy", body: plainError(e), level: "error" }),
+        );
+        cx.notify();
+      })
+      .child(address);
+  }
+
   // Opens the + menu at the pointer. A chat pane speaks for the agent parked behind it.
   openActions(self, agent) {
     const space = spaces().find((s) => s.tabs.some((c) => c.id === self.tab))?.id;
@@ -294,6 +319,7 @@ export default class Pane extends View {
     const canAct = canSwitch && !(agent ?? self.terminal ?? "").includes("/");
     const confirming = Boolean(agent) && this.ending;
     const boards = canAct ? boardsOf(agent ?? self.terminal) : [];
+    const address = chatMode ? agent : self.terminal;
 
     return h_flex()
       .id(`pane-head-${pane}`)
@@ -309,6 +335,7 @@ export default class Pane extends View {
       .on_click(() => run("pane.focus", { pane }))
       .when(Boolean(pic), (el) => el.child(pic))
       .child(div().flex_none().max_w(260).min_w(0).truncate().font_medium().text_color(t.foreground).child(name))
+      .when(Boolean(address), (el) => el.child(this.addressChip(t, address, pane)))
       .child(div().flex_shrink_1().min_w(0).truncate().text_color(t.dim).child(folder(board ? null : p.cwd)))
       .child(div().flex_1())
       .when(p.status === "working", (el) => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))

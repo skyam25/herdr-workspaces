@@ -54,6 +54,15 @@ const NOTE_RULE = [
   "Never rewrite the current note yourself. Only a tidy pass may, because it records what the note covers.",
 ].join(" ");
 
+// The pane header shows this address, so the person quotes it across conversations.
+// A tab name can't stand in for it, because one tab holds several terminals.
+const terminalContext = (terminal) => [
+  `This session runs in the Herdr terminal ${terminal}, and the person sees that address in this pane's header.`,
+  "When the person names a terminal by an address such as `t7`, or `machine/t7` on another machine, it is a herdr-core address.",
+  "Pass it straight to `hc read`, `hc send` or `--terminal`, and run `hc ls` to list every live terminal. A tab name is not an address, because one tab can hold several terminals.",
+  "`hc --skill` prints the full hc manual. The older `herdr` command, `HERDR_ENV` and pane ids belong to the Herdr TUI and do not work here.",
+].join(" ");
+
 const LISTED_ARTIFACTS = 12;
 
 // `hws current --line` says a workspace has no Tasks in its first line. Instructions follow on later lines.
@@ -161,7 +170,7 @@ async function main() {
 
   const kept = Boolean(status?.places?.current);
   const tasks = Boolean(line) && !hasNoTasks(line);
-  const context = [workspace.filter(Boolean).join(" "), kept && NOTE_RULE, kept && artifactsContext(scan), tasks && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PASTE, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, matchContext(match)].filter(Boolean).join("\n\n");
+  const context = [workspace.filter(Boolean).join(" "), inHerdrApp() && terminalContext(terminal), kept && NOTE_RULE, kept && artifactsContext(scan), tasks && inHerdrApp() && TASK_LIST, line && inHerdrApp() && REVIEW, inHerdrApp() && NOTE_EDITOR, inHerdrApp() && PASTE, inHerdrApp() && OUTPUTS, inHerdrApp() && ASK, matchContext(match)].filter(Boolean).join("\n\n");
   if (!context) return;
 
   await print(

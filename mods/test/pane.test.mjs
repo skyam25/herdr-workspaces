@@ -36,6 +36,25 @@ test("an agent pane shows the switch and a shell pane does not", async () => {
   assert.equal((await mount("hws-pane", { pane: "p1" })).has("ph-mode-p1-chat"), false);
 });
 
+test("a terminal pane shows its address, and a click copies it", async () => {
+  const H = world({ panes: [SHELL] });
+  const m = await mount("hws-pane", { pane: "p1" });
+  assert.match(m.text(), /\bt1\b/);
+  await m.click("ph-addr-p1");
+  const copied = H.calls.find((c) => c.command === "sh");
+  assert.equal(copied?.args.at(-1), "t1");
+  assert.equal(H.runs.some((r) => r.name === "pane.focus"), false);
+});
+
+test("a chat pane shows its parked agent's address, and a mod pane shows none", async () => {
+  world({ panes: [CHAT_PANE], terminals: [parked("t7")] });
+  assert.equal((await mount("hws-pane", { pane: "p2" })).has("ph-addr-p2"), true);
+  assert.match((await mount("hws-pane", { pane: "p2" })).text(), /\bt7\b/);
+
+  world({ panes: [{ pane: "p3", terminal: null, tab: "tb1", focused: true, mod: "hws-panel", title: "hws-panel" }] });
+  assert.equal((await mount("hws-pane", { pane: "p3" })).has("ph-addr-p3"), false);
+});
+
 test("the workspace panel's pane is titled Workspace", async () => {
   world({ panes: [{ pane: "p3", terminal: null, tab: "tb1", focused: true, mod: "hws-panel", title: "hws-panel" }] });
   const m = await mount("hws-pane", { pane: "p3" });

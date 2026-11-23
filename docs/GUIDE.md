@@ -26,7 +26,7 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 | Workspace panel | Current note, what the note doesn't cover yet, artifacts, agents, open surfaces, where files go |
 | Right panel, Outputs | Each agent's declared deliverables, then touched documents, with Review, Open as note and Copy path |
 | Right panel, Tasks | The workspace's cards, owners and orchestrator |
-| Pane header | Chat or Terminal for an agent, and Resume or Show for its windows |
+| Pane header | The terminal's address, such as `t94`, which a click copies. Chat or Terminal for an agent, and Resume or Show for its windows |
 | Surfaces | Sketch, note, review page, outline, questions. Done delivers, Pop out and Pop in move them |
 
 ## What an agent gets
@@ -35,7 +35,7 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 
 | Source | When | Says |
 |---|---|---|
-| Session-start hook | Every Claude session in a Herdr terminal | The workspace, where files land, how fresh the note is, the task list when the workspace has Tasks, and how to review, write notes, declare outputs and ask questions |
+| Session-start hook | Every Claude session in a Herdr terminal | The workspace, where files land, how fresh the note is, its own terminal address and how to reach another, the task list when the workspace has Tasks, and how to review, write notes, declare outputs and ask questions |
 | `herdr-workspace` skill | The person mentions a workspace, tasks, a surface or review | Full command reference |
 | Feature skills | On matching requests | `sketch-board`, `wireframe`, `outline-first`, `behavior-review`, `feedback-items`, `tidy`, `orchestrate` |
 | Delivered prompts | Each Done | What the person did and the `hws` command to run next |
@@ -56,6 +56,7 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 | Feedback items and behavior rules | `hws surface cli --type page -- feedback\|behavior ...` |
 | Reopen earlier work | `hws review ARTIFACT`, `hws surface open --type board --artifact A`, `hws surface resume --id S` |
 | Update the current note | Load `herdr-workspaces:tidy`. Never rewrite the note directly |
+| Reach a terminal the person names, such as `t7` | `hc read T`, `hc send T "text"`, `--terminal T`. `hc ls` lists them |
 
 After opening any surface, the agent ends its turn. The person's answer arrives as the next prompt.
 

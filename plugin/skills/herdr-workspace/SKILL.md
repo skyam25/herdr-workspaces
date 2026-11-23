@@ -1,6 +1,6 @@
 ---
 name: herdr-workspace
-description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane or window, asks to open a note or file in the Herdr editor rather than VS Code, asks to look over, comment on or give feedback on a page or document, or asks to reopen a sketch, note or page from earlier. Explains how to read the workspace, use the space's task list, hand a page to the user for review, reopen earlier work, declare outputs, ask the user questions and ask for input through a surface.
+description: This skill should be used when the user mentions a workspace, a Herdr workspace or "this workspace", mentions the task list, to-dos, Tasks or the Board, asks what is in the workspace, what artifacts it has or where files should land, asks to sketch, draw, write or review something in a pane or window, asks to open a note or file in the Herdr editor rather than VS Code, asks to look over, comment on or give feedback on a page or document, asks to reopen a sketch, note or page from earlier, or names another terminal by its address, such as t7. Explains how to read the workspace, use the space's task list, hand a page to the user for review, reopen earlier work, reach another terminal, declare outputs, ask the user questions and ask for input through a surface.
 ---
 
 # Herdr workspace
@@ -197,6 +197,20 @@ This runs the surface command line against this terminal's newest open surface. 
 | `feedback` | `herdr-workspaces:feedback-items` |
 
 For a UI mockup that needs no surface, load `herdr-workspaces:wireframe`. It renders an SVG with `${CLAUDE_PLUGIN_ROOT}/bin/wireframe-render.mjs`.
+
+## Reach another terminal
+
+Every Herdr terminal has a herdr-core address, such as `t94`, or `macminim1/t14` on another machine. This session's address is `$HC_TERMINAL_ID`. Each pane header shows its terminal's address, and a click copies it, so the person quotes it from one conversation to another.
+
+| To | Run |
+|---|---|
+| See every live terminal, with its folder and agent | `hc ls` |
+| Read a terminal's screen and history | `hc read T --lines 100` |
+| Send a terminal a message | `hc send T "text"` |
+| Open a surface for another terminal | `hws surface open ... --terminal T` |
+| Drive another terminal's surface | `hws surface cli --terminal T -- VERB` |
+
+Use the address the person gives. Never pick a terminal by its tab, because one tab can hold several terminals. The `where` field in `hc ls` names a tab, so it can match several terminals too. `hc --skill` prints the full hc manual. The older `herdr` command, `HERDR_ENV` and pane ids belong to the Herdr TUI and do not work in the Herdr app.
 
 ## Declare outputs
 

@@ -127,6 +127,8 @@ const ASK =
 const PASTE =
   "When the person asks for text to paste somewhere else, such as a message, an email or a post, write it to a Markdown file instead of printing it, and open it with `hws surface open --type note --file F --terminal $HC_TERMINAL_ID`, then end the turn. In a workspace, put the file in `hws place scratch`. The note's Copy button copies it as rich text. When they ask for changes, edit the same file, because the open note reloads it.";
 const HERDR_TAIL = `${NOTE_EDITOR}\n\n${PASTE}\n\n${OUTPUTS}\n\n${ASK}`;
+const TERMINAL =
+  "This session runs in the Herdr terminal t13, and the person sees that address in this pane's header. When the person names a terminal by an address such as `t7`, or `machine/t7` on another machine, it is a herdr-core address. Pass it straight to `hc read`, `hc send` or `--terminal`, and run `hc ls` to list every live terminal. A tab name is not an address, because one tab can hold several terminals. `hc --skill` prints the full hc manual. The older `herdr` command, `HERDR_ENV` and pane ids belong to the Herdr TUI and do not work here.";
 
 function contextOf(result) {
   assert.equal(result.status, 0);
@@ -276,7 +278,7 @@ describe("session-start hook", () => {
 
     assert.equal(
       contextOf(run(HOOK, { bundle: HERDR_APP })),
-      `${HERDR_TAIL}\n\n` +
+      `${TERMINAL}\n\n${HERDR_TAIL}\n\n` +
       'This folder belongs to the Herdr workspace "checkout demo", but this space is not part of it, so its instructions and task list do not apply here. The person can add this space from the Workspace panel. Mention this only if the person asks about the workspace, its task list or its notes, and do not act on it yourself.',
     );
     assert.deepEqual(calls(), [REGISTER, "bin current --line", "bin space match --json"].sort());
@@ -377,7 +379,12 @@ describe("session-start hook", () => {
 
   it("teaches only the Herdr app paragraphs outside a workspace in a Herdr app terminal", () => {
     homeStub({ current: ":" });
-    assert.equal(contextOf(run(HOOK, { bundle: HERDR_APP })), HERDR_TAIL);
+    assert.equal(contextOf(run(HOOK, { bundle: HERDR_APP })), `${TERMINAL}\n\n${HERDR_TAIL}`);
+  });
+
+  it("names this terminal's address right after the workspace line", () => {
+    homeStub();
+    assert.ok(contextOf(run(HOOK, { bundle: HERDR_APP, terminal: "t9z" })).startsWith(`${LINE}\n\nThis session runs in the Herdr terminal t9z,`));
   });
 
   it("leaves out the note editor in another app's terminal", () => {

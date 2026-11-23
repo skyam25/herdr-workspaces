@@ -1645,8 +1645,9 @@ test("hws-new, hws-panel and hws-actions carry the same hws.js", () => {
   assert.equal(read("../hws-new/hws.js"), read("../hws-actions/hws.js"));
 });
 
-test("hws-panel and hws-work carry the same clipboard.js", () => {
+test("hws-panel, hws-work and hws-pane carry the same clipboard.js", () => {
   assert.equal(read("../hws-panel/clipboard.js"), read("../hws-work/clipboard.js"));
+  assert.equal(read("../hws-panel/clipboard.js"), read("../hws-pane/clipboard.js"));
 });
 
 test("every element method used exists in gpui-kit.d.ts", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {
