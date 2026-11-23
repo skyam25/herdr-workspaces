@@ -1,5 +1,5 @@
 // Copies text to the clipboard.
-// Keep this file identical in hws-panel, hws-work and hws-pane. test/simulate.test.mjs compares them.
+// Keep this file identical in hws-panel and hws-work. test/simulate.test.mjs compares them.
 
 import { exec, window } from "herdr";
 

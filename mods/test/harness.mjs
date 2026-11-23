@@ -136,6 +136,7 @@ export async function mount(mod, props, H = globalThis.__herdr) {
   const cx = {
     notify() {},
     stop_propagation() {},
+    write_to_clipboard(text) { H.clipboard = text; },
     focus_handle: () => ({ focus() {}, is_focused: () => false }),
     spawn: (fn) => { fn(cx); },
     sleep: () => new Promise(() => {}),

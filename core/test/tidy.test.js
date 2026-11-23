@@ -930,6 +930,7 @@ test('a note lands in notes and a board in artifacts, each named by its title', 
   const terminal = manifest.terminals[0].terminal;
   const finish = (type, title) => {
     const surface = box.json(['surface', 'open', '--type', type, '--in-pane', '--title', title, '--terminal', terminal]);
+    box.json(['surface', 'save', '--id', surface.id]);
     box.json(['surface', 'done', '--id', surface.id, '--bundle', box.bundle(`bundle-${surface.id}`)]);
     return box.manifest(manifest.id).artifacts.at(-1);
   };

@@ -41,6 +41,19 @@ export interface SurfaceConfig {
   workspace?: { id: string; name: string };
   /** The stand-in session's folder, as `hws` names it. Unset leaves `sessionCwd` to work it out. */
   sessionFolder?: string;
+  /** Save holds the surface. */
+  saved?: boolean;
+  /** Days unsaved work waits after its terminal ends before it goes to the Trash. */
+  recentDays: number;
+}
+
+/** `recentDays` when `hws` does not pass it. */
+export const RECENT_DAYS = 7;
+
+/** A positive number of days, or the default. */
+function recentDaysFrom(raw: string | undefined): number {
+  const days = Number(raw);
+  return raw && Number.isFinite(days) && days > 0 ? days : RECENT_DAYS;
 }
 
 /** The surface this process hosts, or undefined when it runs as the plain app. */
@@ -65,6 +78,8 @@ export function surfaceFromEnv(env: NodeJS.ProcessEnv): SurfaceConfig | undefine
     ...(env.HWS_SURFACE_WEB === '1' ? { web: true } : {}),
     ...(env.HWS_WORKSPACE_ID ? { workspace: { id: env.HWS_WORKSPACE_ID, name: env.HWS_WORKSPACE_NAME ?? '' } } : {}),
     ...(env.HWS_SESSION_FOLDER ? { sessionFolder: env.HWS_SESSION_FOLDER } : {}),
+    ...(env.HWS_SURFACE_SAVED === '1' ? { saved: true } : {}),
+    recentDays: recentDaysFrom(env.HWS_RECENT_DAYS),
   };
 }
 
@@ -282,7 +297,7 @@ function writeAnswers(dataDir: string, answers: Answers): void {
 /** Names the draft `hws` is being handed. `hws` closes the pane on success, which ends this process before it can settle. */
 const handedFile = (dataDir: string) => join(dataDir, 'handed-off.json');
 
-type HwsResult = { standalone?: boolean; artifact?: string; link?: string; text?: string; deliveryError?: string; message?: string };
+type HwsResult = { standalone?: boolean; artifact?: string; link?: string; text?: string; deliveryError?: string; message?: string; saved?: boolean };
 
 const POLL_WAIT_S = 25;
 const RETRY_MS = 1000;
@@ -315,6 +330,8 @@ export class SurfaceHost {
       shown: cfg.shown,
       ...(cfg.web ? { web: true } : {}),
       ...(cfg.workspace ? { workspace: cfg.workspace } : {}),
+      ...(cfg.saved ? { saved: true } : {}),
+      recentDays: cfg.recentDays,
       ...(cfg.type === 'questions' ? readRound(cfg.dataDir) : {}),
     };
   }
@@ -384,6 +401,11 @@ export class SurfaceHost {
   private async pop(): Promise<void> {
     if (this.state.busy || this.state.delivered || this.cfg.web) return;
     const to = this.cfg.shown === 'pane' ? 'window' : 'pane';
+    await this.flushThen(['surface', 'pop', '--id', this.cfg.id, '--to', to, '--json'], 'Could not move');
+  }
+
+  /** Saves pending work, then runs `hws`, which may end this host part-way. `after` turns its answer into state. */
+  private async flushThen(args: string[], failText: string, after: (result: HwsResult) => Partial<SurfaceState> = () => ({})): Promise<void> {
     this.update({ busy: true });
     try {
       await this.deps.flush?.();
@@ -392,10 +414,9 @@ export class SurfaceHost {
       return;
     }
     try {
-      await this.hws(['surface', 'pop', '--id', this.cfg.id, '--to', to, '--json']);
-      this.update({ busy: false });
+      this.update({ busy: false, ...after(await this.hws(args)) });
     } catch (err) {
-      this.update({ busy: false, notice: { text: `Could not move: ${(err as Error).message}`, error: true } });
+      this.update({ busy: false, notice: { text: `${failText}: ${(err as Error).message}`, error: true } });
     }
   }
 
@@ -418,19 +439,28 @@ export class SurfaceHost {
    */
   async move(workspace: string): Promise<void> {
     if (this.state.busy || this.state.delivered || this.cfg.shown !== 'window') return;
+    await this.flushThen(['surface', 'move', '--id', this.cfg.id, '--workspace', workspace, '--json'], 'Could not move');
+  }
+
+  /** Asks `hws` to save this surface, or to clear Saved, and shows what it reports. */
+  async save(saved: boolean): Promise<void> {
+    if (this.state.busy || this.state.delivered || this.cfg.web || this.cfg.type === 'questions') return;
     this.update({ busy: true });
     try {
-      await this.deps.flush?.();
+      const result = await this.hws(['surface', 'save', '--id', this.cfg.id, ...(saved ? [] : ['--off']), '--json']);
+      this.update({ busy: false, saved: typeof result.saved === 'boolean' ? result.saved : saved });
     } catch (err) {
-      this.update({ busy: false, notice: { text: `Could not save before moving: ${(err as Error).message}`, error: true } });
-      return;
+      this.update({ busy: false, notice: { text: `${saved ? 'Could not save' : 'Could not clear Saved'}: ${(err as Error).message}`, error: true } });
     }
-    try {
-      await this.hws(['surface', 'move', '--id', this.cfg.id, '--workspace', workspace, '--json']);
-      this.update({ busy: false });
-    } catch (err) {
-      this.update({ busy: false, notice: { text: `Could not move: ${(err as Error).message}`, error: true } });
-    }
+  }
+
+  /**
+   * Saves pending work, then asks `hws` to save this Unfiled surface to a workspace.
+   * `hws` moves it first, which ends this host and starts the window again there.
+   */
+  async saveTo(workspace: string): Promise<void> {
+    if (this.state.busy || this.state.delivered || this.cfg.web || this.cfg.type === 'questions' || this.cfg.shown !== 'window') return;
+    await this.flushThen(['surface', 'save', '--id', this.cfg.id, '--workspace', workspace, '--json'], 'Could not save', (result) => ({ saved: result.saved !== false }));
   }
 
   private async focusOwner(): Promise<void> {

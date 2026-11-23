@@ -52,6 +52,21 @@ export function ago(ms) {
 
 const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
+const DAY_MS = 86_400_000;
+
+// When unheld work goes to the Trash, or null with no date. Days round up, and under one day reads today.
+export function trashLabel(expiresAt, now) {
+  if (typeof expiresAt !== "number") return null;
+  const left = expiresAt - now;
+  return left < DAY_MS ? "Trash today" : `Trash in ${plural(Math.ceil(left / DAY_MS), "day")}`;
+}
+
+// How long a surface or artifact lasts: Saved, its Trash date, Round-trip, or null for kept work.
+export function lifetimeLabel(item, now) {
+  if (item?.saved) return "Saved";
+  return trashLabel(item?.expiresAt, now) ?? (item?.transient ? "Round-trip" : null);
+}
+
 // A status without `behind` is the fake's empty answer or an older hws, so it counts as none.
 export const validStatus = (status) => (status && typeof status === "object" && status.behind && typeof status.behind === "object" ? status : null);
 

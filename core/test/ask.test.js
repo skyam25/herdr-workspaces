@@ -190,7 +190,7 @@ test('done delivers the answers as one prompt, files them as a message and close
   assert.deepEqual(box.json(['artifact', 'scan', '--workspace', manifest.id]).tracked, []);
 });
 
-test('a closed window with an answer stays as a draft, and one with none goes at prune', (t) => {
+test('a closed window with an answer stays as a draft, and one with none goes once its owner ends', (t) => {
   const { box, manifest, owner } = setup(t);
   const surface = box.json(['ask', '--file', askFile(box), '--terminal', owner, '--window']);
   box.setState({ hc: { t90: 'missing' } });
@@ -200,6 +200,10 @@ test('a closed window with an answer stays as a draft, and one with none goes at
   assert.deepEqual(box.json(['surface', 'list']).map((item) => [item.id, item.type, item.open]), [[surface.id, 'questions', false]]);
 
   writeFileSync(join(dataOf(box, manifest, surface), 'answers.json'), JSON.stringify({ answers: { deadline: { answer: '' } } }));
+  box.json(['prune']);
+  assert.equal(box.manifest(manifest.id).surfaces.length, 1);
+
+  box.setState({ hc: { t90: 'missing', [owner]: 'missing' } });
   box.json(['prune']);
   assert.deepEqual(box.manifest(manifest.id).surfaces, []);
   assert.ok(!existsSync(join(manifest.folder, '.herdr-workspace', `${manifest.name}-${manifest.id.slice(-6)}`, 'scratch', 'drafts')));

@@ -3,8 +3,8 @@
 // --apply uninstalls the plugin and moves the app and its data to the Trash.
 
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 import {
   MARKETPLACE,
@@ -21,14 +21,15 @@ import {
   pluginEnabled,
   pluginInstalled,
 } from '../agent-brief.js';
-import { findArtifactWhere, freeName, linkFor, readScene } from '../artifacts.js';
+import { findArtifactWhere, readScene } from '../artifacts.js';
 import { checkout } from '../checkout.js';
+import { copyBoardBundle, writeDraftFile } from '../drafts.js';
 import { HwsError } from '../errors.js';
 import { appHome } from '../forks.js';
 import { herdrVersion } from '../herdr-version.js';
 import { scanInstructions } from '../instruction-scan.js';
 import { ensureStandaloneManifest, listManifests, updateManifest } from '../manifest.js';
-import { expandFolder, home, slug } from '../paths.js';
+import { expandFolder, home } from '../paths.js';
 import { writablePlace } from '../places.js';
 import { remembered } from '../settings.js';
 import { moveToTrash } from '../trash.js';
@@ -36,8 +37,6 @@ import { newId } from './surface.js';
 
 const HWS_PLUGIN = 'herdr-workspaces@herdr-workspaces';
 const QUIT_POLL_MS = 250;
-const SCENE = 'board.excalidraw';
-const ATTACHMENT = /\(att:([\w-]+)\)/g;
 
 const tilde = (path) => (path === home() || path.startsWith(`${home()}/`) ? `~${path.slice(home().length)}` : path);
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -107,13 +106,6 @@ function addUnfiled(record) {
   });
 }
 
-function boardPrompt(dir, name, extras) {
-  const lines = [`Sketch "${name}", imported from Agent Brief.`, '', `The drawing is ${linkFor(join(dir, SCENE))}.`];
-  if (extras.includes('notes.md')) lines.push(`Its notes are ${linkFor(join(dir, 'notes.md'))}.`);
-  if (extras.includes('comments.json')) lines.push(`Its pinned comments are ${linkFor(join(dir, 'comments.json'))}.`);
-  return `${lines.join('\n')}\n`;
-}
-
 function importBoard(source, place) {
   const name = basename(source, '.excalidraw');
   const kind = 'board';
@@ -126,38 +118,10 @@ function importBoard(source, place) {
   }
   const id = newId('a');
   const dir = join(place, id);
-  mkdirSync(dir, { recursive: true });
-  copyFileSync(source, join(dir, SCENE));
-  const extras = [];
-  for (const [suffix, target] of [['.comments.json', 'comments.json'], ['.notes.md', 'notes.md']]) {
-    const side = join(source, '..', `${name}${suffix}`);
-    if (existsSync(side)) {
-      copyFileSync(side, join(dir, target));
-      extras.push(target);
-    }
-  }
-  const prompt = join(dir, 'prompt.md');
-  writeFileSync(prompt, boardPrompt(dir, name, extras));
+  const prompt = copyBoardBundle(dirname(source), name, dir, { title: name, origin: 'imported from Agent Brief' });
   const record = { id, type: kind, title: name, path: dir, prompt, fromTerminal: null, createdAt: statSync(source).mtimeMs, status: 'current', supersedes: null, importedFrom: source };
   addUnfiled(record);
   return { imported: { kind, name, source, artifact: id, path: dir } };
-}
-
-// The draft's title, else its first line with words, as Agent Brief's list showed it.
-function draftTitle(draft) {
-  if (typeof draft.title === 'string' && draft.title.trim()) return draft.title.trim();
-  const first = draft.body
-    .split('\n')
-    .map((line) => line.replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/^\s*(?:#+|[-*+]|\d+[.)]|>)\s*/, '').trim())
-    .find(Boolean);
-  return (first ?? draft.id).slice(0, 60);
-}
-
-// Pasted pictures live in the draft as data URLs, so the Markdown carries them inline.
-function draftMarkdown(draft, title) {
-  const body = draft.body.replace(ATTACHMENT, (whole, id) => (draft.attachments?.[id] ? `(${draft.attachments[id]})` : whole)).trimEnd();
-  const headed = new RegExp(`^#\\s+${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`).test(body.split('\n')[0] ?? '');
-  return draft.title && !headed ? `# ${title}\n\n${body}\n` : `${body}\n`;
 }
 
 function importDraft(source, place) {
@@ -177,9 +141,7 @@ function importDraft(source, place) {
     const reason = draft.outline?.path ? `an outline, whose text lives in ${draft.outline.path}` : 'empty';
     return { skipped: { kind, name, source, reason } };
   }
-  const title = draftTitle({ ...draft, id: draft.id ?? name });
-  const file = freeName(place, `${slug(title)}.md`);
-  writeFileSync(file, draftMarkdown(draft, title));
+  const { title, file } = writeDraftFile(draft, place, name);
   const id = newId('a');
   const createdAt = Number.isFinite(draft.createdAt) ? draft.createdAt : statSync(source).mtimeMs;
   addUnfiled({ id, type: 'file', title, path: file, prompt: file, fromTerminal: null, createdAt, status: 'current', supersedes: null, importedFrom: source });

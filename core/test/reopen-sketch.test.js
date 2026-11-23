@@ -146,7 +146,7 @@ test('a closed draft keeps its edits, and a closed empty one starts from the art
   assert.ok(existsSync(join(data, 'seed', 'board.excalidraw')));
 });
 
-test('a reopened sketch closed without edits goes at prune, and an edited one stays a draft', (t) => {
+test('a reopened sketch closed without edits goes once its owner ends, and an edited one stays a draft', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
@@ -156,6 +156,7 @@ test('a reopened sketch closed without edits goes at prune, and an edited one st
 
   // Stands in for the host: it loads the seed into boards/ and records what it put there.
   const openSeeded = () => {
+    box.setState({ hc: {} });
     const surface = box.json(['surface', 'open', '--type', 'board', '--artifact', artifact.id, '--terminal', owner]);
     const data = dataDir(box, manifest.id, surface.id);
     assert.ok(existsSync(join(data, 'seed', 'board.excalidraw')));
@@ -164,7 +165,7 @@ test('a reopened sketch closed without edits goes at prune, and an edited one st
     writeFileSync(join(data, 'boards', 'flow.excalidraw'), scene([{ id: 'r2', version: 4 }, { id: 'r1', customData: { createdAt: 5 } }, { id: 'old', isDeleted: true }]));
     writeFileSync(join(data, 'boards', 'flow.comments.json'), JSON.stringify({ overall: '', pins: [pin] }, null, 2));
     writeFileSync(join(data, 'seeded.json'), JSON.stringify({ board: 'flow', elements: ['r1:1', 'r2:4'], comments: { overall: '', pins: [pin] } }));
-    box.setState({ hc: { t90: 'missing' } });
+    box.setState({ hc: { t90: 'missing', [owner]: 'missing' } });
     return { surface, data };
   };
   const listed = () => box.json(['surface', 'list']).map((item) => item.id);

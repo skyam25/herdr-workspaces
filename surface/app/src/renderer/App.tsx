@@ -349,7 +349,16 @@ function Panel({ host, info, controller, scene, book, shelf, items, outputs, ini
     <SurfacePlace surface={surface} onAct={surfaceAct} onTargets={() => host.surfaceTargets()} onMove={(workspace) => void host.surfaceMove(workspace)} />
   );
   const sendBar = surface ? (
-    <SurfaceBar surface={surface} mic={questioning ? undefined : micButton} claim={claimed} onDone={done} onAct={surfaceAct} />
+    <SurfaceBar
+      surface={surface}
+      mic={questioning ? undefined : micButton}
+      claim={claimed}
+      onDone={done}
+      onAct={surfaceAct}
+      onSave={(saved) => void host.surfaceSave(saved)}
+      onTargets={() => host.surfaceTargets()}
+      onSaveTo={(workspace) => void host.surfaceSaveTo(workspace)}
+    />
   ) : (
     <SendTo
       sessions={sessions}

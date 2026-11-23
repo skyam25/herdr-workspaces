@@ -674,6 +674,17 @@ button.stop-talk:hover {
   gap: 6px;
 }
 
+.send-to .surface-save {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.send-to .surface-save.saved {
+  color: var(--muted);
+}
+
 .send-to .divider {
   flex: none;
   width: 1px;

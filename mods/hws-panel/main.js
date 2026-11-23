@@ -11,7 +11,7 @@ import { agents, panes, spaces, focused, props, exec, hc, theme, run, openOverla
 import { hws, message, submitDialog, openWorkspaceForm, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 import { startSidebar, drawSidebar } from "./sidebar.js";
 import { initRename, renderConfirm, renderRename, renderRowMenu, renderStageMenu } from "./rowmenu.js";
-import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, nameList, noteLines, placeRows, resolvePath, taskCounts, typeLabel, validStatus } from "./context.js";
+import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, nameList, noteLines, lifetimeLabel, placeRows, resolvePath, taskCounts, typeLabel, validStatus } from "./context.js";
 import { openCite, openExternally, revealPath, showBoard } from "./cites.js";
 import { renderArtifactMenu } from "./artifactmenu.js";
 import { initMoveSpace, initSpaceMenu, renderMoveSpace, renderSpaceMenu, spaceRef } from "./spacemenu.js";
@@ -451,7 +451,8 @@ export default class Panel extends View {
     const livePanes = new Set(panes().map((p) => p.pane));
     const drafts = new Set((shared("hws-pane.boards") ?? []).filter((b) => !b.open).map((b) => b.id));
     const owner = (s) => (s.terminal ? agents().find((a) => a.address === s.terminal) : null);
-    const detail = (s) => [typeLabel(s.type), owner(s) ? agentName(owner(s)) : !s.terminal && "standalone", drafts.has(s.id) && "draft"].filter(Boolean).join(" · ");
+    const now = Date.now();
+    const detail = (s) => [typeLabel(s.type), owner(s) ? agentName(owner(s)) : !s.terminal && "standalone", drafts.has(s.id) && "draft", lifetimeLabel(s, now)].filter(Boolean).join(" · ");
     return v_flex()
       .flex_none()
       .gap(1)

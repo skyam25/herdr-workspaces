@@ -5,11 +5,11 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { closeOverlay, focused, openOverlay, props } from "herdr";
 import { hws, message, submitDialog, formKeys, dialogRoot, dialogFooter, button, problemLine } from "./hws.js";
-import { ago, typeLabel } from "./context.js";
+import { ago, lifetimeLabel, trashLabel, typeLabel } from "./context.js";
 import { openCite } from "./cites.js";
 
 const MOD = "hws-panel";
-const UNFILED_DIALOG = { width: 520, height: 480 };
+const UNFILED_DIALOG = { width: 640, height: 480 };
 const MOVE_DIALOG = { width: 440, height: 420 };
 
 // `standalone` is the workspace id hws gives work that belongs to no workspace.
@@ -19,11 +19,19 @@ const icon = (name) => `mods/workspace-chrome/${name}.svg`;
 
 export const STATE_LABELS = { open: "open", draft: "draft", pane: "in a pane" };
 
+// The move dialog's verbs. Save and Keep file the item and hold it for good.
+const MOVE_MODES = {
+  move: { heading: (title) => `Move ${title} to a workspace`, busy: "Moving…" },
+  save: { heading: (title) => `Save ${title} to a workspace`, busy: "Saving…" },
+  keep: { heading: (title) => `Keep ${title} in a workspace`, busy: "Keeping…" },
+};
+
 export function openUnfiled() {
   openOverlay({ mod: MOD, kind: "dialog", modal: true, ...UNFILED_DIALOG, props: { view: "unfiled" } });
 }
 
-// `item` is `{ kind: "surface" | "artifact", id, title, from }`.
+// `item` is `{ kind: "surface" | "artifact", id, title, from, mode? }`, where `mode` is
+// "save" or "keep" for a pick that also holds the item.
 export function openMoveItem(item) {
   openOverlay({ mod: MOD, kind: "dialog", modal: true, ...MOVE_DIALOG, props: { view: "move-item", ...item } });
 }
@@ -131,39 +139,42 @@ function trashTip(surface) {
   return null;
 }
 
-function surfaceRow(t, view, surface) {
+// Saving an unfiled surface moves it, so Save… needs its own window, as Move… does.
+function surfaceRow(t, view, surface, now) {
   const title = !surface.title || surface.title === surface.type ? typeLabel(surface.type) : surface.title;
-  const canTrash = surface.state === "draft";
+  const detail = [typeLabel(surface.type), STATE_LABELS[surface.state] ?? surface.state, trashLabel(surface.expiresAt, now)].filter(Boolean).join(" · ");
+  const moves = { enabled: !view.busy && surface.state !== "pane", tip: surface.state === "pane" ? "Pop it out to its own window first" : null };
+  const canSave = !surface.saved && surface.type !== "questions";
   return itemRow(t, {
     id: surface.id,
     glyph: icon(surface.type === "note" ? "file-text" : surface.type === "page" ? "files" : "square-pen"),
     title,
-    detail: view.busy?.endsWith(surface.id) ? "Working…" : `${typeLabel(surface.type)} · ${STATE_LABELS[surface.state] ?? surface.state}`,
+    detail: view.busy?.endsWith(surface.id) ? "Working…" : detail,
     actions: [
       smallButton(t, `unfiled-open-${surface.id}`, "Open", (_e, cx) => act(view, `open-${surface.id}`, () => openSurface(surface), cx), { enabled: !view.busy }),
-      smallButton(t, `unfiled-move-${surface.id}`, "Move…", () => moveItem({ kind: "surface", id: surface.id, title }), {
-        enabled: !view.busy && surface.state !== "pane",
-        tip: surface.state === "pane" ? "Pop it out to its own window first" : null,
-      }),
+      smallButton(t, `unfiled-move-${surface.id}`, "Move…", () => moveItem({ kind: "surface", id: surface.id, title }), moves),
+      ...(canSave ? [smallButton(t, `unfiled-save-${surface.id}`, "Save…", () => moveItem({ kind: "surface", id: surface.id, title, mode: "save" }), moves)] : []),
       smallButton(t, `unfiled-trash-${surface.id}`, "Trash", (_e, cx) => act(view, `trash-${surface.id}`, () => hws(["surface", "discard", "--id", surface.id]), cx), {
-        enabled: !view.busy && canTrash,
+        enabled: !view.busy && surface.state === "draft",
         tip: trashTip(surface),
       }),
     ],
   });
 }
 
+// A round-trip goes to the Trash once its terminal ends, unless it is kept.
 function artifactRow(t, view, artifact, now) {
   const title = artifact.title || typeLabel(artifact.type) || artifact.id;
-  const when = artifact.createdAt ? ` · ${ago(now - artifact.createdAt)}` : "";
+  const detail = [lifetimeLabel(artifact, now) ?? "saved", artifact.createdAt && ago(now - artifact.createdAt)].filter(Boolean).join(" · ");
   return itemRow(t, {
     id: artifact.id,
     glyph: icon("archive"),
     title,
-    detail: view.busy?.endsWith(artifact.id) ? "Working…" : `saved${when}`,
+    detail: view.busy?.endsWith(artifact.id) ? "Working…" : detail,
     actions: [
       smallButton(t, `unfiled-open-${artifact.id}`, "Open", (_e, cx) => act(view, `open-${artifact.id}`, () => openSaved(artifact), cx), { enabled: !view.busy }),
       smallButton(t, `unfiled-move-${artifact.id}`, "Move…", () => moveItem({ kind: "artifact", id: artifact.id, title }), { enabled: !view.busy }),
+      ...(artifact.transient ? [smallButton(t, `unfiled-keep-${artifact.id}`, "Keep…", () => moveItem({ kind: "artifact", id: artifact.id, title, mode: "keep" }), { enabled: !view.busy })] : []),
       smallButton(t, `unfiled-trash-${artifact.id}`, "Trash", (_e, cx) => act(view, `trash-${artifact.id}`, () => hws(["artifact", "trash", artifact.id]), cx), { enabled: !view.busy }),
     ],
   });
@@ -196,7 +207,7 @@ export function renderUnfiled(t, view) {
             .overflow_y_scrollbar()
             .when(view.unfiled === null, (el) => el.child(div().h(32).flex_none().px(8).flex().items_center().text_color(t.dim).child("Loading…")))
             .when(isEmpty, (el) => el.child(div().h(32).flex_none().px(8).flex().items_center().text_color(t.dim).child("Nothing is unfiled.")))
-            .when(surfaces.length > 0, (el) => el.child(groupTitle(t, "Open and drafts")).children(surfaces.map((s) => surfaceRow(t, view, s))))
+            .when(surfaces.length > 0, (el) => el.child(groupTitle(t, "Open and drafts")).children(surfaces.map((s) => surfaceRow(t, view, s, now))))
             .when(artifacts.length > 0, (el) => el.child(groupTitle(t, "Saved")).children(artifacts.map((a) => artifactRow(t, view, a, now)))),
         )
         .when(Boolean(view.problem), (el) => el.child(problemLine(t, view.problem))),
@@ -226,11 +237,17 @@ export function initMoveItem(view, cx) {
   });
 }
 
-function moveTo(view, workspaceId, cx) {
-  const p = props();
-  const command = p.kind === "artifact" ? ["artifact", "move", p.id, "--workspace", workspaceId] : ["surface", "move", "--id", p.id, "--workspace", workspaceId];
-  submitDialog(view, `move-${workspaceId}`, () => hws(command), cx);
+function moveCommand({ kind, id, mode }, workspaceId) {
+  if (mode === "save") return ["surface", "save", "--id", id, "--workspace", workspaceId];
+  if (mode === "keep") return ["artifact", "keep", id, "--workspace", workspaceId];
+  return kind === "artifact" ? ["artifact", "move", id, "--workspace", workspaceId] : ["surface", "move", "--id", id, "--workspace", workspaceId];
 }
+
+function moveTo(view, workspaceId, cx) {
+  submitDialog(view, `move-${workspaceId}`, () => hws(moveCommand(props(), workspaceId)), cx);
+}
+
+const modeOf = (p) => MOVE_MODES[p.mode] ?? MOVE_MODES.move;
 
 function destinationRow(t, view, { id, glyph, label, detail, onClick }) {
   return h_flex()
@@ -249,7 +266,7 @@ function destinationRow(t, view, { id, glyph, label, detail, onClick }) {
 
 function workspaceRow(t, view, workspace, suggested) {
   const moving = view.busy === `move-${workspace.id}`;
-  const detail = moving ? "Moving…" : suggested ? "The space you are in" : workspace.kind === "throwaway" ? "Throwaway" : null;
+  const detail = moving ? modeOf(props()).busy : suggested ? "The space you are in" : workspace.kind === "throwaway" ? "Throwaway" : null;
   return destinationRow(t, view, { id: `move-to-${workspace.id}`, glyph: icon("layers"), label: workspace.name, detail, onClick: (_e, cx) => moveTo(view, workspace.id, cx) });
 }
 
@@ -259,7 +276,10 @@ export function renderMoveItem(t, view) {
   const targets = view.targets;
   const others = (targets?.workspaces ?? []).filter((w) => w.id !== targets.current && w.id !== targets.suggested);
   const suggested = (targets?.workspaces ?? []).find((w) => w.id === targets?.suggested && w.id !== targets.current) ?? null;
-  const canUnfile = Boolean(targets) && targets.current !== STANDALONE && targets.current !== null;
+  const mode = modeOf(p);
+
+  // Save and Keep file the item, so they never offer Unfiled.
+  const canUnfile = !p.mode && Boolean(targets) && targets.current !== STANDALONE && targets.current !== null;
   const unfile = destinationRow(t, view, {
     id: "move-to-standalone",
     glyph: "mods/hws-panel/inbox.svg",
@@ -277,7 +297,7 @@ export function renderMoveItem(t, view) {
         .min_h(0)
         .p(18)
         .gap(10)
-        .child(div().flex_none().text_size(15).font_semibold().truncate().child(`Move ${p.title || "this"} to a workspace`))
+        .child(div().flex_none().text_size(15).font_semibold().truncate().child(mode.heading(p.title || "this")))
         .when(p.kind === "surface", (el) => el.child(div().flex_none().text_color(t.muted).whitespace_normal().child("An open window closes and opens again in its new workspace.")))
         .child(
           v_flex()

@@ -109,6 +109,7 @@ test('a place with another writer is read and never written', (t) => {
 
   const terminal = manifest.terminals[0].terminal;
   const surface = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'flow', '--terminal', terminal]);
+  box.json(['surface', 'save', '--id', surface.id]);
   const bundle = box.bundle('bundle-refused');
   const refused = box.hws(['surface', 'done', '--id', surface.id, '--bundle', bundle]);
   assert.equal(refused.code, 1);
@@ -144,7 +145,7 @@ test('done lands a kept bundle in a custom artifacts place with status current',
   const manifest = box.app();
   box.json(['set', '--workspace', manifest.id, '--place', 'artifacts=docs/outputs']);
 
-  const { artifact, done } = box.finishGlued(manifest);
+  const { artifact, done } = box.finishGlued(manifest, undefined, { save: true });
 
   const expected = join(manifest.folder, 'docs', 'outputs', `flow-${artifact.id}`);
   assert.equal(done.artifact, artifact.id);
@@ -169,7 +170,7 @@ test('done still lands a default kept bundle under the workspace folder', (t) =>
   const box = sandbox(t);
   const manifest = box.app();
   mkdirSync(join(manifest.folder, 'docs'));
-  const { artifact } = box.finishGlued(manifest);
+  const { artifact } = box.finishGlued(manifest, undefined, { save: true });
   assert.equal(artifact.path, join(ownDir(manifest), 'artifacts', `flow-${artifact.id}`));
   assert.equal(artifact.status, 'current');
 });

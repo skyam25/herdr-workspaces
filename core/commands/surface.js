@@ -22,8 +22,9 @@ import {
   windowStatus,
 } from '../herdr.js';
 import { TIDY_ROLE, ensureStandaloneManifest, listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
-import { HOST_SCRIPT, STANDALONE, SURFACE_CLI, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
+import { HOST_SCRIPT, STANDALONE, SURFACE_CLI, roundTripDir, slug, socketPath, stateRoot, surfaceDataDir, workspaceDir } from '../paths.js';
 import { isForeign, isKept, placeOf, writablePlace } from '../places.js';
+import { recentDays } from '../settings.js';
 import { callingTerminal, requireCallingTerminal, requireFlag, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
@@ -208,7 +209,7 @@ function paneTerminal(live, pane) {
   return null;
 }
 
-const paneIsOpen = (live, pane) => paneTerminal(live, pane) !== null;
+export const paneIsOpen = (live, pane) => paneTerminal(live, pane) !== null;
 
 // The folder the host's stand-in session works in for a page or note on a local file.
 // Empty for anything else, so the host keeps its work folder.
@@ -216,6 +217,9 @@ function sessionFolderOf(workspace, { type, file }) {
   if (!file || isUrl(file) || type === 'board' || type === 'questions') return '';
   return projectRootFor(workspace.folder, file);
 }
+
+// Every write of a record shows or moves the surface, which holds it again, so it no longer expires.
+const held = ({ expiresAt: _gone, ...surface }) => surface;
 
 // Records the session folder on a surface, so `hws surface cli` can pass it on.
 function withSessionFolder(workspace, surface) {
@@ -225,7 +229,7 @@ function withSessionFolder(workspace, surface) {
 }
 
 // `owner` is set only for a surface in its own window. A sketch's drawing arrives as a seed, never as a file.
-function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
+function hostArgv({ workspace, id, type, title, terminal, file, owner, saved }) {
   const environment = {
     HWS_HOME: stateRoot(),
     HWS_SURFACE_ID: id,
@@ -237,6 +241,8 @@ function hostArgv({ workspace, id, type, title, terminal, file, owner }) {
     HWS_SURFACE_FILE: type === 'board' ? '' : file,
     HWS_FOLDER: workspace.folder,
     HWS_SESSION_FOLDER: sessionFolderOf(workspace, { type, file }),
+    HWS_SURFACE_SAVED: saved ? '1' : '',
+    HWS_RECENT_DAYS: String(recentDays()),
     COMPANION_SOCKET: socketPath(id),
     COMPANION_DATA_DIR: surfaceDataDir(workspace.id, id),
     ...(owner === undefined ? {} : { HWS_SURFACE_WINDOW: '1', HWS_SURFACE_OWNER: owner }),
@@ -374,8 +380,11 @@ async function openOn(flags, { windowed, terminal, source, prepare }) {
   prepare?.(dataDir);
 
   const owner = windowed ? (terminal ? windowOwnerLabel(live, terminal, placement) : '') : undefined;
-  const argv = hostArgv({ workspace, id: surfaceId, type: flags.type, title, terminal, file, owner });
-  const fileFields = { ...(file ? { file } : {}), ...(reopens ? { reopens } : {}) };
+  const saved = Boolean(already?.saved);
+  const argv = hostArgv({ workspace, id: surfaceId, type: flags.type, title, terminal, file, owner, saved });
+
+  // Save outlives a reopening. Expiry does not, because the surface is held again.
+  const fileFields = { ...(file ? { file } : {}), ...(reopens ? { reopens } : {}), ...(saved ? { saved } : {}) };
 
   if (windowed) {
     const host = runDetached(argv, workspace.folder);
@@ -398,7 +407,7 @@ async function openOn(flags, { windowed, terminal, source, prepare }) {
 function replaceSurface(workspaceId, surface) {
   let stored;
   updateManifest(workspaceId, (draft) => {
-    stored = withSessionFolder(draft, surface);
+    stored = withSessionFolder(draft, held(surface));
     draft.surfaces = draft.surfaces.filter((item) => item.id !== surface.id);
     draft.surfaces.push(stored);
   });
@@ -408,7 +417,7 @@ function replaceSurface(workspaceId, surface) {
 // Rewrites a record where it stands. A prune may drop a record whose host just ended, so it comes back.
 function rewriteSurface(workspaceId, surface) {
   updateManifest(workspaceId, (draft) => {
-    const stored = withSessionFolder(draft, surface);
+    const stored = withSessionFolder(draft, held(surface));
     const at = draft.surfaces.findIndex((item) => item.id === surface.id);
     if (at === -1) draft.surfaces.push(stored);
     else draft.surfaces[at] = stored;
@@ -449,14 +458,20 @@ function feedbackFields(manifest, surface) {
   return { role: FEEDBACK_ROLE, title: `Feedback on ${surface.title}`, file, reviewOf: artifactOfFile(manifest, file)?.id ?? null };
 }
 
-// Kept bundles land under the workspace's artifacts place. The surface's record stays.
+// Where a bundle lives. A kept workspace's folders are for people to read, so kept bundles
+// carry their titles there, and round-trips stay under the state root.
+export function bundleDir(manifest, { type, title }, artifactId, { transient }) {
+  if (!isKept(manifest)) return join(writablePlace(manifest, 'artifacts'), artifactId);
+  if (transient) return join(roundTripDir(manifest.id), artifactId);
+  return join(writablePlace(manifest, type === 'note' ? 'notes' : 'artifacts'), `${slug(title)}-${artifactId}`);
+}
+
+// A saved surface files kept work. Any other surface files a round-trip. The surface's record stays.
 // A reopened sketch's bundle replaces the one it reopened, and a second press replaces the first.
 export function archiveBundle({ manifest, surface }, bundle) {
   const artifactId = newId('a');
-
-  // A kept workspace's folders are for people to read, so its bundles carry their titles.
-  const place = surface.type === 'note' && isKept(manifest) ? 'notes' : 'artifacts';
-  const artifactDir = join(writablePlace(manifest, place), isKept(manifest) ? `${slug(surface.title)}-${artifactId}` : artifactId);
+  const transient = !surface.saved;
+  const artifactDir = bundleDir(manifest, surface, artifactId, { transient });
   const prompt = moveBundle(bundle, artifactDir);
   const review = surface.type === 'questions' ? { role: ANSWERS_ROLE } : isTidyReview(manifest, surface) ? { role: TIDY_ROLE } : feedbackFields(manifest, surface);
   const artifact = {
@@ -468,17 +483,25 @@ export function archiveBundle({ manifest, surface }, bundle) {
     fromTerminal: surface.terminal,
     createdAt: Date.now(),
     status: 'current',
+    ...(transient ? { transient } : {}),
     ...review,
   };
   updateManifest(manifest.id, (draft) => {
-    const old = surface.reopens ? draft.artifacts.find((item) => item.id === surface.reopens) : null;
-    if (surface.reopens) artifact.supersedes = old ? old.id : null;
-    if (old) old.status = 'superseded';
-    draft.artifacts.push(artifact);
+    pushArtifact(draft, artifact, surface.reopens);
     const record = draft.surfaces.find((item) => item.id === surface.id);
     if (record?.reopens) record.reopens = artifactId;
   });
   return artifact;
+}
+
+// Adds an artifact to a manifest draft. A sketch's new version supersedes the artifact it reopened.
+export function pushArtifact(draft, artifact, reopens) {
+  if (reopens) {
+    const old = draft.artifacts.find((item) => item.id === reopens);
+    artifact.supersedes = old ? old.id : null;
+    if (old) old.status = 'superseded';
+  }
+  draft.artifacts.push(artifact);
 }
 
 export function dropSurface(manifest, surface) {
@@ -522,20 +545,36 @@ function findWindow(surfaceId) {
   return found;
 }
 
-// Lists every window and draft, oldest first. A closed window with nothing on it is left out.
+// Terminal liveness, asked once per terminal for one listing or prune. Covers owners and window hosts.
+export function liveCheck() {
+  const known = new Map();
+  return (terminal) => {
+    if (!terminal) return false;
+    if (!known.has(terminal)) known.set(terminal, isTerminalAlive(terminal));
+    return known.get(terminal);
+  };
+}
+
+const lifeFields = (surface) => ({ saved: Boolean(surface.saved), expiresAt: surface.expiresAt ?? null });
+
+// Prune writes expiresAt only on a surface with work, so it answers without reading the data folder.
+const holdsWork = (manifest, surface) => surface.saved || Boolean(surface.expiresAt) || hasDraftWork(manifest.id, surface.id);
+
+// Lists every window and draft, oldest first. A closed window with no work, no Save and no live owner is left out.
 export function surfaceList() {
+  const live = liveCheck();
   const windows = listManifests({ includeStandalone: true }).flatMap((manifest) =>
     manifest.surfaces
-      .filter((surface) => surface.host)
+      .filter((surface) => surface.host && (live(surface.host) || holdsWork(manifest, surface) || live(surface.terminal)))
       .map((surface) => ({
         id: surface.id,
         type: surface.type,
         title: surface.title,
         terminal: surface.terminal,
         workspace: manifest.id,
-        open: isWindowOpen(surface),
-      }))
-      .filter((surface) => surface.open || hasDraftWork(manifest.id, surface.id)),
+        open: live(surface.host),
+        ...lifeFields(surface),
+      })),
   );
   return { data: windows, text: windows.map((item) => `${item.id} ${item.open ? 'open' : 'draft'} ${item.title}`).join('\n') };
 }
@@ -546,19 +585,28 @@ export function unfiledList() {
   const manifest = listManifests({ includeStandalone: true }).find((item) => item.id === STANDALONE);
   if (!manifest) return { data: { surfaces: [], artifacts: [] }, text: 'nothing unfiled' };
   const live = listLive() ?? { spaces: [] };
+  const alive = liveCheck();
   const stateOf = (surface) => {
     if (!surface.host) return paneIsOpen(live, surface.pane) ? 'pane' : null;
-    if (isWindowOpen(surface)) return 'open';
-    return hasDraftWork(manifest.id, surface.id) ? 'draft' : null;
+    if (alive(surface.host)) return 'open';
+    return holdsWork(manifest, surface) || alive(surface.terminal) ? 'draft' : null;
   };
   const surfaces = manifest.surfaces
-    .map((surface) => ({ id: surface.id, type: surface.type, title: surface.title, file: surface.file ?? null, state: stateOf(surface) }))
+    .map((surface) => ({ id: surface.id, type: surface.type, title: surface.title, file: surface.file ?? null, state: stateOf(surface), ...lifeFields(surface) }))
     .filter((surface) => surface.state)
     .reverse();
   const artifacts = manifest.artifacts
-    .map((artifact) => ({ id: artifact.id, type: artifact.type, title: artifact.title, path: artifact.path, createdAt: artifact.createdAt ?? null }))
+    .map((artifact) => ({
+      id: artifact.id,
+      type: artifact.type,
+      title: artifact.title,
+      path: artifact.path,
+      createdAt: artifact.createdAt ?? null,
+      transient: Boolean(artifact.transient),
+      expiresAt: artifact.expiresAt ?? null,
+    }))
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-  const lines = [...surfaces.map((item) => `${item.id}\t${item.state}\t${item.title}`), ...artifacts.map((item) => `${item.id}\tsaved\t${item.title}`)];
+  const lines = [...surfaces.map((item) => `${item.id}\t${item.state}\t${item.title}`), ...artifacts.map((item) => `${item.id}\t${item.transient ? 'round-trip' : 'saved'}\t${item.title}`)];
   return { data: { surfaces, artifacts }, text: lines.join('\n') || 'nothing unfiled' };
 }
 
@@ -578,7 +626,7 @@ function raiseWindow(surface) {
 // Starts a window host on the surface's id, data folder, title, file and owner.
 function startWindow(manifest, surface, live) {
   const owner = surface.terminal ? windowOwnerLabel(live, surface.terminal, {}) : '';
-  const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: surface.file ?? '', owner });
+  const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: surface.file ?? '', owner, saved: surface.saved });
   const host = runDetached(argv, manifest.folder);
   return { host, pid: terminalInfo(host)?.pid ?? null };
 }
@@ -635,7 +683,7 @@ async function popOut(manifest, surface, live) {
 async function popIn(manifest, surface, live) {
   const placement = popInPlacement(live, surface);
   await endHost(live, surface);
-  const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: surface.file ?? '' });
+  const argv = hostArgv({ workspace: manifest, id: surface.id, type: surface.type, title: surface.title, terminal: surface.terminal, file: surface.file ?? '', saved: surface.saved });
   const opened = placement.pane
     ? act('pane.split', { direction: 'right', pane: placement.pane, argv })
     : act('tab.new', { name: surface.title, space: placement.space, folder: manifest.folder, argv });
@@ -759,7 +807,7 @@ export async function surfaceMove(flags) {
   }
 
   dropSurface(manifest, surface);
-  let moved = { ...surface };
+  let moved = surface;
   if (wasOpen) {
     const { host, pid } = startWindow(target, surface, live);
     moved = { ...moved, host, pid };
@@ -783,15 +831,44 @@ export function surfaceTargets(flags) {
   };
 }
 
+// Moves a surface's data folder and its linked drafts to the Trash.
+export function trashSurfaceData(workspaceId, surfaceId) {
+  const data = surfaceDataDir(workspaceId, surfaceId);
+  if (!existsSync(data)) return;
+  const drafts = linkedDraftHome(data);
+  moveToTrash([data, ...(drafts ? [drafts] : [])]);
+}
+
 // A discarded draft is user work, so it goes to the Trash.
 export function surfaceDiscard(flags) {
   const { manifest, surface } = findWindow(requireFlag(flags, 'id'));
   if (isWindowOpen(surface)) throw new HwsError('close that window before discarding it');
-  const data = surfaceDataDir(manifest.id, surface.id);
-  const drafts = linkedDraftHome(data);
-  if (existsSync(data)) moveToTrash([data, ...(drafts ? [drafts] : [])]);
+  trashSurfaceData(manifest.id, surface.id);
   dropSurface(manifest, surface);
   return { data: { id: surface.id, discarded: true }, text: `discarded ${surface.id}` };
+}
+
+// Save holds a surface until Discard. A standalone surface moves to a workspace first,
+// because saved work gets its home in a workspace folder.
+export async function surfaceSave(flags) {
+  const surfaceId = requireFlag(flags, 'id');
+  const { manifest, surface } = findSurface(surfaceId);
+  if (surface.type === 'questions') throw new HwsError('a round of questions cannot be saved');
+  const off = Boolean(flags.off);
+  const moves = !off && manifest.id === STANDALONE;
+  if (moves && !flags.workspace) throw new UsageError('pass --workspace W, because saved work lives in a workspace');
+  if (moves && !surface.host) throw new HwsError('pop the surface out to its own window before moving it');
+
+  // The flag lands first, so a window the move restarts starts as saved.
+  updateManifest(manifest.id, (draft) => {
+    const record = draft.surfaces.find((item) => item.id === surfaceId);
+    if (!record) return;
+    delete record.expiresAt;
+    if (off) delete record.saved;
+    else record.saved = true;
+  });
+  const workspace = moves ? (await surfaceMove({ id: surfaceId, workspace: flags.workspace })).data.workspace : manifest.id;
+  return { data: { id: surfaceId, saved: !off, workspace }, text: `${off ? 'unsaved' : 'saved'} ${surfaceId}` };
 }
 
 export async function surfaceDone(flags) {

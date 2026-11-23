@@ -140,15 +140,29 @@ test('targets suggests the workspace of the selected space and names the current
   assert.equal(box.json(['surface', 'targets', '--id', surface.id]).suggested, null);
 });
 
-test('artifact move files an unfiled bundle under the workspace and points its prompt there', (t) => {
+test('artifact move keeps a round-trip under the state root of a kept workspace', (t) => {
   const { box, manifest } = unfiledBox(t);
   const note = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'Login flow', '--standalone']);
   box.json(['surface', 'done', '--id', note.id, '--bundle', box.bundle('bundle-flow')]);
   const [artifact] = box.manifest('standalone').artifacts;
+  assert.equal(artifact.transient, true);
 
-  const moved = box.json(['artifact', 'move', artifact.id, '--workspace', manifest.id]);
+  box.json(['artifact', 'move', artifact.id, '--workspace', manifest.id]);
 
-  assert.equal(moved.moved, true);
+  const [record] = box.manifest(manifest.id).artifacts;
+  assert.deepEqual([record.path, record.transient], [join(box.root, 'workspaces', manifest.id, 'artifacts', artifact.id), true]);
+});
+
+test('artifact keep files an unfiled round-trip under the workspace folder and points its prompt there', (t) => {
+  const { box, manifest } = unfiledBox(t);
+  const note = box.json(['surface', 'open', '--type', 'board', '--in-pane', '--title', 'Login flow', '--standalone']);
+  box.json(['surface', 'done', '--id', note.id, '--bundle', box.bundle('bundle-flow')]);
+  const [artifact] = box.manifest('standalone').artifacts;
+  assert.equal(box.hws(['artifact', 'keep', artifact.id]).code, 2);
+
+  const kept = box.json(['artifact', 'keep', artifact.id, '--workspace', manifest.id]);
+
+  assert.equal(kept.transient, undefined);
   assert.deepEqual(box.manifest('standalone').artifacts, []);
   const [record] = box.manifest(manifest.id).artifacts;
   assert.equal(record.id, artifact.id);

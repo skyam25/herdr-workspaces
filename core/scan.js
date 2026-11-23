@@ -4,6 +4,7 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
+import { isTrackedWork } from './artifacts.js';
 import { allPlaces, homeOf, isKept } from './places.js';
 
 const MAX_DEPTH = 4;
@@ -122,7 +123,7 @@ function linkedFrom(docs, home) {
 }
 
 function trackedOf(manifest) {
-  return manifest.artifacts.filter((item) => !item.role).map(({ id, type, title, path, status }) => ({ id, type, title: title ?? null, path, status: status ?? 'current' }));
+  return manifest.artifacts.filter(isTrackedWork).map(({ id, type, title, path, status }) => ({ id, type, title: title ?? null, path, status: status ?? 'current' }));
 }
 
 function candidatesOf(manifest, tracked) {

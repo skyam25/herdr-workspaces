@@ -54,10 +54,21 @@ function hasAnswers(data) {
   return fileHasWork(join(data, ANSWERS_FILE), (file) => Object.values(file.answers ?? {}).some(isAnswered));
 }
 
-// True when a closed window left a drawing, comments, a note or an answer worth coming back to.
-export function hasDraftWork(workspaceId, surfaceId) {
+// The names of boards whose drawing or comments hold work, without `.excalidraw`.
+export function boardsWithWork(workspaceId, surfaceId) {
   const data = surfaceDataDir(workspaceId, surfaceId);
   const boards = join(data, 'boards');
   const seeded = unchangedSeed(data);
-  return filesIn(boards).some((name) => boardFileHasWork(boards, name, seeded)) || filesIn(join(data, 'drafts')).length > 0 || hasAnswers(data);
+  const names = filesIn(boards).filter((name) => boardFileHasWork(boards, name, seeded)).map((name) => name.replace(/\.(excalidraw|comments\.json)$/, ''));
+  return [...new Set(names)];
+}
+
+// True when a closed window left a drawing, comments, a note or an answer worth coming back to.
+// The cheap checks run first, and the board check stops at the first board with work.
+export function hasDraftWork(workspaceId, surfaceId) {
+  const data = surfaceDataDir(workspaceId, surfaceId);
+  if (filesIn(join(data, 'drafts')).length > 0 || hasAnswers(data)) return true;
+  const boards = join(data, 'boards');
+  const seeded = unchangedSeed(data);
+  return filesIn(boards).some((name) => boardFileHasWork(boards, name, seeded));
 }

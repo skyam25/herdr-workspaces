@@ -12,6 +12,9 @@ export const FEEDBACK_ROLE = 'feedback';
 // Marks the answers to an `hws ask` round, which are a message too.
 export const ANSWERS_ROLE = 'answers';
 
+// Stream work, which scan and freshness track. Reviews, answers and round-trips are messages.
+export const isTrackedWork = (artifact) => !artifact.role && !artifact.transient;
+
 // Follows symlinks, so /tmp and /private/tmp compare equal. A missing path
 // takes the real path of its nearest existing folder, with the rest appended.
 export function realOf(path) {

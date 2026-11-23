@@ -2,16 +2,18 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { SurfaceAction, SurfaceState, SurfaceTargets } from '../shared/ipc';
 import type { FooterClaim } from './footer-send';
 import { usePointerOutside } from './hooks';
-import { ChevronIcon, FolderIcon, InboxIcon, PopInIcon, PopOutIcon } from './Icons';
+import { CheckIcon, ChevronIcon, FolderIcon, InboxIcon, PopInIcon, PopOutIcon } from './Icons';
 
 const UNFILED = 'standalone';
+
+const isUnfiled = (surface: SurfaceState) => !surface.workspace?.name;
 
 /** Where this surface is filed, and a menu that moves it when it shows in its own window. */
 function WorkspaceChip(props: { surface: SurfaceState; onTargets: () => Promise<SurfaceTargets>; onMove: (workspace: string) => void }) {
   const { surface } = props;
   const [open, setOpen] = useState(false);
   const name = surface.workspace?.name || 'Unfiled';
-  const unfiled = !surface.workspace?.name;
+  const unfiled = isUnfiled(surface);
   const movable = surface.shown === 'window' && !surface.busy && !surface.delivered;
   return (
     <div className="anchor">
@@ -28,12 +30,19 @@ function WorkspaceChip(props: { surface: SurfaceState; onTargets: () => Promise<
         <span className="label">{name}</span>
         {surface.shown === 'window' && <ChevronIcon />}
       </button>
-      {open && <MoveMenu onTargets={props.onTargets} onMove={(id) => (setOpen(false), props.onMove(id))} onClose={() => setOpen(false)} />}
+      {open && <MoveMenu align="start" onTargets={props.onTargets} onMove={(id) => (setOpen(false), props.onMove(id))} onClose={() => setOpen(false)} />}
     </div>
   );
 }
 
-function MoveMenu(props: { onTargets: () => Promise<SurfaceTargets>; onMove: (workspace: string) => void; onClose: () => void }) {
+/** A menu of workspaces. `title` heads it, and `align` pins it to its anchor's left or right edge. */
+export function MoveMenu(props: {
+  title?: string;
+  align: 'start' | 'end';
+  onTargets: () => Promise<SurfaceTargets>;
+  onMove: (workspace: string) => void;
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [targets, setTargets] = useState<SurfaceTargets | undefined>();
   const [failed, setFailed] = useState<string | undefined>();
@@ -56,7 +65,14 @@ function MoveMenu(props: { onTargets: () => Promise<SurfaceTargets>; onMove: (wo
     </button>
   );
   return (
-    <div className="popover-panel up start move-menu" ref={ref} role="menu" aria-label="Move to workspace" data-testid="move-menu">
+    <div
+      className={`popover-panel up ${props.align} move-menu`}
+      ref={ref}
+      role="menu"
+      aria-label={props.title ?? 'Move to workspace'}
+      data-testid="move-menu"
+    >
+      {props.title && <h3 className="move-title">{props.title}</h3>}
       {failed && <p className="muted">{failed}</p>}
       {!targets && !failed && <p className="muted">Loading workspaces…</p>}
       {suggested && (
@@ -67,7 +83,7 @@ function MoveMenu(props: { onTargets: () => Promise<SurfaceTargets>; onMove: (wo
       )}
       {targets && (
         <>
-          <h3>{suggested ? 'Other workspaces' : 'Move to'}</h3>
+          {(suggested || !props.title) && <h3>{suggested ? 'Other workspaces' : 'Move to'}</h3>}
           {others.length ? others.map((w) => row(w.id, w.name, <FolderIcon />)) : <p className="muted">No other workspace is open.</p>}
         </>
       )}
@@ -118,6 +134,63 @@ export function SurfacePlace(props: {
   );
 }
 
+/** What the Save control shows, and what a click on it does. */
+export interface SaveControl {
+  label: 'Save' | 'Saved';
+  /** What a click does. `menu` opens the workspaces to save an Unfiled surface to. */
+  click: 'save' | 'unsave' | 'menu';
+  disabled: boolean;
+  title: string;
+}
+
+/** The Save control for a surface, or undefined where it is hidden. */
+export function saveControl(surface: SurfaceState): SaveControl | undefined {
+  if (surface.type === 'questions' || surface.web) return undefined;
+  const days = Math.ceil(surface.recentDays);
+  const rule = `Unsaved work goes to the Trash ${days} ${days === 1 ? 'day' : 'days'} after its terminal ends.`;
+  const blocked = !!surface.busy || !!surface.delivered;
+  if (surface.saved) return { label: 'Saved', click: 'unsave', disabled: blocked, title: `Saved, so this stays. Click to clear Saved. ${rule}` };
+  if (!isUnfiled(surface)) return { label: 'Save', click: 'save', disabled: blocked, title: `Keep this work. ${rule}` };
+  const inWindow = surface.shown === 'window';
+  const lead = inWindow ? 'Save this to a workspace.' : 'Pop it out to save it to a workspace.';
+  return { label: 'Save', click: 'menu', disabled: blocked || !inWindow, title: `${lead} ${rule}` };
+}
+
+/** Save, or Saved with a check. On an Unfiled surface it opens the workspaces to save to. */
+function SaveButton(props: { control: SaveControl; onSave: (saved: boolean) => void; onTargets: () => Promise<SurfaceTargets>; onSaveTo: (workspace: string) => void }) {
+  const { control } = props;
+  const [open, setOpen] = useState(false);
+  const click = () => {
+    if (control.click === 'menu') setOpen((o) => !o);
+    else props.onSave(control.click === 'save');
+  };
+  return (
+    <div className="anchor">
+      <button
+        className={control.label === 'Saved' ? 'ghost surface-save saved' : 'ghost surface-save'}
+        disabled={control.disabled}
+        title={control.title}
+        aria-pressed={control.label === 'Saved'}
+        {...(control.click === 'menu' ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open } : {})}
+        onClick={click}
+        data-testid="surface-save"
+      >
+        {control.label === 'Saved' && <CheckIcon />}
+        <span className="label">{control.label}</span>
+      </button>
+      {open && (
+        <MoveMenu
+          title="Save to a workspace"
+          align="end"
+          onTargets={props.onTargets}
+          onMove={(id) => (setOpen(false), props.onSaveTo(id))}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 /** Done's label, with the count of what a view's claim sends on it. */
 export function doneLabel(claim?: Pick<FooterClaim, 'holds' | 'count'>): string {
   if (!claim?.count) return 'Done';
@@ -125,18 +198,25 @@ export function doneLabel(claim?: Pick<FooterClaim, 'holds' | 'count'>): string 
   return `Done · ${claim.count} ${noun}${claim.count === 1 ? '' : 's'}`;
 }
 
-/** The composer's right end on a surface: the mic, then Done, or Open terminal and Copy link when no terminal waits. */
-export function SurfaceBar(props: { surface: SurfaceState; mic?: ReactNode; claim?: FooterClaim; onDone: () => void; onAct: (action: SurfaceAction) => void }) {
+/** The composer's right end on a surface: Save, the mic, then Done, or Open terminal and Copy link when no terminal waits. */
+export function SurfaceBar(props: {
+  surface: SurfaceState;
+  mic?: ReactNode;
+  claim?: FooterClaim;
+  onDone: () => void;
+  onAct: (action: SurfaceAction) => void;
+  onSave: (saved: boolean) => void;
+  onTargets: () => Promise<SurfaceTargets>;
+  onSaveTo: (workspace: string) => void;
+}) {
   const { surface } = props;
   const blocked = !!surface.busy || !!surface.delivered;
+  const save = saveControl(surface);
   return (
     <div className="anchor send-to" data-testid="surface-bar">
-      {props.mic && (
-        <>
-          {props.mic}
-          <span className="divider" aria-hidden="true" />
-        </>
-      )}
+      {save && <SaveButton control={save} onSave={props.onSave} onTargets={props.onTargets} onSaveTo={props.onSaveTo} />}
+      {props.mic}
+      {(save || props.mic) && <span className="divider" aria-hidden="true" />}
       {surface.standalone ? (
         <>
           <button className="ghost" disabled={blocked} onClick={() => props.onAct('terminal')} data-testid="surface-open-terminal">

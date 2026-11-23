@@ -650,6 +650,8 @@ async function start(): Promise<void> {
   ipc.handle('surfaceRepeat', async () => (await surfaceHost?.repeat()) ?? false);
   ipc.handle('surfaceTargets', async () => (surfaceHost ? surfaceHost.targets() : { current: null, suggested: null, workspaces: [] }));
   ipc.handle('surfaceMove', async (workspace) => surfaceHost?.move(workspace));
+  ipc.handle('surfaceSave', async (saved) => surfaceHost?.save(saved));
+  ipc.handle('surfaceSaveTo', async (workspace) => surfaceHost?.saveTo(workspace));
   ipc.handle('surfaceAnswer', async (answers) => surfaceHost?.answer(answers));
   transport.on(CH.reply, (_e, reply) => bridge.handleReply(reply as BoardReply));
   // A surface has no place to hide to. Its pane is the window.

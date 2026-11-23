@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-import { artifactAdd, artifactList, artifactMove, artifactScan, artifactSet, artifactTerminal, artifactTrash, link, review } from './commands/artifact.js';
+import { artifactAdd, artifactKeep, artifactList, artifactMove, artifactScan, artifactSet, artifactTerminal, artifactTrash, link, review } from './commands/artifact.js';
 import { agentAdd, agentsList } from './commands/agents.js';
 import { ask } from './commands/ask.js';
 import { archive, unarchive } from './commands/archive.js';
@@ -17,7 +17,7 @@ import { find, reopen } from './commands/retired.js';
 import { decisionAdd, decisionList } from './commands/decision.js';
 import { tidyApply, tidyStart, tidyStatus, tidyStop } from './commands/tidy.js';
 import { boardAdd, boardOpen, spaceAdd, spaceMatch, spaceMove, spaceRemove } from './commands/spaces.js';
-import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceMove, surfaceOpen, surfacePop, surfaceResume, surfaceCli, surfaceSocket, surfaceTargets, unfiledList } from './commands/surface.js';
+import { surfaceDiscard, surfaceDone, surfaceFocus, surfaceList, surfaceMove, surfaceOpen, surfacePop, surfaceResume, surfaceCli, surfaceSave, surfaceSocket, surfaceTargets, unfiledList } from './commands/surface.js';
 import {
   todoAdd,
   todoArchive,
@@ -86,6 +86,7 @@ const ROUTES = [
   { path: ['surface', 'list'], run: surfaceList, options: {} },
   { path: ['surface', 'resume'], run: surfaceResume, options: { id: text } },
   { path: ['surface', 'discard'], run: surfaceDiscard, options: { id: text } },
+  { path: ['surface', 'save'], run: surfaceSave, options: { id: text, workspace: text, off: flag } },
   { path: ['surface', 'pop'], run: surfacePop, options: { id: text, to: text } },
   { path: ['surface', 'socket'], run: surfaceSocket, options: { terminal: text, title: text } },
   { path: ['surface', 'cli'], run: surfaceCli, options: { terminal: text, title: text, type: text } },
@@ -94,6 +95,7 @@ const ROUTES = [
   { path: ['unfiled'], run: unfiledList, options: {} },
   { path: ['artifact', 'move'], run: artifactMove, options: { workspace: text }, positionals: 1 },
   { path: ['artifact', 'trash'], run: artifactTrash, options: {}, positionals: 1 },
+  { path: ['artifact', 'keep'], run: artifactKeep, options: { workspace: text }, positionals: 1 },
   { path: ['artifact', 'list'], run: artifactList, options: { workspace: text } },
   { path: ['artifact', 'terminal'], run: artifactTerminal, options: {}, positionals: 1 },
   { path: ['artifact', 'set'], run: artifactSet, options: { status: text, supersedes: text }, positionals: 1 },

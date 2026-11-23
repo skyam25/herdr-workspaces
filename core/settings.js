@@ -50,6 +50,14 @@ export function defaultPlaces() {
   return places && typeof places === 'object' ? places : {};
 }
 
+const RECENT_DAYS = 7;
+
+// Days unheld work waits in Recently closed before it goes to the Trash.
+export function recentDays() {
+  const days = Number(readSettings().recentDays);
+  return Number.isFinite(days) && days > 0 ? days : RECENT_DAYS;
+}
+
 export function agentModels() {
   const saved = readSettings().models ?? {};
   return { orchestrator: saved.orchestrator ?? DEFAULT_MODELS.orchestrator, worker: saved.worker ?? DEFAULT_MODELS.worker };

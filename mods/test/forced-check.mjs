@@ -127,6 +127,22 @@ const UNFILED_ITEMS = {
   artifacts: [{ id: "a1", type: "board", title: "Login flow", path: "/a1", createdAt: 1 }],
 };
 const MOVE_ITEM = { view: "move-item", kind: "surface", id: "s1", title: "Untitled sketch", from: "standalone", overlay: "o" };
+const LIFETIME_ITEMS = {
+  surfaces: [
+    { id: "s1", type: "board", title: "Untitled sketch", state: "draft", saved: false, expiresAt: null },
+    { id: "s2", type: "note", title: "a note with a title long enough to truncate in its row", state: "draft", saved: false, expiresAt: 1794500000000 },
+    { id: "s3", type: "page", title: "spec.html", state: "pane", saved: false, expiresAt: null },
+    { id: "s4", type: "questions", title: "Questions", state: "open", saved: false, expiresAt: null },
+  ],
+  artifacts: [{ id: "a1", type: "board", title: "Login flow", path: "/a1", createdAt: 1, transient: true, expiresAt: 1794500000000 }, { id: "a2", type: "note", title: "Plan", path: "/a2", createdAt: 1 }],
+};
+const SAVE_ITEM = { ...MOVE_ITEM, mode: "save" };
+const KEEP_MENU = { view: "artifact-menu", artifact: { id: "a1", type: "board", path: "/a", prompt: "/a/prompt.md", transient: true }, overlay: "o" };
+const LIFETIME_MANIFEST = {
+  ...MANIFEST,
+  surfaces: [{ ...MANIFEST.surfaces[0], saved: true }, { ...MANIFEST.surfaces[1], expiresAt: 1794500000000 }],
+  artifacts: [{ ...MANIFEST.artifacts[0], transient: true }, { ...MANIFEST.artifacts[1], title: "a note with a title long enough to truncate in its row", transient: true, expiresAt: 1794500000000 }],
+};
 const DESTINATIONS = [{ id: "w1", name: "docs", kind: "app" }, { id: "w2", name: "a workspace with a name long enough to truncate in its row", kind: "general" }, { id: "w3", name: "scrap", kind: "throwaway" }];
 const spaceMenuFile = (menuProps) => ({ "spacemenu.js": { header: `const __props = () => (${JSON.stringify(menuProps)});\n`, patch: (s) => s.replaceAll("props()", "__props()") } });
 
@@ -147,6 +163,7 @@ const VARIANTS = [
   { mod: "hws-work", name: "board-archive-confirm", props: { view: "tasks" }, patch: boardState(`this.todos = ${JSON.stringify(DONE_CARDS)}; this.confirmingArchive = true;`) },
   { mod: "hws-work", name: "board-archiving", props: { view: "tasks" }, patch: boardState(`this.todos = ${JSON.stringify(DONE_CARDS)}; this.archiving = true;`) },
   { mod: "hws-actions", name: "actions-orchestrate", props: { terminal: "t13", space: "spc1", cwd: "/w", overlay: "o" } },
+  { mod: "hws-actions", name: "actions-boards", props: { terminal: "t13", overlay: "o", boards: [{ id: "s1", type: "board", title: "Plan", open: false }, { id: "s2", type: "note", title: "note", open: true, saved: true }] } },
   { mod: "hws-new", name: "menu-orchestrate", props: { overlay: "o" }, header: LIVE_HEADER, patch: (s) => s.replaceAll("focused()", "__focused()").replaceAll("spaces()", '__spaces().map((x) => ({ ...x, active: true, folder: "/w" }))').replace('shared("hws.workspace.spaces")', '["spc1"]') },
   { mod: "hws-new", name: "form", props: { step: "workspace" } },
   { mod: "hws-new", name: "form-from-space", props: { step: "workspace", space: { id: "spc1", name: "a space with a name long enough to truncate in the dialog's heading", folder: "/Users/me/Projects/checkout" } } },
@@ -163,6 +180,8 @@ const VARIANTS = [
   { mod: "hws-panel", name: "panel", props: {}, header: LIVE_HEADER, patch: live },
   { mod: "hws-panel", name: "panel-note", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.note = null;", 'this.note = { text: "Link copied.", isError: false };') },
   { mod: "hws-panel", name: "artifact-menu", props: { view: "artifact-menu", artifact: { id: "a1", type: "board", path: "/a", prompt: "/a/prompt.md" }, overlay: "o" }, files: { "artifactmenu.js": { header: `const __props = () => (${JSON.stringify({ view: "artifact-menu", artifact: { id: "a1", type: "board", path: "/a", prompt: "/a/prompt.md" }, overlay: "o" })});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
+  { mod: "hws-panel", name: "artifact-menu-keep", props: KEEP_MENU, files: { "artifactmenu.js": { header: `const __props = () => (${JSON.stringify(KEEP_MENU)});\n`, patch: (s) => s.replaceAll("props()", "__props()") } } },
+  { mod: "hws-panel", name: "panel-lifetime", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", `this.manifests = [${JSON.stringify(LIFETIME_MANIFEST)}];`) },
   { mod: "hws-panel", name: "panel-reader", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.reading = null;", 'this.reading = { title: "Spec", text: "# Hello", isLoading: false, reveal: "/a/spec.md" };') },
   { mod: "hws-panel", name: "panel-outside", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];") },
   { mod: "hws-panel", name: "panel-outside-match", props: {}, header: LIVE_HEADER, patch: (s) => live(s).replace("this.manifests = [__MANIFEST];", "this.manifests = [];").replace("this.match = null;", 'this.match = { spaceId: "spc1", candidates: [{ id: "w1", name: "checkout", folder: "/w", home: null }, { id: "w2", name: "a workspace with a long name", folder: "/", home: null }] };').replace("this.note = null;", 'this.note = { text: "Could not move the space.", isError: true };') },
@@ -199,6 +218,8 @@ const VARIANTS = [
   { mod: "hws-panel", name: "space-menu-plain", props: { view: "space-menu", space: "spc2", overlay: "o" }, patch: (s) => s.replace("initSpaceMenu(this, cx);", "this.git = null;"), files: spaceMenuFile({ view: "space-menu", space: "spc2", overlay: "o" }) },
   { mod: "hws-panel", name: "move-space", props: MOVE_SPACE, patch: (s) => s.replace("initMoveSpace(this, cx);", `this.from = { id: "w0", name: "checkout" }; this.matches = new Set(["w1"]); this.workspaces = ${JSON.stringify(DESTINATIONS)}; this.busy = "move-w2"; this.problem = "herdr is not answering";`), files: spaceMenuFile(MOVE_SPACE) },
   { mod: "hws-panel", name: "unfiled", props: UNFILED, patch: (s) => s.replace("initUnfiled(this, cx);", `this.unfiled = ${JSON.stringify(UNFILED_ITEMS)}; this.busy = "trash-s2"; this.problem = "Could not move that to the Trash.";`), files: unfiledFile(UNFILED) },
+  { mod: "hws-panel", name: "unfiled-lifetime", props: UNFILED, patch: (s) => s.replace("initUnfiled(this, cx);", `this.unfiled = ${JSON.stringify(LIFETIME_ITEMS)};`), files: unfiledFile(UNFILED) },
+  { mod: "hws-panel", name: "move-item-save", props: SAVE_ITEM, patch: (s) => s.replace("initMoveItem(this, cx);", `this.targets = { current: "standalone", suggested: "w1", workspaces: ${JSON.stringify(DESTINATIONS)} }; this.busy = "move-w2";`), files: unfiledFile(SAVE_ITEM) },
   { mod: "hws-panel", name: "unfiled-empty", props: UNFILED, patch: (s) => s.replace("initUnfiled(this, cx);", "this.unfiled = { surfaces: [], artifacts: [] };"), files: unfiledFile(UNFILED) },
   { mod: "hws-panel", name: "unfiled-loading", props: UNFILED, patch: (s) => s.replace("initUnfiled(this, cx);", "this.unfiled = null;"), files: unfiledFile(UNFILED) },
   { mod: "hws-panel", name: "move-item", props: MOVE_ITEM, patch: (s) => s.replace("initMoveItem(this, cx);", `this.targets = { current: "w0", suggested: "w1", workspaces: ${JSON.stringify(DESTINATIONS)} }; this.busy = "move-w2"; this.problem = "herdr is not answering";`), files: unfiledFile(MOVE_ITEM) },

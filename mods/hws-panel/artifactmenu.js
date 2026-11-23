@@ -1,6 +1,7 @@
 // The "..." menu on an artifact row, holding every way to open it other than the companion.
 
 import { openOverlay, props } from "herdr";
+import { hws } from "./hws.js";
 import { copy } from "./clipboard.js";
 import { openExternally, revealLabel, revealPath } from "./cites.js";
 import { popupHeight, popupMenu } from "./rowmenu.js";
@@ -17,11 +18,15 @@ function externalItem({ type, path }) {
   return { id: "external", label: "Open in default app", file: path };
 }
 
+// Keep makes a round-trip kept work. The panel's manifest watch shows the change.
+const keepItems = (artifact) => (artifact.transient ? [{ id: "keep", label: "Keep", run: () => hws(["artifact", "keep", artifact.id]) }] : []);
+
 function menuItems(artifact) {
   if (artifact.type === "link") {
     return [
       { id: "external", label: "Open in browser", run: () => openExternally(artifact.path) },
       { id: "copy", label: "Copy link", run: () => copy(artifact.path) },
+      ...keepItems(artifact),
     ];
   }
   const external = externalItem(artifact);
@@ -29,11 +34,12 @@ function menuItems(artifact) {
     { id: external.id, label: external.label, run: () => openExternally(external.file) },
     { id: "reveal", label: revealLabel(), run: () => revealPath(artifact.prompt ?? artifact.path) },
     { id: "copy", label: "Copy for Claude", run: () => copy(linkFor(artifact.prompt ?? artifact.path)) },
+    ...keepItems(artifact),
   ];
 }
 
-export function openArtifactMenu({ id, type, path, prompt }) {
-  const artifact = { id, type, path, prompt };
+export function openArtifactMenu({ id, type, path, prompt, transient }) {
+  const artifact = { id, type, path, prompt, ...(transient ? { transient: true } : {}) };
   openOverlay({ mod: MOD, kind: "popup", width: MENU_WIDTH, height: popupHeight(menuItems(artifact).length), props: { artifact, view: "artifact-menu" } });
 }
 

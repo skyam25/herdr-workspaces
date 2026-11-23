@@ -1,17 +1,17 @@
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
-import { artifactOfFile, findArtifact, isInside, linkFor, moveBundle, moveDir, realOf } from '../artifacts.js';
+import { artifactOfFile, findArtifact, isInside, linkFor, moveBundle, moveDir, realOf, relocateArtifact } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, listLive } from '../herdr.js';
 import { listManifests, manifestOfSpace, updateManifest } from '../manifest.js';
-import { STANDALONE, slug } from '../paths.js';
+import { STANDALONE, roundTripDir } from '../paths.js';
 import { isKept, placeOf, writablePlace } from '../places.js';
 import { moveToTrash } from '../trash.js';
 import { requireCallingTerminal, requireFlag, resolveWorkspace, spaceOfTerminal, workspaceByRef } from '../resolve.js';
 import { listRetired } from '../retired.js';
 import { SIDE_FILE, scanWorkspace } from '../scan.js';
-import { moveTarget, newId, surfaceOpen } from './surface.js';
+import { bundleDir, moveTarget, newId, surfaceOpen } from './surface.js';
 
 export const ARTIFACT_STATUSES = ['draft', 'current', 'superseded'];
 
@@ -46,11 +46,13 @@ function openArtifact(id) {
 }
 
 // The folder hws wrote a bundle into, or null for a file or link tracked where it sits.
+// A kept workspace's round-trips sit under the state root.
 function bundleRoot(manifest, artifact) {
   if (!artifact.path || /^https?:/i.test(artifact.path)) return null;
-  for (const role of ['artifacts', 'notes']) {
-    if (role === 'notes' && !isKept(manifest)) continue;
-    const { path } = placeOf(manifest, role);
+  const roots = ['artifacts', 'notes']
+    .filter((role) => role === 'artifacts' || isKept(manifest))
+    .map((role) => placeOf(manifest, role).path);
+  for (const path of [...roots, roundTripDir(manifest.id)]) {
     if (path && isInside(path, artifact.path) && realOf(path) !== realOf(artifact.path)) return path;
   }
   return null;
@@ -66,8 +68,7 @@ export function artifactMove(flags, [id]) {
 
   let moved = { ...artifact };
   if (bundleRoot(manifest, artifact) && existsSync(artifact.path)) {
-    const place = artifact.type === 'note' && isKept(target) ? 'notes' : 'artifacts';
-    const dir = join(writablePlace(target, place), isKept(target) ? `${slug(artifact.title)}-${id}` : id);
+    const dir = bundleDir(target, artifact, id, { transient: Boolean(artifact.transient) });
     if (existsSync(dir)) throw new HwsError(`${dir} already exists`);
     const prompt = moveBundle(artifact.path, dir);
     moved = { ...moved, path: dir, ...(artifact.prompt ? { prompt } : {}) };
@@ -97,6 +98,30 @@ export function artifactTrash(_flags, [id]) {
     draft.artifacts = draft.artifacts.filter((item) => item.id !== id);
   });
   return { data: { id, trashed: true }, text: `trashed ${id}` };
+}
+
+// Keep makes a round-trip kept work. The flag clears first, so a bundle that moves lands as kept work:
+// an unfiled one moves to a workspace, and one under a kept workspace's state root moves into its folder.
+export function artifactKeep(flags, [id]) {
+  if (!id) throw new UsageError('name the artifact to keep');
+  const owner = openArtifact(id);
+  if (owner.id === STANDALONE && !flags.workspace) throw new UsageError('pass --workspace W, because kept work lives in a workspace');
+  updateManifest(owner.id, (draft) => {
+    const record = draft.artifacts.find((item) => item.id === id);
+    delete record.transient;
+    delete record.expiresAt;
+  });
+  if (owner.id === STANDALONE) artifactMove({ workspace: flags.workspace }, [id]);
+
+  const manifest = openArtifact(id);
+  const artifact = manifest.artifacts.find((item) => item.id === id);
+  if (isKept(manifest) && bundleRoot(manifest, artifact) === roundTripDir(manifest.id) && existsSync(artifact.path)) {
+    const dir = bundleDir(manifest, artifact, id, { transient: false });
+    if (existsSync(dir)) throw new HwsError(`${dir} already exists`);
+    relocateArtifact(manifest.id, artifact, dir);
+  }
+  const record = openArtifact(id).artifacts.find((item) => item.id === id);
+  return { data: { ...record, workspace: manifest.id }, text: `kept ${id} at ${record.path}` };
 }
 
 // An empty --supersedes clears it.

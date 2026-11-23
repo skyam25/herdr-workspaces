@@ -13,6 +13,10 @@ const BOARD_LIST = "hws-pane.boards";
 const KINDS = { board: { name: "sketch", icon: "sketch" }, note: { name: "note", icon: "write" }, page: { name: "page", icon: "review" }, questions: { name: "questions", icon: "review" } };
 
 const dropFromList = (id) => setShared(BOARD_LIST, (shared(BOARD_LIST) ?? []).filter((b) => b.id !== id));
+const markSaved = (id) => setShared(BOARD_LIST, (shared(BOARD_LIST) ?? []).map((b) => (b.id === id ? { ...b, saved: true, expiresAt: null } : b)));
+
+// A questions surface can't be saved.
+const canSave = (board) => !board.saved && board.type !== "questions";
 
 // One shell runs the chooser and the open, because the popup can close while the chooser has
 // focus and an exec already started keeps running. Error -128 means the person cancelled.
@@ -79,6 +83,12 @@ export default class Actions extends View {
     dropFromList(id);
   }
 
+  // Saving changes no terminal, so the list takes the new state at once.
+  async saveBoard(id) {
+    await hws(["surface", "save", "--id", id]);
+    markSaved(id);
+  }
+
   // A window in a pane leaves the list, because the list holds only windows and drafts.
   async moveIntoPane(id) {
     await hws(["surface", "pop", "--id", id, "--to", "pane"]);
@@ -93,6 +103,7 @@ export default class Actions extends View {
       const title = !b.title || b.title === type ? kind.name : b.title;
       return [
         { id: `board-${b.id}`, name: `${b.open ? "Show" : "Resume"} ${title}`, icon: kind.icon, divided: i === 0, work: () => hws(["surface", "resume", "--id", b.id]) },
+        ...(canSave(b) ? [{ id: `save-${b.id}`, name: `Save ${title}`, icon: "save", work: () => this.saveBoard(b.id) }] : []),
         ...(b.open
           ? [{ id: `pop-${b.id}`, name: `Move ${title} into a pane`, icon: "pane", work: () => this.moveIntoPane(b.id) }]
           : [{ id: `discard-${b.id}`, name: `Discard ${title}`, icon: "close", work: () => this.discardBoard(b.id) }]),

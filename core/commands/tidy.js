@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
 import { agentTranscript, workspaceAgents } from '../agents.js';
-import { freeName, isInside, moveDir, realOf } from '../artifacts.js';
+import { freeName, isInside, isTrackedWork, moveDir, realOf } from '../artifacts.js';
 import { HwsError, UsageError } from '../errors.js';
 import { act, findTerminal, isTerminalAlive, keepingSelection, killTerminal, listLive, sendText } from '../herdr.js';
 import { withLock } from '../lock.js';
@@ -126,8 +126,8 @@ function sessionsSince(manifest, through) {
 // An artifact counts once when it is created and again each time its file changes.
 function artifactsSince(manifest, through) {
   const found = [];
-  for (const { id, type, title, path, status, createdAt, role } of manifest.artifacts) {
-    if (role) continue;
+  for (const artifact of manifest.artifacts.filter(isTrackedWork)) {
+    const { id, type, title, path, status, createdAt } = artifact;
     const isNew = through == null || (createdAt ?? 0) > through;
     const changed = isNew ? null : modifiedAt(path);
     const isEdited = changed !== null && changed > through;
@@ -140,7 +140,7 @@ function artifactsSince(manifest, through) {
 // Every artifact still in play, so a pass can catch one a newer fact contradicts.
 function liveArtifacts(manifest) {
   return manifest.artifacts
-    .filter((item) => !item.role && item.status !== 'superseded')
+    .filter((item) => isTrackedWork(item) && item.status !== 'superseded')
     .map(({ id, type, title, path, status, createdAt }) => ({ id, type: type ?? null, title: title ?? null, path, status: status ?? 'current', createdAt: createdAt ?? null, modifiedAt: modifiedAt(path) }));
 }
 

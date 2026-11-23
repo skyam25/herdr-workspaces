@@ -36,6 +36,11 @@ export function surfaceDataDir(workspaceId, surfaceId) {
   return join(workspaceDir(workspaceId), 'surfaces', surfaceId);
 }
 
+// A kept workspace's round-trips, under the state root so its folder holds only kept work.
+export function roundTripDir(workspaceId) {
+  return join(workspaceDir(workspaceId), 'artifacts');
+}
+
 export function socketPath(surfaceId) {
   return `/tmp/hws-${surfaceId}.sock`;
 }

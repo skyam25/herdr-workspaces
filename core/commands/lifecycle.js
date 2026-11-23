@@ -11,9 +11,10 @@ import { adoptSharedNotes, applyPlaces, assertRole, assertStage, ensurePlace, is
 import { resolveWorkspace, spaceOfTerminal } from '../resolve.js';
 import { containsFile, isStored, lastActiveAt, listRetired, recordRetired, removeRetired } from '../retired.js';
 import { requireFolder } from '../settings.js';
-import { hasDraftWork, isWindowOpen } from '../surface-windows.js';
+import { isWindowOpen } from '../surface-windows.js';
 import { moveToTrash } from '../trash.js';
 import { archive, archiveClosed } from './archive.js';
+import { ageWork } from './lifetime.js';
 import { KEPT_KINDS, keptFields, keptKind } from './new.js';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -54,19 +55,6 @@ function retireWorkspace(id) {
   }
   removeIfEmpty(join(workspaceDir(id), 'artifacts'));
   removeIfEmpty(workspaceDir(id));
-}
-
-// A closed window with work stays listed as a draft. One with nothing on it goes.
-function dropEmptyClosedWindows() {
-  for (const manifest of listManifests({ includeStandalone: true })) {
-    const closed = manifest.surfaces
-      .filter((surface) => surface.host && !isWindowOpen(surface) && !hasDraftWork(manifest.id, surface.id))
-      .map((surface) => surface.id);
-    if (closed.length === 0) continue;
-    updateManifest(manifest.id, (draft) => {
-      draft.surfaces = draft.surfaces.filter((surface) => !closed.includes(surface.id));
-    });
-  }
 }
 
 // Markers and session records are hints, so old ones go without asking about their terminals.
@@ -167,7 +155,7 @@ export function prune() {
   if (!live?.spaces.some((space) => !space.machine)) {
     return { data: { pruned: [], expired: [], skipped: true }, text: 'the Herdr window listed no local space, so nothing changed' };
   }
-  dropEmptyClosedWindows();
+  ageWork(live);
   dropOldHints(captureDir());
   dropOldHints(terminalSessionDir());
   const liveIds = new Set(live.spaces.map((space) => space.id));

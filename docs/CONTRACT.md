@@ -22,7 +22,8 @@ Shared interfaces for the four parts. Change this file only through the lead.
 - A surface knows its workspace and its terminal, and never guesses either.
 - If the owning terminal has ended, Done acts like standalone.
 - Done writes the artifact, delivers it, and collapses the surface pane.
-- The manifest lives until its workspace closes. Artifacts outlive the manifest.
+- The manifest lives until its workspace closes. Kept artifacts outlive the manifest.
+- Work stays while a window, a live owner terminal, Save or Keep holds it. See [Lifetime](#lifetime).
 - A closed throwaway leaves a retired record, unless the user chose Trash.
 - Only `hws` writes the manifest. Every other part calls `hws`.
 - No background jobs and no notifications. Pruning runs inside `hws` commands. The Dock badge is a count, not a notification, and the Workspaces section sets it.
@@ -42,6 +43,7 @@ Shared interfaces for the four parts. Change this file only through the lead.
 | Kept scratch | `<scratch place>`, default `<folder>/.herdr-workspace/<name>-<id tail>/scratch/` |
 | Throwaway scratch | `<root>/workspaces/<spaceId>/scratch/`, which is also the throwaway's `folder` |
 | Throwaway artifacts | `<root>/workspaces/<spaceId>/artifacts/<artifactId>/` |
+| Round-trip artifacts of a kept workspace | `<root>/workspaces/<spaceId>/artifacts/<artifactId>/` |
 | Kept throwaway work | `~/Documents/Herdr Workspaces/<name>/<artifactId>/` and `.../<name>/scratch-<id tail>/`, written by `hws close --keep` |
 | Standalone artifacts | `<root>/standalone/artifacts/<artifactId>/` |
 | Retired throwaways | `<root>/retired/<spaceId>.json` |
@@ -124,8 +126,12 @@ Standalone surfaces with no workspace use the workspace id `standalone`.
 | `agents[].transcript` | The transcript's absolute path, when it is not where `folder` puts it. Absent otherwise |
 | `surfaces[].file` | The file a note or page shows, or the drawing a reopened sketch started from. Absent otherwise |
 | `surfaces[].reopens` | On a reopened sketch, the id of the artifact its next Done bundle replaces. Absent otherwise |
+| `surfaces[].saved` | True once `hws surface save` saved it. Absent otherwise |
+| `surfaces[].expiresAt` | When prune moves it to the Trash, written when prune first finds it closed, unsaved and without a live owner. Absent while held |
 | `surfaces[].sessionFolder` | On a note or page with a local file, the [session folder](#host-environment) its host was given. Each write of the record works it out again, so a moved surface gets its new workspace's. Absent otherwise |
 | `artifacts[].role` | `tidy` on a review saved from the tidy terminal, or on any surface showing a file from the workspace's `tidy/` folder. `feedback` on the Done bundle of any other page that shows a file. `answers` on the Done bundle of a round from `hws ask`. Freshness and `hws artifact scan` leave all three out, and the panel lists none as an artifact of its own. Absent on other artifacts |
+| `artifacts[].transient` | True on a round-trip. Absent on kept work |
+| `artifacts[].expiresAt` | On a round-trip, when prune moves it to the Trash, written once its `fromTerminal` is gone. Absent otherwise |
 | `artifacts[].file` | On a `feedback` round, the absolute path of the file the page showed. Absent otherwise |
 | `artifacts[].reviewOf` | On a `feedback` round, the id of the `file` artifact that tracked that file at Done, or null when none did. Absent otherwise |
 | `artifacts[].status` | `draft`, `current` or `superseded`. Done writes `current`. A record without it reads as `current` |
@@ -215,7 +221,8 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws review FILE\|ARTIFACT [--title X] [--terminal T] [--window]` | Opens an `.html` or `.md` file as a page beside T, default `$HC_TERMINAL_ID`, as `hws surface open --type page --file F --terminal T --in-pane` does. `--window` opens it in its own window. ARTIFACT is the id of a `file` artifact or of a feedback round. A kept workspace first tracks an untracked file where it sits, as `--in-place` does, except an `.outline.md` or `.feedback.md` file, which is never tracked. An `.outline.md` file opens in Write's outline view. Prints the surface with `file` and `artifact`, the tracking artifact's id or null. The text tells the agent to end the turn, or says that the page is already open in a pane or window with no agent attached. Never opens standalone |
 | `hws ask [--title X] [--file Q.json] [--terminal T] [--window]` | Opens a round of questions beside T, default `$HC_TERMINAL_ID`, in a pane like `hws review`, or in its own window with `--window`. Reads the round from `--file`, else from stdin. The title defaults to `Questions`. A bad round exits 2 and names the field. Prints the surface with `asked`, `kept` and `dropped`, and text that tells the agent to end the turn and says how many answers stayed and left. See [Questions](#questions). Never opens standalone |
 | `hws surface focus --id S` | Shows the surface's owning terminal, or its chat pane when flipped, and brings Herdr forward. Fails when that terminal has ended |
-| `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open}]`. Leaves out closed windows with no work |
+| `hws surface list` | Windows and drafts, oldest first, as `[{id,type,title,terminal,workspace,open,saved,expiresAt}]`. Leaves out a closed window with no work, no Save and no live owner |
+| `hws surface save --id S [--workspace W] [--off]` | Saves a surface from expiry. See [Lifetime](#lifetime) |
 | `hws surface resume --id S` | Brings an open window forward, or starts a closed one again on the same id, data and file |
 | `hws surface pop --id S [--to window\|pane]` | Moves a surface between a pane and its own window, and picks the other place without `--to`. Prints `{id,shown,moved}` with `host` or `pane`. See [Pop out and pop in](#pop-out-and-pop-in) |
 | `hws surface discard --id S` | Moves a draft's data to the Trash and drops its record. Fails while the window is open |
@@ -224,7 +231,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws surface cli [--terminal T] [--title X] [--type board\|note\|page] -- VERB [ARGS...]` | Runs the surface's copy of the Agent Brief CLI on the newest open surface of T that matches, as that surface's stand-in session. See [Surface CLI](#surface-cli) |
 | `hws surface move --id S --workspace W` | Moves a surface's record and data folder to W and keeps its id. W `standalone` takes it out of every workspace. An open window ends and starts again on the moved data, and its drafts link into W's drafts place. A `questions` surface keeps no drafts, so it gets no folder there. Prints `{id,from,workspace,moved,restarted}`. Fails on a surface in a pane, an archived W and an unknown W. A surface already in W prints `moved: false` |
 | `hws surface targets [--id S]` | Prints `{current,suggested,workspaces}`. `current` is S's workspace, or null without `--id`. `suggested` is the workspace of the selected space when it differs from `current`, else null. `workspaces` lists each open workspace as `{id,name,kind}` |
-| `hws unfiled` | Prints `{surfaces,artifacts}` for work in no workspace, newest first. Each surface is `{id,type,title,file,state}`, where `state` is `open`, `draft` or `pane`. A closed window with no work and a closed pane are left out. Each artifact is `{id,type,title,path,createdAt}` |
+| `hws unfiled` | Prints `{surfaces,artifacts}` for work in no workspace, newest first. Each surface is `{id,type,title,file,state,saved,expiresAt}`, where `state` is `open`, `draft` or `pane`. A closed window with no work, no Save and no live owner, and a closed pane, are left out. Each artifact is `{id,type,title,path,createdAt,transient,expiresAt}` |
 | `hws artifact list [--workspace W]` | Artifacts, including those of retired throwaways when W is absent. The text gives one line per artifact with its id, type, status, title and path, separated by tabs. A missing status reads as `current` |
 | `hws artifact set ID [--status draft\|current\|superseded] [--supersedes ID]` | Changes an artifact in an open workspace and prints its record. Needs one of the two flags. `--supersedes` must name another artifact of the same workspace, and an empty value clears it |
 | `hws artifact add --file F [--title X] [--workspace W]` | Registers F as an artifact with type `file` and status `current`, and prints its record. `path` and `prompt` are the file. A file inside the `artifacts` place stays where it is. Any other file moves to `<artifacts place>/<file name>`, and the command fails when that name is taken or another writer owns the place. The title defaults to the file name |
@@ -232,6 +239,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 | `hws artifact add --url URL [--title X] [--workspace W]` | Kept workspaces only. Registers a web document with type `link`. `path`, `prompt` and `url` hold the URL. Registering the same URL again returns the first record |
 | `hws artifact scan [--workspace W]` | Prints `{tracked, candidates, more}`. `candidates` lists output files under the home, files its documents link to and web documents they name, none of them tracked. Writes nothing |
 | `hws artifact move ARTIFACT --workspace W` | Moves an artifact's record to W, or out of every workspace with `standalone`. A bundle `hws` wrote moves under W's `artifacts` place, or `notes` for a note in a kept workspace, and its prompt points at the new folder. A tracked file or link stays where it is. A `supersedes` or `reviewOf` that names an artifact left behind becomes null |
+| `hws artifact keep ARTIFACT [--workspace W]` | Makes a round-trip kept work and gives it a home in the workspace folder. See [Lifetime](#lifetime) |
 | `hws artifact trash ARTIFACT` | Moves an unfiled artifact's bundle to the Trash and drops its record. Fails on an artifact in a workspace |
 | `hws link ARTIFACT` | Prints `@<absolute prompt.md path>`, ready to paste into Claude |
 | `hws todo list\|add\|edit\|move\|send\|archive` | To-dos for a workspace, or for a space outside one. See [To-dos](#to-dos-hws-todo) |
@@ -249,7 +257,7 @@ Every command accepts `--json`. Success exits 0. Failure prints `{"error":"..."}
 
 1. The host writes a bundle folder with `prompt.md` and any `images/`.
 2. It calls `hws surface done --id S --bundle DIR`.
-3. `hws` moves the bundle under the workspace's `artifacts` place and rewrites paths inside `prompt.md` to the new location.
+3. `hws` moves the bundle under the workspace's `artifacts` place and rewrites paths inside `prompt.md` to the new location. A bundle from an unsaved surface is a round-trip and lands under the state root in a kept workspace. See [Lifetime](#lifetime).
 4. For a glued surface whose terminal is live, `hws` runs `hc send T "<prompt.md text>"`, drops the surface's record, then runs `herdr-app do pane.close --pane P` and `herdr-app do pane.focus --terminal T`.
 5. For standalone, or a terminal that ended, `hws` records the artifact and prints `{"standalone":true,"artifact":"...","link":"@..."}`. The host then shows Open terminal and Copy link. A surface in a pane keeps its record, so the file opens to the same pane and a second press files a second bundle. A board in its own window loses its record.
 
@@ -300,7 +308,7 @@ A page that shows a file is a round of feedback on that file. Tidy reviews are t
 | Failed open | A round that fails to open exits 1 and leaves the earlier round's record, questions and answers as they were, so the next `hws ask` still keeps them |
 | Done | Refused with `Answer a question first, then press Done.` until one question has an answer. Then delivers the prompt below and closes the pane, as other surfaces do. Done reads `Done · N answers` once N questions have one |
 | Record | `type: questions`, `role: answers`, titled as the surface |
-| Draft | A closed window with an answer stays a draft. One with none goes at the next prune |
+| Draft | A closed window with an answer stays a draft. One with none stays while its owner lives, as [Lifetime](#lifetime) says |
 
 The prompt has one line per question, in the round's order. A typed answer to a choice question ends with `(their own words)`. Lines after the first of a multi-line answer are indented by two spaces.
 
@@ -325,7 +333,7 @@ Answers to your questions:
 | Seed | Otherwise `hws` copies the drawing to `<data folder>/seed/board.excalidraw`, with `comments.json`, `comments.md` and `notes.md` from A's bundle when they exist. The host loads the seed into its board on start, deletes it and writes `<data folder>/seeded.json` as `{board, elements, comments}`. `elements` lists each live element as `id:version`, sorted, with a missing version read as 1, and `comments` is what it saved, or null. The host deletes `seeded.json` at the first save of that board whose elements or comments differ from it. The source is only read |
 | Comments | From `comments.json`, which a sketch's Done bundle writes beside `comments.md`, else read back from `comments.md` |
 | Done | Delivers and files a new bundle as any board does. The new artifact gets `supersedes: A`, A becomes `superseded`, and the surface's `reopens` moves to the new id, so a second press replaces the first. An A no longer in the surface's workspace gives `supersedes: null` and changes nothing |
-| Close early | While `seeded.json` exists, `hws` counts its board's drawing and comments as no work, so the window goes at the next prune like an empty one. Once the host has deleted it, the window stays as a draft |
+| Close early | While `seeded.json` exists, `hws` counts its board's drawing and comments as no work, so the window is parked like an empty one and goes once its owner ends. Once the host has deleted it, the window stays as a draft |
 
 The board takes its name from the title, with characters other than letters, digits, spaces, dots, dashes and underscores turned into spaces.
 
@@ -343,6 +351,84 @@ The host keeps a sent draft until `hws surface done` succeeds, so a refused bund
 | A standalone press with nothing new | Acts on the artifact the last press saved |
 
 A file opens as the same surface each time, so this is what keeps delivered comments off the page when it opens again.
+
+## Lifetime
+
+Work stays while something holds it. Unheld work sits in Recently closed, then goes to the macOS Trash after `recentDays` days. `recentDays` is a positive number in `settings.json`, default 7.
+
+| Holder | Holds |
+|---|---|
+| An open window or pane | Its surface |
+| A live owner terminal | Its surfaces, open or closed, empty or not, and the round-trip artifacts it sent |
+| Save | A surface, until Discard |
+| Keep | An artifact, for good |
+
+### Surfaces
+
+| State | Rule |
+|---|---|
+| Open | Its window's host or its pane is live |
+| Parked | Closed, not saved, and its owner terminal is live. `hws surface list` lists it even when empty, so the pane header offers Resume |
+| Saved | `saved: true`. Never expires. Once it is closed and its owner has ended, prune files its work in the workspace and drops the record. See [Saved surfaces](#saved-surfaces) |
+| Recently closed | Closed, not saved, and its owner has ended or it has none. The first prune to see this writes `expiresAt`, `recentDays` days on. One with no work is dropped at once |
+| Expired | `expiresAt` has passed. Prune moves its data folder and linked drafts to the Trash and drops the record |
+
+- A pane surface whose pane has closed counts as closed.
+- An owner is live when `hc get` reports it live. A flipped agent counts, because its terminal still runs.
+- A surface that is held again, by Resume, Save or a live owner, loses `expiresAt`.
+- A `questions` surface cannot be saved.
+
+### Artifacts
+
+| Kind | Rule |
+|---|---|
+| Round-trip | `transient: true`. Every Done bundle from an unsaved surface. Prune writes `expiresAt`, `recentDays` days on, once `fromTerminal` is no longer live, or at once when it is null. When it passes, the bundle goes to the Trash and the record goes |
+| Kept | No `transient`. A Done bundle from a saved surface, an artifact `hws artifact keep` marked, a filed saved surface, and every artifact recorded before round-trips existed. Never expires |
+
+- In a kept workspace a round-trip lands under the state root, at `<root>/workspaces/<spaceId>/artifacts/<artifactId>/`, so the workspace folder holds only kept work. Elsewhere it lands where any bundle does.
+- Freshness, `hws artifact scan` and the tidy packet leave round-trips out, as they leave out feedback rounds.
+- Prune trashes only a bundle under the state root. A round-trip found anywhere else loses `transient` instead.
+- An archived workspace's artifacts never expire, because prune skips archived workspaces.
+
+### Saved surfaces
+
+A saved surface that is closed and has lost its owner gets a home in its workspace. Prune does this, in this order.
+
+1. Each board in `<data folder>/boards/` with a drawing or comments becomes a kept `board` artifact. Its bundle holds `board.excalidraw`, `comments.json` and `notes.md` when they exist, and a `prompt.md` that reads `Sketch "T", saved from Herdr.` and links them.
+2. Each draft in `<data folder>/drafts/` with a non-empty body becomes a kept `file` artifact, `<slug of title>.md`.
+3. A reopened sketch's board artifact gets `supersedes` and marks the one it reopened `superseded`, as Done does.
+4. The data folder and linked drafts go to the Trash, because the folder also holds the window's browser data. The record goes.
+
+Bundles land where a kept Done bundle would, under `<artifacts place>/<title>-<artifactId>/` in a kept workspace. A failure leaves the record for the next prune.
+
+### Commands
+
+| Command | Behaviour |
+|---|---|
+| `hws surface save --id S [--workspace W] [--off]` | Sets `saved` and clears `expiresAt`. A standalone surface needs W and moves there first, as `hws surface move` does, so it fails on a surface in a pane. `--off` clears `saved`. Refuses a `questions` surface. Prints `{id,saved,workspace}` |
+| `hws artifact keep ARTIFACT [--workspace W]` | Clears `transient` and `expiresAt`. A bundle under the state root moves to the workspace's artifacts place, or its notes place for a note in a kept workspace, as `<title>-<artifactId>`, and paths in `prompt.md` are rewritten. An unfiled artifact needs W and moves there first, as `hws artifact move` does. A throwaway's artifact stays under the state root, because closing the throwaway asks about it. Prints the record |
+
+### What the lists show
+
+| List | Adds |
+|---|---|
+| `hws surface list` | `saved`, and `expiresAt` or null while held. Lists a window that is open, holds work, is saved or has a live owner |
+| `hws unfiled` | On surfaces, `saved` and `expiresAt`. A closed window with no work whose owner is live reads `draft`. On artifacts, `transient` and `expiresAt` |
+
+### Where the person sees it
+
+| Where | Shows | Runs |
+|---|---|---|
+| Surface bar, before the mic | Save, or Saved with a check once saved. Hidden on `questions` and in a web view. Its tooltip says unsaved work goes to the Trash `recentDays` days after its terminal ends | `hws surface save --id S`, and `--off` on Saved |
+| Surface bar, Unfiled | Save opens the move menu, titled Save to a workspace. A pick saves pending work as Pop does | `hws surface save --id S --workspace W`, which moves and saves |
+| `+` menu | Save `<title>` per unsaved entry in `boards` that is not `questions` | `hws surface save --id S` |
+| Workspace panel, Artifacts and Notes | A round-trip row reads `Round-trip` in dim text after its title, or `Trash in N days` once it has `expiresAt`. Its menu adds Keep | `hws artifact keep A` |
+| Workspace panel, Open now | `Saved` in dim text on a saved surface, `Trash in N days` on one with `expiresAt` | |
+| Unfiled dialog | `Trash in N days` on rows with `expiresAt`. Save… on a surface and Keep… on a round-trip open the move dialog | `hws surface save --id S --workspace W`, `hws artifact keep A --workspace W` |
+
+N rounds up, and reads `Trash today` under one day.
+
+Keep in the artifact menu runs `hws artifact keep A`, and the panel's manifest watch shows the change. In the Unfiled dialog a round-trip's detail starts with `Round-trip` or `Trash in N days` in place of `saved`. Save… is off for a surface in a pane, as Move… is.
 
 ## Temporary throwaways
 
@@ -626,6 +712,8 @@ Clears `tidy`, then ends its terminal with `hc kill` when that terminal is live.
 | `HWS_SURFACE_TYPE` | `board`, `note`, `page` or `questions` |
 | `HWS_SURFACE_TITLE` | Title. `run.sh` sets it as the terminal title, which the pane header shows |
 | `HWS_SURFACE_FILE` | File for a page or note, else empty |
+| `HWS_SURFACE_SAVED` | `1` on a saved surface, else empty |
+| `HWS_RECENT_DAYS` | `recentDays` from settings |
 | `HWS_FOLDER` | Workspace folder, else `$HOME` |
 | `HWS_SESSION_FOLDER` | Session folder for a note or page with a local file, by the table below. Empty for a board, questions, a URL or no file, so the host keeps its work folder |
 | `COMPANION_SOCKET` | The surface socket |
@@ -729,7 +817,7 @@ Herdr resends a pane's whole image for each change to the page, so a surface in 
 
 `hws surface open` shows a board or a note in an ordinary window that other windows can cover, and a page too with `--window`. It sets `HWS_SURFACE_WINDOW=1` and `HWS_SURFACE_OWNER`, a label naming the owning terminal, and starts the host with `hc run --bg` in a terminal with no pane. The window draws the page directly, with no Pixel stream. The surface record has `pane: null`, `host`, that terminal's address, and `file` when the surface shows one.
 
-Closing the window quits the host. A closed window with a drawing, comments, a note or an answer stays in the manifest as a draft, with its data folder. A reopened sketch's drawing and comments count only once the host has deleted `seeded.json`. Prune drops a closed window with no work. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host and moves drafts to the Trash.
+Closing the window quits the host. A closed window with a drawing, comments, a note or an answer stays in the manifest as a draft, with its data folder. A reopened sketch's drawing and comments count only once the host has deleted `seeded.json`. A closed window with no work stays parked while its owner lives. [Lifetime](#lifetime) says when each goes. Done delivers, shows the owning terminal and closes the window. Closing the workspace kills the host and moves drafts to the Trash.
 
 A running host raises its window on `POST /open`. The Window menu's Keep on Top floats it on request.
 
@@ -960,7 +1048,7 @@ The `spaces` block runs `hws-spaces`, a copy of Herdr's `spaces`.
 
 The `hws` layout uses the `hws-pane` header. Claude Code and Codex panes get a Chat | Terminal switch.
 
-Every terminal pane's header shows its terminal's address after the name, such as `t94` or `machine/t7`, in the monospace font. A chat pane's header shows its parked agent's address. A click copies the address with `pbcopy` and toasts `Copied t94`. A mod pane with no terminal shows none. One tab can hold several terminals, so the address names a terminal where a tab name cannot.
+Every terminal pane's header shows its terminal's address after the name, such as `t94` or `machine/t7`, in the monospace font. A chat pane's header shows its parked agent's address. A click copies the address to the clipboard and toasts `Copied t94`. A mod pane with no terminal shows none. One tab can hold several terminals, so the address names a terminal where a tab name cannot.
 
 | Step | Command |
 |---|---|
@@ -1089,7 +1177,7 @@ Both are `hws-panel` dialogs.
 | Dialog | Props | Shows | Actions |
 |---|---|---|---|
 | Unfiled | `{"view":"unfiled"}` | `hws unfiled`, surfaces under Open and drafts, then artifacts under Saved. A surface row gives its type and `open`, `draft` or `in a pane`. An artifact row gives `saved` and its age. With nothing left it says so | Open runs `hws surface resume --id S`, or `hws surface pop --id S --to pane` for a pane, and opens an artifact as the `[artifact:ID]` chip does, so a sketch reopens on a board with `--standalone`. Move… closes this dialog and opens the move dialog. Trash runs `hws surface discard --id S` for a draft, and is off for an open window or a pane, and runs `hws artifact trash` for an artifact. The list reloads after each action, and a failure shows under it |
-| Move to a workspace | `{"view":"move-item","kind":"surface"\|"artifact","id","title","from"}` | `hws surface targets`, with `--id` for a surface. Suggested holds `suggested`. The other open workspaces follow, without `current`. An Unfiled row closes the list when `current` is neither `standalone` nor null | A row runs `hws surface move --id S --workspace W` or `hws artifact move A --workspace W`, then closes. A failure stays in the dialog. Move… is off for a surface in a pane |
+| Move to a workspace | `{"view":"move-item","kind":"surface"\|"artifact","id","title","from","mode"?}`. `mode` `save` heads it `Save X to a workspace` and a row runs `hws surface save --id S --workspace W`. `mode` `keep` heads it `Keep X in a workspace` and a row runs `hws artifact keep A --workspace W` | `hws surface targets`, with `--id` for a surface. Suggested holds `suggested`. The other open workspaces follow, without `current`. An Unfiled row closes the list when `current` is neither `standalone` nor null | A row runs `hws surface move --id S --workspace W` or `hws artifact move A --workspace W`, then closes. A failure stays in the dialog. Move… is off for a surface in a pane |
 
 ### New menu: `hws-actions`
 

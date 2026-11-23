@@ -41,8 +41,7 @@ test("a terminal pane shows its address, and a click copies it", async () => {
   const m = await mount("hws-pane", { pane: "p1" });
   assert.match(m.text(), /\bt1\b/);
   await m.click("ph-addr-p1");
-  const copied = H.calls.find((c) => c.command === "sh");
-  assert.equal(copied?.args.at(-1), "t1");
+  assert.equal(H.clipboard, "t1");
   assert.equal(H.runs.some((r) => r.name === "pane.focus"), false);
 });
 

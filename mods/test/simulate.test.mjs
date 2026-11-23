@@ -1645,9 +1645,8 @@ test("hws-new, hws-panel and hws-actions carry the same hws.js", () => {
   assert.equal(read("../hws-new/hws.js"), read("../hws-actions/hws.js"));
 });
 
-test("hws-panel, hws-work and hws-pane carry the same clipboard.js", () => {
+test("hws-panel and hws-work carry the same clipboard.js", () => {
   assert.equal(read("../hws-panel/clipboard.js"), read("../hws-work/clipboard.js"));
-  assert.equal(read("../hws-panel/clipboard.js"), read("../hws-pane/clipboard.js"));
 });
 
 test("every element method used exists in gpui-kit.d.ts", { skip: !existsSync(`${process.env.HOME}/.config/herdr-app/herdr.d.ts`) }, () => {
@@ -2438,4 +2437,137 @@ test("after /clear the chat drops the old conversation before the new log exists
   assert.deepEqual(self.records, []);
   assert.equal(self.phase, "ready");
   assert.ok(self.conv);
+});
+
+// Lifetime
+
+const DAY = 86_400_000;
+const inDays = (n) => Date.now() + n * DAY;
+
+test("the Trash label rounds days up and reads today under one day", () => {
+  assert.equal(ctx.trashLabel(1000 + DAY / 2, 1000), "Trash today");
+  assert.equal(ctx.trashLabel(1000 - DAY, 1000), "Trash today");
+  assert.equal(ctx.trashLabel(1000 + DAY, 1000), "Trash in 1 day");
+  assert.equal(ctx.trashLabel(1000 + DAY * 1.2, 1000), "Trash in 2 days");
+  assert.equal(ctx.trashLabel(1000 + DAY * 7, 1000), "Trash in 7 days");
+});
+
+test("a round-trip artifact reads Round-trip after its title, then Trash in N days once it expires", async () => {
+  const manifest = {
+    ...APP,
+    artifacts: [
+      { ...APP.artifacts[1], id: "rt", title: "flow", transient: true },
+      { ...APP.artifacts[1], id: "gone", title: "draft flow", transient: true, expiresAt: inDays(2.5) },
+      { ...APP.artifacts[1], id: "kept", title: "final flow" },
+      { ...APP.artifacts[0], id: "memo", title: "memo", transient: true, expiresAt: inDays(0.2) },
+    ],
+  };
+  inWorkspace(manifest);
+  const m = await mount("hws-panel", {});
+  const text = m.text();
+  assert.match(text, /flow \| Round-trip \| sketch · /);
+  assert.match(text, /draft flow \| Trash in 3 days \| sketch · /);
+  assert.match(text, /final flow \| sketch · /);
+  assert.match(text, /memo \| Trash today \| note · /);
+  assert.equal(m.has("lifetime-kept"), false);
+});
+
+test("a round-trip's menu offers Keep, which keeps it", async () => {
+  const H = inWorkspace({ ...APP, artifacts: [{ ...APP.artifacts[1], transient: true }] });
+  const m = await mount("hws-panel", {});
+  await m.click("more-new");
+  const spec = H.overlays.at(-1);
+  assert.equal(spec.props.artifact.transient, true);
+  assert.equal(spec.height, 4 * 28 + 8);
+  const menu = await mount("hws-panel", { ...spec.props, overlay: "ov7" }, H);
+  assert.match(menu.text(), /Open sketch \| Show in Finder \| Copy for Claude \| Keep/);
+  await menu.click("row-menu-keep");
+  await menu.settle();
+  assert.deepEqual(args(H).at(-1), ["artifact", "keep", "new", "--json"]);
+});
+
+test("a kept artifact's menu has no Keep", async () => {
+  const H = setup({});
+  const m = await mount("hws-panel", menuFor(BOARD_ARTIFACT), H);
+  assert.equal(m.has("row-menu-keep"), false);
+  const link = await mount("hws-panel", menuFor({ id: "l", type: "link", path: "https://x.test", transient: true }), H);
+  assert.match(link.text(), /Copy link \| Keep/);
+});
+
+test("Open now reads Saved on a saved surface and Trash in N days on an expiring one", async () => {
+  const surfaces = [
+    { ...APP.surfaces[0], saved: true, expiresAt: null },
+    { id: "s2", type: "note", title: "memo", terminal: null, pane: null, host: "t20", expiresAt: inDays(4) },
+    { id: "s3", type: "page", title: "spec.html", terminal: "t13", pane: null, host: "t21" },
+  ];
+  inWorkspace({ ...APP, surfaces });
+  const m = await mount("hws-panel", {});
+  const text = m.text();
+  assert.match(text, /flow \| sketch · Claude Code · Saved/);
+  assert.match(text, /memo \| note · standalone · Trash in 4 days/);
+  assert.match(text, /spec\.html \| page · Claude Code( \||$)/);
+});
+
+const LIFETIME_UNFILED = {
+  surfaces: [
+    { id: "s1", type: "board", title: "idea", state: "draft", saved: false, expiresAt: null },
+    { id: "s2", type: "note", title: "memo", state: "draft", saved: false, expiresAt: inDays(5.5) },
+    { id: "s3", type: "page", title: "spec.html", state: "pane", saved: false, expiresAt: null },
+    { id: "s4", type: "questions", title: "Questions", state: "open", saved: false, expiresAt: null },
+    { id: "s5", type: "board", title: "kept idea", state: "open", saved: true, expiresAt: null },
+  ],
+  artifacts: [
+    { id: "a1", type: "board", title: "flow", path: "/a1", createdAt: 1, transient: true, expiresAt: inDays(0.5) },
+    { id: "a2", type: "note", title: "plan", path: "/a2", createdAt: 1 },
+  ],
+};
+
+test("the Unfiled dialog shows when work goes to the Trash", async () => {
+  const H = setup({ hws: { unfiled: LIFETIME_UNFILED } });
+  const d = await mount("hws-panel", { view: "unfiled", overlay: "ov3" });
+  const text = d.text();
+  assert.match(text, /idea \| sketch · draft \|/);
+  assert.match(text, /memo \| note · draft · Trash in 6 days/);
+  assert.match(text, /flow \| Trash today · /);
+  assert.match(text, /plan \| saved · /);
+  assert.ok(d.clickable("unfiled-trash-s1"));
+  await d.click("unfiled-trash-s1");
+  assert.deepEqual(args(H).at(-2), ["surface", "discard", "--id", "s1", "--json"]);
+});
+
+test("Save… and Keep… in the Unfiled dialog open the move dialog to save or keep", async () => {
+  const H = setup({ hws: { unfiled: LIFETIME_UNFILED } });
+  const d = await mount("hws-panel", { view: "unfiled", overlay: "ov3" });
+  assert.ok(d.has("unfiled-save-s1") && d.has("unfiled-save-s2"));
+  assert.equal(d.clickable("unfiled-save-s3"), false);
+  assert.equal(d.has("unfiled-save-s4"), false);
+  assert.equal(d.has("unfiled-save-s5"), false);
+  assert.ok(d.has("unfiled-keep-a1"));
+  assert.equal(d.has("unfiled-keep-a2"), false);
+
+  await d.click("unfiled-save-s2");
+  assert.deepEqual(H.closed, ["ov3"]);
+  assert.deepEqual(H.overlays.at(-1).props, { view: "move-item", kind: "surface", id: "s2", title: "memo", mode: "save", from: "standalone" });
+  await d.click("unfiled-keep-a1");
+  assert.deepEqual(H.overlays.at(-1).props, { view: "move-item", kind: "artifact", id: "a1", title: "flow", mode: "keep", from: "standalone" });
+});
+
+test("the move dialog in save mode saves the surface into the picked workspace", async () => {
+  const workspaces = [{ id: "w1", name: "docs", kind: "app" }];
+  const H = setup({ hws: { "surface targets": { current: "w0", suggested: null, workspaces } } });
+  const d = await mount("hws-panel", { view: "move-item", kind: "surface", id: "s2", title: "memo", mode: "save", from: "standalone", overlay: "ov5" });
+  assert.match(d.text(), /Save memo to a workspace/);
+  assert.equal(d.has("move-to-standalone"), false);
+  await d.click("move-to-w1");
+  assert.deepEqual(args(H).at(-1), ["surface", "save", "--id", "s2", "--workspace", "w1", "--json"]);
+  assert.deepEqual(H.closed, ["ov5"]);
+});
+
+test("the move dialog in keep mode keeps the artifact in the picked workspace", async () => {
+  const workspaces = [{ id: "w1", name: "docs", kind: "app" }];
+  const H = setup({ hws: { "surface targets": { current: null, suggested: null, workspaces } } });
+  const d = await mount("hws-panel", { view: "move-item", kind: "artifact", id: "a1", title: "flow", mode: "keep", from: "standalone", overlay: "ov5" });
+  assert.match(d.text(), /Keep flow in a workspace/);
+  await d.click("move-to-w1");
+  assert.deepEqual(args(H).at(-1), ["artifact", "keep", "a1", "--workspace", "w1", "--json"]);
 });

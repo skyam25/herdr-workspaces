@@ -589,3 +589,35 @@ test("an open window moves into a pane and leaves the shared list, and a draft h
   assert.ok(openArgs(H).some((args) => args.join(" ") === "surface pop --id s2 --to pane --json"));
   assert.deepEqual(H.sharedSets.at(-1).value.map((b) => b.id), ["s1"]);
 });
+
+// Lifetime: Save keeps a window past its terminal
+
+test("the + menu offers Save for each unsaved window and runs surface save", async () => {
+  const H = boardsWorld([draft, { ...draft, id: "s2", open: true }]);
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [draft, { ...draft, id: "s2", title: "Flow", open: true }] });
+  const list = rows(m);
+  assert.ok(list.includes("Save Plan") && list.includes("Save Flow"));
+  assert.ok(list.indexOf("Resume Plan") < list.indexOf("Save Plan") && list.indexOf("Save Plan") < list.indexOf("Discard Plan"));
+  await m.click("save-s1");
+  await settle();
+  assert.ok(openArgs(H).some((args) => args.join(" ") === "surface save --id s1 --json"));
+  assert.deepEqual(H.sharedSets.at(-1).value.map((b) => [b.id, Boolean(b.saved)]), [["s1", true], ["s2", false]]);
+});
+
+test("the + menu has no Save for a saved window or a questions surface", async () => {
+  world({});
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [{ ...draft, saved: true }, { ...draft, id: "s2", type: "questions", title: "Questions", open: true }] });
+  assert.equal(m.has("save-s1"), false);
+  assert.equal(m.has("save-s2"), false);
+  assert.equal(rows(m).some((row) => row.startsWith("Save")), false);
+});
+
+test("a failing save shows its message and keeps the menu open", async () => {
+  const H = world({});
+  H.hws["surface save"] = { fail: "a questions surface cannot be saved" };
+  const m = await mount("hws-actions", { ...TERMINAL, boards: [draft] });
+  await m.click("save-s1");
+  await settle();
+  assert.match(m.text(), /a questions surface cannot be saved/);
+  assert.deepEqual(H.closed, []);
+});

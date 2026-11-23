@@ -34,7 +34,7 @@ test('link prints the prompt reference', (t) => {
 
 test('link quotes a prompt path with spaces', (t) => {
   const box = sandbox(t);
-  const { artifact } = box.finishGlued(box.app('my demo'));
+  const { artifact } = box.finishGlued(box.app('my demo'), undefined, { save: true });
   assert.match(box.hws(['link', artifact.id]).stdout, /^@"[^"]* [^"]*\/prompt\.md"\n$/);
 });
 

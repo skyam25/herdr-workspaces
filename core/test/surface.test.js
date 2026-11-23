@@ -44,6 +44,8 @@ test('surface open splits beside the owning terminal with the host environment',
     HWS_SURFACE_FILE: '',
     HWS_FOLDER: manifest.folder,
     HWS_SESSION_FOLDER: '',
+    HWS_SURFACE_SAVED: '',
+    HWS_RECENT_DAYS: '7',
     COMPANION_SOCKET: `/tmp/hws-${surface.id}.sock`,
     COMPANION_DATA_DIR: join(box.root, 'workspaces', manifest.id, 'surfaces', surface.id),
   });
@@ -289,7 +291,7 @@ test("a flipped agent's board opens in its own window and returns to the chat", 
   assert.deepEqual(box.actions().filter((action) => action[2] === 'pane.focus').at(-1), ['herdr-app', 'do', 'pane.focus', '--pane', chatPane]);
 });
 
-test('done on a glued surface moves the bundle, sends, closes and focuses', (t) => {
+test('done on a glued surface files a round-trip under the state root, sends, closes and focuses', (t) => {
   const box = sandbox(t);
   const manifest = box.app();
   const owner = manifest.terminals[0].terminal;
@@ -301,7 +303,7 @@ test('done on a glued surface moves the bundle, sends, closes and focuses', (t) 
 
   const after = box.manifest(manifest.id);
   const [artifact] = after.artifacts;
-  const expectedDir = join(manifest.folder, '.herdr-workspace', `${manifest.name}-${manifest.id.slice(-6)}`, 'artifacts', `flow-${artifact.id}`);
+  const expectedDir = join(box.root, 'workspaces', manifest.id, 'artifacts', artifact.id);
   const expectedText = `Look at @${expectedDir}/images/shot.png now.\n`;
   assert.deepEqual(box.actions(), [
     ['hc', 'send', owner, expectedText],
@@ -314,8 +316,8 @@ test('done on a glued surface moves the bundle, sends, closes and focuses', (t) 
   assert.ok(existsSync(join(expectedDir, 'images', 'shot.png')));
   assert.deepEqual(after.surfaces, []);
   assert.deepEqual(
-    [artifact.type, artifact.title, artifact.path, artifact.prompt, artifact.fromTerminal],
-    ['board', 'flow', expectedDir, join(expectedDir, 'prompt.md'), owner],
+    [artifact.type, artifact.title, artifact.path, artifact.prompt, artifact.fromTerminal, artifact.transient],
+    ['board', 'flow', expectedDir, join(expectedDir, 'prompt.md'), owner, true],
   );
 });
 
@@ -549,9 +551,13 @@ test('surface focus refuses a terminal that has ended', (t) => {
   assert.deepEqual(box.actions().filter((call) => call[0] === 'herdr-app' && call[1] === 'do'), []);
 });
 
-test('a closed window leaves the manifest at the next prune', (t) => {
-  const { box, manifest } = openWindow(t);
+test('a closed empty window stays parked while its owner lives, and goes once the owner ends', (t) => {
+  const { box, manifest, owner, surface } = openWindow(t);
   box.setState({ hc: { t90: 'missing' } });
+  box.json(['prune']);
+  assert.deepEqual(box.manifest(manifest.id).surfaces.map((item) => [item.id, item.expiresAt]), [[surface.id, undefined]]);
+
+  box.setState({ hc: { t90: 'missing', [owner]: 'missing' } });
   box.json(['prune']);
   assert.deepEqual(box.manifest(manifest.id).surfaces, []);
 });
@@ -583,19 +589,21 @@ test('a closed window with a drawing stays as a draft', (t) => {
   assert.deepEqual([listed.id, listed.terminal, listed.open], [surface.id, owner, false]);
 });
 
-test('surface list shows an open window and leaves out an empty closed one', (t) => {
-  const { box, surface } = openWindow(t);
-  assert.deepEqual(box.json(['surface', 'list']).map((item) => [item.id, item.open]), [[surface.id, true]]);
+test('surface list shows an open window, a parked empty one, and leaves it out once its owner ends', (t) => {
+  const { box, owner, surface } = openWindow(t);
+  assert.deepEqual(box.json(['surface', 'list']).map((item) => [item.id, item.open, item.saved, item.expiresAt]), [[surface.id, true, false, null]]);
   box.setState({ hc: { t90: 'missing' } });
+  assert.deepEqual(box.json(['surface', 'list']).map((item) => [item.id, item.open]), [[surface.id, false]]);
+  box.setState({ hc: { t90: 'missing', [owner]: 'missing' } });
   assert.deepEqual(box.json(['surface', 'list']), []);
 });
 
 test('a board with only deleted elements is not a draft', (t) => {
-  const { box, manifest, surface } = openWindow(t);
+  const { box, manifest, owner, surface } = openWindow(t);
   const boards = join(surfaceData(box, manifest, surface), 'boards');
   mkdirSync(boards, { recursive: true });
   writeFileSync(join(boards, 'Sketch.excalidraw'), JSON.stringify({ elements: [{ id: 'a', isDeleted: true }] }));
-  box.setState({ hc: { t90: 'missing' } });
+  box.setState({ hc: { t90: 'missing', [owner]: 'missing' } });
   box.json(['prune']);
   assert.deepEqual(box.manifest(manifest.id).surfaces, []);
 });

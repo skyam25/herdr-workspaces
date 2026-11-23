@@ -10,7 +10,7 @@ import { tilde } from "./hws.js";
 import { revealLabel, showBoard } from "./cites.js";
 import { openArtifactMenu } from "./artifactmenu.js";
 import { openRowMenu, openStageMenu } from "./rowmenu.js";
-import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, feedbackRounds, freshness, isNote, linkCite, livePass, placeRows, recordedSessions, roundFiles, tasksLine, typeLabel } from "./context.js";
+import { BACKLOG_ROWS, FRESHNESS_COLOR, agentName, ago, artifactGroups, backlog, citeLabel, countsLine, feedbackRounds, freshness, isNote, linkCite, livePass, placeRows, recordedSessions, lifetimeLabel, roundFiles, tasksLine, typeLabel } from "./context.js";
 
 const STATUS_COLOR = { draft: "ansi3", current: "ansi2", superseded: "dim" };
 
@@ -352,6 +352,7 @@ function roundRow(t, host, round, now, label) {
 // A page with feedback gains a count that unfolds its rounds beneath it.
 function artifactRow(t, host, workspace, artifact, now, rounds = []) {
   const { status } = artifact;
+  const lifetime = lifetimeLabel(artifact, now);
   const open = (_e, cx) => host.citeAction({ kind: "artifact", value: artifact.id }, workspace, cx);
   const unfolded = rounds.length > 0 && host.showRounds.has(artifact.id);
   const toggle = (_e, cx) => {
@@ -371,7 +372,6 @@ function artifactRow(t, host, workspace, artifact, now, rounds = []) {
       div()
         .id(`artifact-open-${artifact.id}`)
         .when(Boolean(file?.startsWith("/")), (el) => el.drag_paths([file]))
-        .flex_1()
         .min_w(0)
         .truncate()
         .cursor_pointer()
@@ -380,6 +380,8 @@ function artifactRow(t, host, workspace, artifact, now, rounds = []) {
         .on_click(open)
         .child(artifact.title || artifact.id),
     )
+    .when(Boolean(lifetime), (el) => el.child(div().id(`lifetime-${artifact.id}`).flex_none().text_size(11).text_color(t.dim).child(lifetime)))
+    .child(div().flex_1())
     .when(Boolean(status) && status !== "current", (el) => el.child(pill(t, status, t[STATUS_COLOR[status]])))
     .when(rounds.length > 0, (el) =>
       el.child(

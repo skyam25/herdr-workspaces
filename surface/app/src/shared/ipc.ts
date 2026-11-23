@@ -323,6 +323,10 @@ export interface SurfaceState {
   workspace?: { id: string; name: string };
   /** A web view shows this surface, so it offers no Pop. */
   web?: boolean;
+  /** Save holds this surface, so its work never goes to the Trash. */
+  saved?: boolean;
+  /** Days unsaved work waits after its terminal ends before it goes to the Trash. */
+  recentDays: number;
   /** The file the surface shows, as `/open` names it. A page that loads after the first opens it. */
   file?: string;
   busy?: boolean;
@@ -536,6 +540,10 @@ export interface CompanionApi extends BoardHost {
   surfaceTargets(): Promise<SurfaceTargets>;
   /** Saves pending work and moves this surface to a workspace, or to `standalone` to unfile it. */
   surfaceMove(workspace: string): Promise<void>;
+  /** Saves this surface, or clears Saved when `saved` is false. */
+  surfaceSave(saved: boolean): Promise<void>;
+  /** Saves pending work, then moves an Unfiled surface to a workspace and saves it there. */
+  surfaceSaveTo(workspace: string): Promise<void>;
   /** Holds a questions surface's answers, so they outlive the host. */
   surfaceAnswer(answers: Answers): Promise<void>;
   onSurface(fn: (state: SurfaceState) => void): Subscription;
@@ -731,6 +739,8 @@ export const CH = {
   surfaceRepeat: 'surface:repeat',
   surfaceTargets: 'surface:targets',
   surfaceMove: 'surface:move',
+  surfaceSave: 'surface:save',
+  surfaceSaveTo: 'surface:save-to',
   surfaceAnswer: 'surface:answer',
   init: 'app:init',
   listBoards: 'boards:list',
@@ -859,6 +869,8 @@ export const IPC_INVOKE = {
   surfaceRepeat: CH.surfaceRepeat,
   surfaceTargets: CH.surfaceTargets,
   surfaceMove: CH.surfaceMove,
+  surfaceSave: CH.surfaceSave,
+  surfaceSaveTo: CH.surfaceSaveTo,
   surfaceAnswer: CH.surfaceAnswer,
   listBoards: CH.listBoards,
   loadBoard: CH.loadBoard,

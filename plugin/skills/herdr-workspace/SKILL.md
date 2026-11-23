@@ -198,6 +198,18 @@ This runs the surface command line against this terminal's newest open surface. 
 
 For a UI mockup that needs no surface, load `herdr-workspaces:wireframe`. It renders an SVG with `${CLAUDE_PLUGIN_ROOT}/bin/wireframe-render.mjs`.
 
+## Keep work
+
+Work from a surface lasts only while something holds it. A Done bundle is a round-trip by default. It sits under the state root and goes to the Trash some days after its terminal ends, 7 by default, set by `recentDays` in hws settings. A surface the person never finished goes the same way.
+
+| When the person asks to | Run |
+|---|---|
+| Keep a delivered sketch, note or review | `hws artifact keep A`. It moves the bundle into the workspace folder for good |
+| Keep a surface that is still open or drafted | `hws surface save --id S` |
+| Keep unfiled work | Add `--workspace W` to either command, because kept work lives in a workspace |
+
+Keep only what the person asks to keep. Round-trips are messages, so `hws artifact scan` and freshness leave them out.
+
 ## Reach another terminal
 
 Every Herdr terminal has a herdr-core address, such as `t94`, or `macminim1/t14` on another machine. This session's address is `$HC_TERMINAL_ID`. Each pane header shows its terminal's address, and a click copies it, so the person quotes it from one conversation to another.

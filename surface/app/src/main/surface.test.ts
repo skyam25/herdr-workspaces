@@ -26,6 +26,7 @@ const config = (over: Partial<SurfaceConfig> = {}): SurfaceConfig => ({
   dataDir: '/data',
   hws: 'hws',
   shown: 'pane',
+  recentDays: 7,
   ...over,
 });
 
@@ -49,6 +50,21 @@ describe('surfaceFromEnv', () => {
     expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_WORKSPACE_ID: 'w1', HWS_WORKSPACE_NAME: 'demo' })?.workspace).toEqual({ id: 'w1', name: 'demo' });
     expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_WORKSPACE_ID: 'standalone', HWS_WORKSPACE_NAME: '' })?.workspace).toEqual({ id: 'standalone', name: '' });
     expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1' })?.workspace).toBeUndefined();
+  });
+
+  it('reads whether the surface is saved', () => {
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_SAVED: '1' })?.saved).toBe(true);
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_SURFACE_SAVED: '' })?.saved).toBeUndefined();
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1' })?.saved).toBeUndefined();
+  });
+
+  it('reads recentDays, and falls back to 7 days', () => {
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_RECENT_DAYS: '14' })?.recentDays).toBe(14);
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_RECENT_DAYS: '0.5' })?.recentDays).toBe(0.5);
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1' })?.recentDays).toBe(7);
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_RECENT_DAYS: '' })?.recentDays).toBe(7);
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_RECENT_DAYS: '0' })?.recentDays).toBe(7);
+    expect(surfaceFromEnv({ HWS_SURFACE_ID: 's1', HWS_RECENT_DAYS: 'soon' })?.recentDays).toBe(7);
   });
 
   it('keeps a local URL as it is', () => {
@@ -385,14 +401,14 @@ describe('SurfaceHost', () => {
   });
 });
 
-describe('SurfaceHost pop', () => {
+describe('SurfaceHost pop, move and save', () => {
   /** An `hws` that logs its arguments, and whether the flush ran first, then answers or fails. */
-  function harness(over: Partial<SurfaceConfig>, opts: { fail?: boolean; flush?: () => Promise<unknown> } = {}) {
+  function harness(over: Partial<SurfaceConfig>, opts: { fail?: boolean; flush?: () => Promise<unknown>; reply?: string } = {}) {
     const root = temp();
     const log = join(root, 'log');
     const flushed = join(root, 'flushed');
     const hws = join(root, 'hws');
-    const answer = opts.fail ? `echo '{"error":"no open pane"}'; exit 1` : `echo '{"moved":true}'`;
+    const answer = opts.fail ? `echo '{"error":"no open pane"}'; exit 1` : `echo '${opts.reply ?? '{"moved":true}'}'`;
     writeFileSync(hws, `#!/bin/sh\ntest -f '${flushed}' && echo flushed >> '${log}'\necho "$@" >> '${log}'\n${answer}\n`, { mode: 0o755 });
     const states: SurfaceState[] = [];
     const flush = opts.flush ?? (async () => writeFileSync(flushed, ''));
@@ -467,6 +483,90 @@ describe('SurfaceHost pop', () => {
     void h.host.move('w1');
     await h.settled();
     expect(h.states.at(-1)?.notice).toEqual({ text: 'Could not move: no open pane', error: true });
+  });
+
+  it('starts saved or not, as hws says, with recentDays', () => {
+    expect(harness({}).host.info()).toMatchObject({ recentDays: 7 });
+    expect(harness({}).host.info().saved).toBeUndefined();
+    expect(harness({ saved: true, recentDays: 3 }).host.info()).toMatchObject({ saved: true, recentDays: 3 });
+  });
+
+  it('saves without saving pending work first, and shows Saved', async () => {
+    const h = harness({ workspace: { id: 'w1', name: 'demo' } }, { reply: '{"id":"s1","saved":true,"workspace":"w1"}' });
+    void h.host.save(true);
+    await h.settled();
+    expect(h.lines()).toEqual(['surface save --id s1 --json']);
+    expect(h.states[0]?.busy).toBe(true);
+    expect(h.states.at(-1)).toMatchObject({ saved: true, notice: undefined });
+  });
+
+  it('clears Saved with --off', async () => {
+    const h = harness({ saved: true }, { reply: '{"id":"s1","saved":false,"workspace":"w1"}' });
+    void h.host.save(false);
+    await h.settled();
+    expect(h.lines()).toEqual(['surface save --id s1 --off --json']);
+    expect(h.states.at(-1)?.saved).toBe(false);
+  });
+
+  it('keeps the state hws reports over the one asked for', async () => {
+    const h = harness({}, { reply: '{"id":"s1","saved":false,"workspace":"w1"}' });
+    void h.host.save(true);
+    await h.settled();
+    expect(h.states.at(-1)?.saved).toBe(false);
+  });
+
+  it('shows the error when hws refuses to save or clear Saved', async () => {
+    const on = harness({}, { fail: true });
+    void on.host.save(true);
+    await on.settled();
+    expect(on.states.at(-1)?.saved).toBeUndefined();
+    expect(on.states.at(-1)?.notice).toEqual({ text: 'Could not save: no open pane', error: true });
+
+    const off = harness({ saved: true }, { fail: true });
+    void off.host.save(false);
+    await off.settled();
+    expect(off.states.at(-1)).toMatchObject({ saved: true, notice: { text: 'Could not clear Saved: no open pane', error: true } });
+  });
+
+  it('saves nothing on questions or in a web view', async () => {
+    for (const over of [{ type: 'questions' as const }, { web: true }]) {
+      const h = harness(over);
+      await h.host.save(true);
+      await h.host.saveTo('w1');
+      expect(h.lines()).toEqual([]);
+      expect(h.states).toEqual([]);
+    }
+  });
+
+  it('saves the work, then asks hws to save an Unfiled window to a workspace', async () => {
+    const h = harness({ shown: 'window', workspace: { id: 'standalone', name: '' } }, { reply: '{"id":"s1","saved":true,"workspace":"w1"}' });
+    void h.host.saveTo('w1');
+    await h.settled();
+    expect(h.lines()).toEqual(['flushed', 'surface save --id s1 --workspace w1 --json']);
+    expect(h.states.at(-1)?.saved).toBe(true);
+  });
+
+  it('saves nothing to a workspace from a pane', async () => {
+    const h = harness({ workspace: { id: 'standalone', name: '' } });
+    await h.host.saveTo('w1');
+    expect(h.lines()).toEqual([]);
+    expect(h.states).toEqual([]);
+  });
+
+  it('stays put and says why when the work does not save before saving to a workspace', async () => {
+    const h = harness({ shown: 'window' }, { flush: () => Promise.reject(new Error('panel is not ready')) });
+    void h.host.saveTo('w1');
+    await h.settled();
+    expect(h.lines()).toEqual([]);
+    expect(h.states.at(-1)?.notice).toEqual({ text: 'Could not save before moving: panel is not ready', error: true });
+  });
+
+  it('shows the error when hws refuses to save it to a workspace', async () => {
+    const h = harness({ shown: 'window' }, { fail: true });
+    void h.host.saveTo('w1');
+    await h.settled();
+    expect(h.states.at(-1)?.saved).toBeUndefined();
+    expect(h.states.at(-1)?.notice).toEqual({ text: 'Could not save: no open pane', error: true });
   });
 });
 

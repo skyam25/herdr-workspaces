@@ -27,7 +27,7 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 | Right panel, Outputs | Each agent's declared deliverables, then touched documents, with Review, Open as note and Copy path |
 | Right panel, Tasks | The workspace's cards, owners and orchestrator |
 | Pane header | The terminal's address, such as `t94`, which a click copies. Chat or Terminal for an agent, and Resume or Show for its windows |
-| Surfaces | Sketch, note, review page, outline, questions. Done delivers, Pop out and Pop in move them |
+| Surfaces | Sketch, note, review page, outline, questions. Done delivers, Pop out and Pop in move them, and Save keeps one from expiring |
 
 ## What an agent gets
 
@@ -56,6 +56,7 @@ What Herdr Workspaces adds to Herdr, how agents learn to use it, and how to move
 | Feedback items and behavior rules | `hws surface cli --type page -- feedback\|behavior ...` |
 | Reopen earlier work | `hws review ARTIFACT`, `hws surface open --type board --artifact A`, `hws surface resume --id S` |
 | Update the current note | Load `herdr-workspaces:tidy`. Never rewrite the note directly |
+| Keep delivered work, or save a surface | `hws artifact keep A`, `hws surface save --id S` |
 | Reach a terminal the person names, such as `t7` | `hc read T`, `hc send T "text"`, `--terminal T`. `hc ls` lists them |
 
 After opening any surface, the agent ends its turn. The person's answer arrives as the next prompt.

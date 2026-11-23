@@ -7,9 +7,8 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { props, run, theme, home, exec, hc, nextCommand, shared, setShared, openOverlay, checking, settings } from "herdr";
 import { panes, terminals, spaces, inRender } from "./live.js";
-import { button as uiButton, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
+import { button as uiButton, clickable, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { LABEL, sweep } from "./parked.js";
-import { copy } from "./clipboard.js";
 
 const CHAT = "hws-chat";
 const BOARD = "hws-work";
@@ -182,26 +181,19 @@ export default class Pane extends View {
 
   // The terminal's hc address. People quote it to agents in other conversations, so a click copies it.
   addressChip(t, address, pane) {
-    return div()
+    const chip = div()
       .id(`ph-addr-${pane}`)
       .flex_none()
       .px(4)
-      .rounded(RADIUS.control)
       .font_family(settings()?.font_family ?? "JetBrains Mono")
       .text_size(TEXT.id)
       .text_color(t.dim)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover).text_color(t.foreground))
       .tooltip(`Terminal ${address}. Click to copy`)
-      .on_click((_e, cx) => {
-        cx.stop_propagation();
-        copy(address).then(
-          () => toast({ title: `Copied ${address}`, timeout: 2000 }),
-          (e) => toast({ title: "Couldn't copy", body: plainError(e), level: "error" }),
-        );
-        cx.notify();
-      })
       .child(address);
+    return clickable(chip, (_e, cx) => {
+      cx.write_to_clipboard(address);
+      toast({ title: `Copied ${address}`, timeout: 2000 });
+    }, { radius: RADIUS.control });
   }
 
   // Opens the + menu at the pointer. A chat pane speaks for the agent parked behind it.
