@@ -84,6 +84,8 @@ export function setup(overrides = {}) {
     closed: [],
     picks: [],
     pickResult: null,
+    filePicks: [],
+    filePickResult: null,
     files: {},
     watches: [],
     watchResult: null,

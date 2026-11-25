@@ -32,7 +32,7 @@ The installer downloads a prebuilt surface when CI has published one for that co
 
 Update with `hws update`, which pulls `main`, reinstalls every part when the installed version differs from the checkout, and runs the checks. It also finishes the job after a manual `git pull` or a failed install. `hws doctor` checks the install and says when GitHub has newer commits or the install is stale.
 
-`mods/keys.example.json` lists suggested key bindings for `~/.config/herdr-app/keys.json`.
+The command palette lists Herdr Workspaces commands in its Workspaces group. `mods/keys.example.json` lists suggested key bindings for `~/.config/herdr-app/keys.json`.
 
 ## Test
 

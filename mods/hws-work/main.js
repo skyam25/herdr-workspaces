@@ -9,6 +9,7 @@ import { COLUMNS, DONE_SHOWN, POLL_MS, SESSION_ENDED, SOME_AGENT, ago, cardSumma
 import { copy } from "./clipboard.js";
 import { focusAgent, hws, openNote, openOutput, openSession } from "./open.js";
 import { AddSeveralForm, ModelsForm, TODOS_CHANGED, TodoForm, textFlag } from "./todo.js";
+import { everyWhileShown } from "./visible.js";
 
 const WAITING_KEY = "hws.tasks.waiting";
 const DIALOG_PX = 440;
@@ -97,8 +98,9 @@ export default class Work extends View {
       this.syncTodos(cx);
     } else this.poll(cx);
 
-    // Tasks keeps polling while hidden because the tab bar shows its waiting count.
-    cx.timer.every(POLL_MS, (cx) => {
+    // Tasks keeps polling while its tab is hidden because the tab bar shows its waiting count.
+    // Both pause while the window is hidden. The sidebar keeps the Dock badge current.
+    everyWhileShown(cx, POLL_MS, (cx) => {
       if (this.kind === "tasks") this.loadTodos(cx);
       else if (outputsShowing()) this.poll(cx);
     });

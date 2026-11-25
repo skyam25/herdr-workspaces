@@ -10,8 +10,6 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const OK = { code: 0, stdout: "", stderr: "" };
 const AGENT_PANE = { pane: "p1", terminal: "t1", tab: "tb1", focused: true };
-const CANCELLED = { code: 1, stdout: "", stderr: "execution error: User canceled. (-128)" };
-const BROKEN = { code: 1, stdout: "", stderr: "execution error: no display (-1)" };
 
 const TERMINAL = { terminal: "t1", overlay: "ov1" };
 const FLIPPED = { terminal: "t1", chat: true, pane: "p2", space: "spc1", overlay: "ov1" };
@@ -27,7 +25,6 @@ function world(overrides) {
 
 const rows = (m) => m.text().split(" | ");
 const openArgs = (H) => hwsCalls(H).map((c) => c.args);
-const osascriptCalls = (H) => H.calls.filter((c) => c.command === "osascript");
 
 // hws-actions
 
@@ -178,7 +175,7 @@ test("on Linux, Review a page uses the desktop's file picker and opens its first
   const run = spawnSync("/bin/sh", args, { encoding: "utf8", env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir } });
   assert.equal(run.status, 0);
   assert.deepEqual(run.stdout.trim().split("\n").slice(0, 5), ["surface", "open", "--type", "page", "--file"]);
-  assert.equal(run.stdout.trim().split("\n")[5], "/Users/me/.config/herdr-app/mods/hws-chat/pick-files.py");
+  assert.equal(run.stdout.trim().split("\n")[5], "/Users/me/.config/herdr-app/mods/hws-actions/pick-files.py");
 });
 
 test("a flipped agent's page opens beside its chat pane", async () => {
@@ -384,11 +381,6 @@ function chat(overrides = {}) {
 
 const cx = { notify() {}, spawn: (fn) => fn(cx), timer: { after: (_ms, fn) => fn(cx) } };
 
-const macPicker = (answer) => (command) => {
-  if (command === "uname") return { ...OK, stdout: "Darwin\n" };
-  return command === "osascript" ? answer : OK;
-};
-
 test("the composer's + is wired to the menu", () => {
   assert.match(read("../hws-chat/main.js"), /this\.round\("chat-attach",[^\n]*this\.openActions\(cx\)/);
 });
@@ -424,30 +416,29 @@ test("a chat with no reply yet leaves lastReply out", () => {
 });
 
 test("a chat with no agent opens the file picker directly", async () => {
-  const H = world({ other: macPicker(CANCELLED) });
+  const H = world();
   chat({ addr: null, myPane: () => null }).openActions(cx);
   await settle();
 
   assert.deepEqual(H.overlays, []);
-  assert.equal(osascriptCalls(H).length, 1);
+  assert.equal(H.filePicks.length, 1);
 });
 
-test("macOS picks several files and adds their POSIX paths", async () => {
-  const H = world({ other: macPicker({ ...OK, stdout: "/a/one.png\n/a/two words.pdf\n" }) });
+test("the picker allows several files and adds their paths", async () => {
+  const H = world({ filePickResult: ["/a/one.png", "/a/two words.pdf"] });
   const c = chat();
   c.pickFiles(cx);
   await settle();
 
-  assert.match(osascriptCalls(H)[0].args.join(" "), /choose file .*with multiple selections allowed/);
-  assert.match(osascriptCalls(H)[0].args.join(" "), /POSIX path of f/);
+  assert.deepEqual(H.filePicks, [{ prompt: "Attach", multiple: true }]);
   assert.match(JSON.stringify(c.inline), /\/a\/one\.png/);
   assert.match(JSON.stringify(c.inline), /\/a\/two words\.pdf/);
-  assert.equal(H.calls.some((x) => x.command === "sh"), false);
+  assert.deepEqual(H.calls, []);
   assert.equal(c.error, null);
 });
 
-test("cancelling the macOS picker adds nothing and shows no error", async () => {
-  world({ other: macPicker(CANCELLED) });
+test("cancelling the picker adds nothing and shows no error", async () => {
+  world({ filePickResult: null });
   const c = chat();
   c.pickFiles(cx);
   await settle();
@@ -456,8 +447,8 @@ test("cancelling the macOS picker adds nothing and shows no error", async () => 
   assert.equal(c.error, null);
 });
 
-test("a macOS picker that fails says so", async () => {
-  world({ other: macPicker(BROKEN) });
+test("a picker that fails says so", async () => {
+  world({ filePickResult: new Error("no portal") });
   const c = chat();
   c.pickFiles(cx);
   await settle();
@@ -465,24 +456,8 @@ test("a macOS picker that fails says so", async () => {
   assert.equal(c.error, "Couldn't open the file picker.");
 });
 
-test("Linux keeps the portal picker", async () => {
-  const H = world({
-    other: (command) => {
-      if (command === "uname") return { ...OK, stdout: "Linux\n" };
-      return command === "sh" ? { ...OK, stdout: "/home/me/x.txt\n" } : OK;
-    },
-  });
-  const c = chat();
-  c.pickFiles(cx);
-  await settle();
-
-  assert.match(H.calls.find((x) => x.command === "sh").args.at(-1), /mods\/hws-chat\/pick-files\.py$/);
-  assert.equal(osascriptCalls(H).length, 0);
-  assert.match(JSON.stringify(c.inline), /\/home\/me\/x\.txt/);
-});
-
 test("an attach request for this pane runs the picker once", async () => {
-  const H = world({ other: macPicker(CANCELLED), sharedValues: { "hws-chat.attach": { pane: "p2", at: 50 } } });
+  const H = world({ sharedValues: { "hws-chat.attach": { pane: "p2", at: 50 } } });
   const c = chat();
 
   c.takeAttachRequest("p2", cx);
@@ -490,16 +465,16 @@ test("an attach request for this pane runs the picker once", async () => {
   await settle();
 
   assert.equal(c.attachReqAt, 50);
-  assert.equal(osascriptCalls(H).length, 1);
+  assert.equal(H.filePicks.length, 1);
 });
 
 test("an attach request for another pane or an old time is ignored", async () => {
-  const H = world({ other: macPicker(CANCELLED), sharedValues: { "hws-chat.attach": { pane: "p9", at: 50 } } });
+  const H = world({ sharedValues: { "hws-chat.attach": { pane: "p9", at: 50 } } });
   chat().takeAttachRequest("p2", cx);
   chat({ attachReqAt: 50 }).takeAttachRequest("p9", cx);
   await settle();
 
-  assert.equal(osascriptCalls(H).length, 0);
+  assert.equal(H.filePicks.length, 0);
 });
 
 // Boards left open or saved as drafts

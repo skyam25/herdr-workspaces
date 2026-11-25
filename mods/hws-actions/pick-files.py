@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# The desktop's own file picker (xdg-desktop-portal FileChooser), several files at once, for the
-# chat's attach button: prints each chosen path on its own line; nothing when cancelled.
-# Herdr's mods have a folder picker only (pickFolder), so the chat runs this.
+# The desktop's own file picker (xdg-desktop-portal FileChooser) for the + menu's Review a page.
+# Prints each chosen path on its own line, and nothing when cancelled. The argument is the title.
+# The menu's popup can close while the picker is open, so a shell runs this in place of pickFiles.
 import sys
 from urllib.parse import unquote, urlparse
 
 from gi.repository import Gio, GLib
 
-title = sys.argv[1] if len(sys.argv) > 1 else "Attach files"
+title = sys.argv[1] if len(sys.argv) > 1 else "Open"
 bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 token = f"herdr_chat_{GLib.random_int()}"
 sender = bus.get_unique_name()[1:].replace(".", "_")

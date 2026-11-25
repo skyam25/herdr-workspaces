@@ -2103,6 +2103,18 @@ test("Tasks lists its cards every 10 seconds and keeps listing while hidden", as
   assert.equal(sessionsPolls(H), 0);
 });
 
+test("Tasks skips its poll while the window is hidden", async () => {
+  const H = world({ layout: panelLayout(true, "files") });
+  H.window = { visible: false };
+  const m = await mount("hws-work", { view: "tasks" });
+  assert.equal(todoLists(H), 1);
+  await m.fireTimer(10000);
+  assert.equal(todoLists(H), 1);
+  H.window = { visible: true };
+  await m.fireTimer(10000);
+  assert.equal(todoLists(H), 2);
+});
+
 test("Outputs polls only while it is showing", async () => {
   const H = world({ layout: panelLayout(true, "outputs") });
   const m = await mount("hws-work", { view: "outputs" });

@@ -24,7 +24,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, Scrollbar, VirtualListScrollHandle, TextView, v_virtual_list, InputState, Input } from "gpui-base";
-import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines, layout } from "herdr";
+import { focused, props, run, theme, home, hc, exec, shared, setShared, watchFolder, window, settings, playSound, notify, appHome, readTextFile, writeTextFile, nextCommand, openOverlay, knownAgents, machines, layout, pickFiles } from "herdr";
 import { agents, panes, terminals, spaces, inRender } from "./live.js";
 import * as fs from "fs/promises";
 import { FIND, LOG, Conversation, records, resultText, summary, excerpt, names, pilotLine } from "./core/chat-log.js";
@@ -53,17 +53,6 @@ import { cleanCommand } from "./core/clean-env.js";
 import * as choices from "./settings.js";
 import { Dictation, BUN_PATH, warmAudio } from "./dictate.js";
 
-// Prints each chosen file's POSIX path on its own line. Error -128 means the person cancelled.
-const PICK_FILES_MAC = [
-  "activate",
-  'set picked to choose file with prompt "Attach files" with multiple selections allowed',
-  'set out to ""',
-  "repeat with f in picked",
-  "set out to out & POSIX path of f & linefeed",
-  "end repeat",
-  "return out",
-].flatMap((line) => ["-e", line]);
-
 // Writing down after Done this long says it's taking longer than usual (SHEP-63).
 const DICT_SLOW = 5000;
 import { PanelHost, inner, openTaskThread, backToTasks, requestWorkerTerminal, THREAD, STACK as TASKS_STACK, BODY as THREAD_BODY, CHAT as THREAD_CHAT, TERM as THREAD_TERM, FILES as THREAD_FILES, CHANGES as THREAD_CHANGES, PR as THREAD_PR, BROWSER as THREAD_BROWSER } from "./panel.js";
@@ -77,6 +66,7 @@ import { note } from "./usage.js";
 import { statusLines, statusParts } from "./statusline.js";
 import { insertedRange, isImageNames, namesMatch, imagePaths } from "./clipboard.js";
 import { imageToken, nextImageNumber, numberForSend, orphanedImages, withoutLeadingLabels } from "./imagelabels.js";
+import { everyWhileShown } from "./visible.js";
 
 // Messages a page of history holds: the newest page first, earlier ones as the person scrolls up.
 const PAGE = 200;
@@ -503,7 +493,7 @@ export default class Chat extends View {
       const rows = [...this.helpers(), ...this.jobs()];
       if (this.status() === "working" || rows.some((r) => Date.now() - (r.at ?? 0) < 61000) || (rows.length && ticks % 30 === 0)) cx.notify();
     });
-    cx.timer.every(CLI_STATUS_MS, (cx) => this.readCliStatus(cx));
+    everyWhileShown(cx, CLI_STATUS_MS, (cx) => this.readCliStatus(cx));
 
     // The first read can't wait for the slow timer, and it needs the agent's kind and pane first.
     const openedAt = Date.now();
@@ -513,7 +503,7 @@ export default class Chat extends View {
 
     // An Assistant's chat keeps its tasks current for their news lines (newsLines()): herdr-task's own
     // statuses, the same as the Tasks panel's and the news it sends.
-    cx.timer.every(8000, (cx) => {
+    everyWhileShown(cx, 8000, (cx) => {
       if (!this.assistant() || this.tasksLoading) return;
       this.tasksLoading = true;
       cx.spawn(async (cx) => {
@@ -3950,18 +3940,14 @@ export default class Chat extends View {
     cx.timer.after(0, (cx) => this.pickFiles(cx));
   }
 
-  // The desktop's own file picker (osascript on macOS, pick-files.py and xdg-desktop-portal
-  // elsewhere). The chosen files join the message as tiles, as a drop or a paste makes them.
+  // Herdr's file picker. The chosen files join the message as tiles, as a drop or a paste makes them.
   pickFiles(cx) {
     cx.spawn(async (cx) => {
-      const isMac = (await exec("uname", []).catch(() => null))?.stdout?.trim() === "Darwin";
-      const r = await (isMac
-        ? exec("osascript", PICK_FILES_MAC)
-        : exec("sh", ["-c", 'P=/usr/bin/python3; [ -x "$P" ] || P=python3; exec "$P" -I "$1"', "x", `${appHome()}/mods/hws-chat/pick-files.py`])).catch(() => null);
-      const cancelled = isMac && Boolean(r?.stderr?.includes("-128"));
-      const list = (r?.stdout ?? "").split("\n").filter(Boolean);
-      if (r && r.code !== 0 && !cancelled) this.error = "Couldn't open the file picker.";
-      if (!list.length) { cx.notify(); return; }
+      const list = await pickFiles({ prompt: "Attach", multiple: true }).catch(() => {
+        this.error = "Couldn't open the file picker.";
+        return null;
+      });
+      if (!list?.length) { cx.notify(); return; }
       this.addInline(attach.paths(list));
       this.saveSoon(cx);
       this.box.focus();

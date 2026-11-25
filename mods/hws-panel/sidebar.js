@@ -369,6 +369,7 @@ export function startSidebar(cx) {
   };
   load(state, cx);
   cx.timer.every(CHECK_MS, (cx) => check(state, cx));
+  // The Dock badge shows while the window is hidden, so this load never pauses.
   cx.timer.every(REFRESH_MS, (cx) => load(state, cx));
   return state;
 }

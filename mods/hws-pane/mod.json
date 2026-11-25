@@ -1,1 +1,12 @@
-{ "place": "none", "title": "Pane header" }
+{
+  "place": "none",
+  "title": "Pane header",
+  "palette": [
+    {
+      "title": "Flip the agent between chat and terminal",
+      "command": "hws-pane.toggle",
+      "group": "Workspaces",
+      "words": "chat terminal flip switch pane"
+    }
+  ]
+}

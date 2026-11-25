@@ -1,1 +1,19 @@
-{ "place": "none", "title": "New", "overlay": { "kind": "dialog", "width": 420 } }
+{
+  "place": "none",
+  "title": "New",
+  "overlay": {
+    "kind": "dialog",
+    "width": 420
+  },
+  "palette": [
+    {
+      "title": "New workspace, throwaway, sketch or note…",
+      "command": "mod.open",
+      "args": {
+        "name": "hws-new"
+      },
+      "group": "Workspaces",
+      "words": "launcher new terminal workspace throwaway find sketch board note"
+    }
+  ]
+}

@@ -1013,7 +1013,7 @@ The `hws` layout has a `workspaces` block that runs `hws-panel` with `{"view":"s
 | Panel button on the current workspace | `mod.open` for `hws-panel` |
 | Window count on a workspace row, shown while it has open windows | A window glyph and the count of open windows that `hws surface list` gives the workspace, before the status dot. Its tooltip reads `N open windows`. A click runs `hws surface resume --id` for each of them and leaves the space as it was |
 
-The section reloads with `hws list` when the spaces change and every 60 seconds. Each reload sets `shared("hws.workspace.spaces")` to the sorted ids of every space in an open workspace, Board spaces included, only when the list changes. Each reload also runs `hws tidy status --workspace W` for every kept workspace. Each full reload also runs `hws unfiled` and `hws surface list`, and a failure of either counts as nothing. Each full reload runs `hws todo list --space <Board space>` for every workspace with a Board and counts the unarchived cards in `waiting`, and a failure counts as zero. It sets `shared("hws.tasks.waiting")` to an object that maps every space of each such workspace, the Board space included, to that count, only when the map changes. It sets the Dock badge with `setBadge` to the total of those counts, one per workspace, and clears it at zero. It sets the window title with `setWindowTitle` to the name of the workspace that holds the shown space, Board spaces included, and gives the title back to Herdr on a space outside every workspace. Each is set only when it changes. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A kept workspace with no `tidiedAt` shows a dim unwritten ring, which is neither behind nor stale. A throwaway, or a failed status, shows no ring. Space rows show each space's status. The active space row is highlighted, its workspace row shows full-strength text and tile with no background, and other workspace rows are muted. Tabs appear only in the top bar. Hovering a workspace row shows a + that runs `hws space add --workspace W`, unfolds the workspace and reloads. Herdr shows the new space at once. Right-clicking a workspace row opens a menu with Open panel, Add space…, Add tasks when it has no Board, Rename and Archive, or Close in place of Archive for a throwaway. Add space… opens the dialog for `hws space add` and `hws space move`. Add tasks runs `hws board add --workspace W`, then shows Tasks. Open panel selects the workspace's space and splits the panel beside a terminal on its shown tab, or focuses a panel already there. Archive, Close, Restore and Remove each ask first in a dialog. `hws list --archived` fills a folded Archived row at the end of the list. Clicking an archived workspace offers Restore, and its right-click menu has Restore, Rename and Remove, which runs `hws close`. The section sizes its block with `layout.resize`, growing until the other sidebar blocks reach their fixed size or `min`, measured against the window height in Herdr's `window.json`, or up to 480px of rows when that file cannot be read, and then scrolling. Dragging the divider below the section holds the block at that height in either direction, and the list scrolls when its rows overflow. Dropping the divider within 10px of the rows' height lets the block fit its rows again. The held height is kept in `localStorage` under `sidebar.workspaces.cap`. The scrollbar shows only while the rows overflow. The section shows only the + when the sidebar is narrower than 160px. The launcher offers Orchestrate this space only when the active space's id is in `hws.workspace.spaces`, and its dialog fits its rows.
+The section reloads with `hws list` when the spaces change and every 60 seconds. The 60-second reload runs while the window is hidden too, because the Dock badge still shows. Each reload sets `shared("hws.workspace.spaces")` to the sorted ids of every space in an open workspace, Board spaces included, only when the list changes. Each reload also runs `hws tidy status --workspace W` for every kept workspace. Each full reload also runs `hws unfiled` and `hws surface list`, and a failure of either counts as nothing. Each full reload runs `hws todo list --space <Board space>` for every workspace with a Board and counts the unarchived cards in `waiting`, and a failure counts as zero. It sets `shared("hws.tasks.waiting")` to an object that maps every space of each such workspace, the Board space included, to that count, only when the map changes. It sets the Dock badge with `setBadge` to the total of those counts, one per workspace, and clears it at zero. It sets the window title with `setWindowTitle` to the name of the workspace that holds the shown space, Board spaces included, and gives the title back to Herdr on a space outside every workspace. Each is set only when it changes. A workspace row shows its most urgent status, a freshness ring for a kept workspace and how many commits its folder is ahead of its upstream. The ring's tooltip is the status `line`. A kept workspace with no `tidiedAt` shows a dim unwritten ring, which is neither behind nor stale. A throwaway, or a failed status, shows no ring. Space rows show each space's status. The active space row is highlighted, its workspace row shows full-strength text and tile with no background, and other workspace rows are muted. Tabs appear only in the top bar. Hovering a workspace row shows a + that runs `hws space add --workspace W`, unfolds the workspace and reloads. Herdr shows the new space at once. Right-clicking a workspace row opens a menu with Open panel, Add space…, Add tasks when it has no Board, Rename and Archive, or Close in place of Archive for a throwaway. Add space… opens the dialog for `hws space add` and `hws space move`. Add tasks runs `hws board add --workspace W`, then shows Tasks. Open panel selects the workspace's space and splits the panel beside a terminal on its shown tab, or focuses a panel already there. Archive, Close, Restore and Remove each ask first in a dialog. `hws list --archived` fills a folded Archived row at the end of the list. Clicking an archived workspace offers Restore, and its right-click menu has Restore, Rename and Remove, which runs `hws close`. The section sizes its block with `layout.resize`, growing until the other sidebar blocks reach their fixed size or `min`, measured against the window height in Herdr's `window.json`, or up to 480px of rows when that file cannot be read, and then scrolling. Dragging the divider below the section holds the block at that height in either direction, and the list scrolls when its rows overflow. Dropping the divider within 10px of the rows' height lets the block fit its rows again. The held height is kept in `localStorage` under `sidebar.workspaces.cap`. The scrollbar shows only while the rows overflow. The section shows only the + when the sidebar is narrower than 160px. The launcher offers Orchestrate this space only when the active space's id is in `hws.workspace.spaces`, and its dialog fits its rows.
 
 ## Space menu
 
@@ -1044,6 +1044,29 @@ The `spaces` block runs `hws-spaces`, a copy of Herdr's `spaces`.
 | Worktree whose checkout is hidden | Shows as a plain row |
 | Divider | A top border, as Agents and the footer draw, with 8px above the heading |
 
+## Command palette
+
+Each mod's `mod.json` adds its own entries to Herdr's command palette, in the group Workspaces.
+
+| Entry | Mod | Command |
+|---|---|---|
+| New workspace, throwaway, sketch or note… | `hws-new` | `mod.open {name: "hws-new"}` |
+| Show or hide the workspace panel | `hws-panel` | `mod.open {name: "hws-panel"}` |
+| Show or hide Outputs | `hws-brief` | `mod.open {name: "hws-brief"}` |
+| Flip the agent between chat and terminal | `hws-pane` | `hws-pane.toggle` |
+
+## Hidden window
+
+Timed reloads skip their turn while `window().visible` is false, and the next turn after the window shows runs as usual. Folder watches still fire while hidden.
+
+| Paused | Keeps running |
+|---|---|
+| The workspace panel's 20-second refresh | The sidebar's 60-second reload, for the Dock badge |
+| Tasks and Outputs' 10-second poll | `hws-pane`'s sweep that ends agents whose chat pane closed |
+| `hws-pane`'s `hws surface list` | |
+| The chat's task reload and CLI status read | |
+| An Assistant chat's `herdr-task list` | |
+
 ## Chat and Terminal flip
 
 The `hws` layout uses the `hws-pane` header. Claude Code and Codex panes get a Chat | Terminal switch.
@@ -1059,6 +1082,7 @@ Every terminal pane's header shows its terminal's address after the name, such a
 - The core label `herdr.chat` names the chat pane that shows a parked agent.
 - A parked agent has no pane, so `herdr-app ls` lists no terminal for it and `pane.focus --terminal T` fails.
 - `hws-pane` ends a parked agent once its chat pane has gone.
+- The narrow Agents rail numbers only agents with a pane, in the order `setAgentOrder` gives `agent.next`, `agent.prev` and `agent.select {index}`. A flipped agent's row shows no number.
 - A flip keeps every pane's size. Herdr gives a closed pane's width to its left neighbor, so the new pane moves left of the old one first.
 
 ### Permission hook

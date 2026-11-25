@@ -253,7 +253,7 @@ for (const v of VARIANTS) {
   const dir = `${forced}/${v.name}`;
   mkdirSync(dir, { recursive: true });
   cpSync(`${root}${v.mod}/mod.json`, `${dir}/mod.json`);
-  for (const file of ["hws.js", "clipboard.js", "sidebar.js", "rowmenu.js", "spacemenu.js", "unfiled.js", "artifactmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "tabtitle.js", "board.js", "data.js", "open.js", "todo.js"]) {
+  for (const file of ["hws.js", "clipboard.js", "sidebar.js", "rowmenu.js", "spacemenu.js", "unfiled.js", "artifactmenu.js", "context.js", "sections.js", "cites.js", "flipped.js", "tabtitle.js", "board.js", "data.js", "open.js", "todo.js", "visible.js"]) {
     if (existsSync(`${root}${v.mod}/${file}`)) cpSync(`${root}${v.mod}/${file}`, `${dir}/${file}`);
   }
   let source = readFileSync(`${root}${v.mod}/main.js`, "utf8").replaceAll("props()", "__props()");

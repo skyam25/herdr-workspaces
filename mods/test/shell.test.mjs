@@ -669,6 +669,10 @@ test("the two flipped.js copies are identical", () => {
   assert.equal(read("hws-tabs/flipped.js"), read("hws-agents/flipped.js"));
 });
 
+test("the visible.js copies are identical", () => {
+  for (const mod of ["hws-work", "hws-pane", "hws-chat"]) assert.equal(read(`${mod}/visible.js`), read("hws-panel/visible.js"), mod);
+});
+
 test("hws-tabs carries the assets it references", () => {
   const source = read("hws-tabs/main.js");
   const own = [...source.matchAll(/mods\/hws-tabs\/([\w-]+\.svg)/g)].map((m) => m[1]);

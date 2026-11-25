@@ -171,7 +171,7 @@ Measured on 2026-11-12 in a separate Herdr 0.1.15 window of 1994 by 1211 points,
 - [ ] Open a note and a page in the real window and confirm an idle pane no longer flickers. Only the pty has shown it.
 - [x] Draw the page at 30 frames a second in a pane, through `PIXEL_FPS` in `surface/run.sh`. Pixel's CPU use fell from 54% of a core to 28% while a page scrolled, and the pane showed the same 5 frames a second.
 - [ ] Set `TERMINAL_BROWSER_PRESENT=patched` in `surface/run.sh` once Herdr fixes [#500](https://github.com/herdrdev/herdr-app/issues/500). Pixel then sends only the changed region, which cut typing from 2.4 MB/s to 0.01 MB/s in the pty. Herdr drops the pixel offset the patches are placed with, so they land up to a cell off today.
-- [ ] Watch Herdr [#508](https://github.com/herdrdev/herdr-app/pull/508) and [#704](https://github.com/herdrdev/herdr-app/pull/704). They keep the old image on screen during an update and take frames in shared memory, and Pixel uses both with no change here.
+- [ ] Watch Herdr [#704](https://github.com/herdrdev/herdr-app/pull/704). It holds images through an update and takes frames in shared memory, and Pixel uses both with no change here. [#508](https://github.com/herdrdev/herdr-app/pull/508), which held the old image during an update, closed unmerged on 2026-11-12.
 
 ### 10. Test the new UI homes by hand
 

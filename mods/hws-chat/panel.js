@@ -30,6 +30,7 @@ import { button, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { on as addonOn } from "./addons.js";
 import { artifactCli } from "./artview.js";
 import { GREP, publishedIds, taskArtifacts } from "./core/task-artifacts.js";
+import { everyWhileShown } from "./visible.js";
 
 // The task header's shared left edge, and task ids in the Tasks list's monospace (mods/tasks).
 const EDGE = 12, ID_FONT = "JetBrains Mono";
@@ -335,7 +336,7 @@ export class PanelHost {
     // The task's record, again every 3 s while a worker shows (12 s on another machine).
     if (!this.polling) {
       this.polling = true;
-      cx.timer.every(3000, (cx) => {
+      everyWhileShown(cx, 3000, (cx) => {
         const addr = this.cur?.terminal, key = this.cur?.key;
         const remote = addr ? addr.includes("/") : Boolean(key?.machine);
         if ((addr || key) && (!remote || ++this.ticks % 4 === 0)) cx.spawn(async (cx) => this.loadTask(addr, cx));

@@ -10,6 +10,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { agents, panes, spaces, focused, props, exec, hc, theme, run, openOverlay, closeOverlay, readTextFile, shared, watchFolder } from "herdr";
 import { hws, message, submitDialog, openWorkspaceForm, checkFolder, fillParent, makeInput, focusField, formKeys, dialogRoot, dialogFooter, labeled, field, areaField, button, folderRow, problemLine, tilde } from "./hws.js";
 import { startSidebar, drawSidebar } from "./sidebar.js";
+import { everyWhileShown } from "./visible.js";
 import { initRename, renderConfirm, renderRename, renderRowMenu, renderStageMenu } from "./rowmenu.js";
 import { ROLES, ROLE_DEFAULTS, SUGGEST_PROMPT, agentName, nameList, noteLines, lifetimeLabel, placeRows, resolvePath, taskCounts, typeLabel, validStatus } from "./context.js";
 import { openCite, openExternally, revealPath, showBoard } from "./cites.js";
@@ -93,7 +94,7 @@ export default class Panel extends View {
       this.placesFor = null;
       this.watching = new Map();
       this.refresh(cx);
-      cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
+      everyWhileShown(cx, REFRESH_MS, (cx) => this.refresh(cx));
     }
   }
 

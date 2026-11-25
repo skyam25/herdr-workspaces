@@ -1,1 +1,21 @@
-{ "place": "none", "title": "Brief", "overlay": { "kind": "popup", "width": 8, "height": 8, "frame": "none" } }
+{
+  "place": "none",
+  "title": "Brief",
+  "overlay": {
+    "kind": "popup",
+    "width": 8,
+    "height": 8,
+    "frame": "none"
+  },
+  "palette": [
+    {
+      "title": "Show or hide Outputs",
+      "command": "mod.open",
+      "args": {
+        "name": "hws-brief"
+      },
+      "group": "Workspaces",
+      "words": "brief outputs documents deliverables"
+    }
+  ]
+}

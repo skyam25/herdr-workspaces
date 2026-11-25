@@ -9,6 +9,7 @@ import { props, run, theme, home, exec, hc, nextCommand, shared, setShared, open
 import { panes, terminals, spaces, inRender } from "./live.js";
 import { button as uiButton, clickable, segmented, TEXT, RADIUS, toast, plainError } from "./ui.js";
 import { LABEL, sweep } from "./parked.js";
+import { everyWhileShown } from "./visible.js";
 
 const CHAT = "hws-chat";
 const BOARD = "hws-work";
@@ -128,13 +129,15 @@ export default class Pane extends View {
     // `herdr-app check` draws the header only. The sweep and hws calls would act on the live app.
     if (checking()) return;
 
+    // The sweep ends agents whose chat pane closed, so it runs while the window is hidden too.
     cx.timer.every(SWEEP_MS, () => {
       if (Date.now() - lastSweep < SWEEP_MS / 2) return;
       lastSweep = Date.now();
       sweep();
     });
     refreshBoards();
-    cx.timer.every(BOARDS_MS, () => { refreshBoards(); });
+    // The boards list pauses while the window is hidden and catches up on the first tick after.
+    everyWhileShown(cx, BOARDS_MS, () => { refreshBoards(); });
 
     // A short wait lets a reloaded build exit at its next cx use.
     cx.spawn(async (cx) => {

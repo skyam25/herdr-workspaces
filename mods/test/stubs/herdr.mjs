@@ -11,6 +11,11 @@ export const run = (name, args) => { H().runs.push({ name, args }); return null;
 export const openOverlay = (spec) => { H().overlays.push(spec); return `ov${H().overlays.length}`; };
 export const closeOverlay = (id) => { H().closed.push(id); return null; };
 export const pickFolder = (options) => { H().picks.push(options); return Promise.resolve(H().pickResult); };
+export const pickFiles = (options) => {
+  H().filePicks.push(options);
+  const r = H().filePickResult;
+  return r instanceof Error ? Promise.reject(r) : Promise.resolve(r ?? null);
+};
 export const exec = (command, args, options) => H().exec(command, args, options);
 export const readTextFile = (path) => Promise.resolve(H().files[path] ?? null);
 export const watchFolder = (dir) => { H().watches.push(dir); return H().watchResult ? H().watchResult(dir) : new Promise(() => {}); };

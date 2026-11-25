@@ -797,6 +797,27 @@ test("the panel polls once every 20 seconds and overlapping refreshes collapse",
   assert.equal(lists(), 2);
 });
 
+test("the panel skips its poll while the window is hidden", async () => {
+  const H = inWorkspace(APP, { window: { visible: false } });
+  const m = await mount("hws-panel", {});
+  const lists = () => args(H).filter((a) => a[0] === "list").length;
+  assert.equal(lists(), 1);
+  await m.fireTimer(20000);
+  assert.equal(lists(), 1);
+  H.window = { visible: true };
+  await m.fireTimer(20000);
+  assert.equal(lists(), 2);
+});
+
+test("the sidebar keeps loading while the window is hidden, for the Dock badge", async () => {
+  const H = inWorkspace(APP, { window: { visible: false } });
+  const m = await mount("hws-panel", { view: "sidebar" });
+  await settle();
+  const before = args(H).filter((a) => a[0] === "list").length;
+  await m.fireTimer(60000);
+  assert.ok(args(H).filter((a) => a[0] === "list").length > before);
+});
+
 test("the watch reloads for manifest changes and ignores surface writes", async () => {
   const { dir } = APP;
   const batches = [[`${dir}/surfaces/s1/board.json`], [`${dir}/workspace.json`]];

@@ -29,7 +29,7 @@ if [ "$(uname -s)" = Darwin ]; then
     exit 1
   fi
 else
-  f=$(python3 -I "${appHome()}/mods/hws-chat/pick-files.py") || { echo "Couldn't open the file chooser." >&2; exit 1; }
+  f=$(python3 -I "${appHome()}/mods/hws-actions/pick-files.py" "${prompt}") || { echo "Couldn't open the file chooser." >&2; exit 1; }
   f=$(printf '%s\n' "$f" | head -n 1)
   [ -n "$f" ] || exit 0
 fi
